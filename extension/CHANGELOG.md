@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/patricebender/roadbook-karoo/compare/v0.9.0...v0.10.0) (2026-09-07)
+
+
+### Features
+
+* live position on the route overview timeline ([#25](https://github.com/patricebender/roadbook-karoo/issues/25)) ([9d15d80](https://github.com/patricebender/roadbook-karoo/commit/9d15d80a7c592c83e2b0ea9849ad151e89a5b98f))
+
 ## [0.9.0](https://github.com/patricebender/roadbook-karoo/compare/v0.8.0...v0.9.0) (2026-08-31)
 
 

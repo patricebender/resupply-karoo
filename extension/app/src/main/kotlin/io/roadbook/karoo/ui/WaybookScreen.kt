@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
@@ -30,6 +29,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +47,9 @@ import io.roadbook.karoo.R
 import io.roadbook.karoo.build.BuildState
 import io.roadbook.karoo.data.OpeningHours
 import io.roadbook.karoo.data.Poi
+import io.roadbook.karoo.data.aheadMetersFor
+import io.roadbook.karoo.data.behindMetersFor
+import io.roadbook.karoo.data.formatKm
 
 /**
  * The Waybook ROUTE view: a header with build/clear/filter shortcuts and a live build
@@ -54,6 +60,10 @@ import io.roadbook.karoo.data.Poi
 fun WaybookScreen(
     pois: List<Poi>,
     routeLengthMeters: Double,
+    // Live along-route position of the rider, or null when there's no route/live
+    // stream. Drives the timeline marker, per-row distance-ahead, and the initial
+    // scroll to the first POI ahead.
+    progressMeters: Double?,
     buildState: BuildState,
     onBuild: () -> Unit,
     onClear: () -> Unit,
@@ -64,6 +74,9 @@ fun WaybookScreen(
     hoursOf: (Poi) -> OpeningHours.Hours?,
     // Hoisted so the scroll position survives opening/closing the detail view.
     listState: LazyListState,
+    // Hoisted guard (see MainActivity): true once the initial "scroll to first POI
+    // ahead" has run, so returning from a detail view doesn't yank the user back.
+    didInitialScroll: MutableState<Boolean>,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Header(
@@ -86,15 +99,51 @@ fun WaybookScreen(
             return@Column
         }
 
-        RouteStrip(pois = pois, routeLengthMeters = routeLengthMeters)
+        // The along-route km of the row at the top of the list — drives the floating
+        // km pill on the strip so it tracks where the list is as you scroll.
+        // derivedStateOf so it only recomputes when the visible window changes.
+        val topVisibleMeters by remember(pois, routeLengthMeters) {
+            derivedStateOf {
+                if (routeLengthMeters <= 0.0) return@derivedStateOf null
+                val idx = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: return@derivedStateOf null
+                pois.getOrNull(idx)?.distancesAlongRoute?.firstOrNull()
+            }
+        }
+
+        RouteStrip(
+            pois = pois,
+            routeLengthMeters = routeLengthMeters,
+            progressMeters = progressMeters,
+            listPositionMeters = topVisibleMeters,
+        )
         HorizontalDivider()
+
+        // On entry mid-ride, jump to the first POI still ahead so "what's next" is the
+        // first thing the rider sees. Fires once per screen entry (guarded by a saved
+        // flag) so manual scrolling afterward is never yanked back. The live position
+        // usually arrives after the (cached) POIs, so we gate on progress being known —
+        // keying on that so the effect re-runs when the first stream value lands. pois
+        // is pre-sorted by along-route distance (PoiQuery), so first-ahead is monotonic.
+        val canScroll = progressMeters != null && pois.isNotEmpty() && routeLengthMeters > 0.0
+        LaunchedEffect(canScroll) {
+            if (didInitialScroll.value || !canScroll) return@LaunchedEffect
+            val p = progressMeters ?: return@LaunchedEffect
+            val firstAhead = pois.indexOfFirst { aheadMetersFor(it, p) != null }
+            if (firstAhead > 0) listState.scrollToItem(firstAhead)
+            didInitialScroll.value = true
+        }
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             items(pois, key = { it.id }) { poi ->
+                val ahead = progressMeters?.let { aheadMetersFor(poi, it) }
+                // Known progress but no ahead-crossing ⇒ behind the rider; how far back.
+                val behind = progressMeters?.takeIf { ahead == null }?.let { behindMetersFor(poi, it) }
                 PoiRow(
                     poi = poi,
                     hours = hoursOf(poi),
                     hasRoute = routeLengthMeters > 0,
+                    aheadMeters = ahead,
+                    behindMeters = behind,
                     onClick = { onOpenPoi(poi) },
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
@@ -193,29 +242,31 @@ private fun PoiRow(
     poi: Poi,
     hours: OpeningHours.Hours?,
     hasRoute: Boolean,
+    // Meters still to ride to reach this POI; null when unknown or already passed.
+    aheadMeters: Double?,
+    // Meters behind the rider once passed (≥0); null when still ahead / no position.
+    behindMeters: Double?,
     onClick: () -> Unit,
 ) {
     val style = styleForType(poi.type)
+    val passed = behindMeters != null
+    // Passed POIs recede further so the ahead ones stand out, but stay tappable (scroll
+    // up to backtrack to a water stop you rode past).
+    val rowAlpha = if (passed) 0.35f else 1f
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .alpha(rowAlpha)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(style.color),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                style.icon,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(22.dp),
-            )
+        // Left rail: the category icon (with the open/closed status badge) stacked over
+        // the route distance to/from this POI, so both live on the narrow left edge and
+        // the name/type text gets the full remaining width.
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            StatusIcon(style = style, hours = hours)
+            DistanceLabel(aheadMeters = aheadMeters, behindMeters = behindMeters)
         }
         Spacer(Modifier.size(16.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -225,8 +276,8 @@ private fun PoiRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Line 2: type + status badge. Line 3 (when closed): "opens Mon 08:00".
-            TypeAndStatusLine(hours = hours, typeLabel = labelForPoi(poi))
+            // Line 2: type. Line 3 (when closed): "opens Mon 08:00".
+            TypeAndOpensLine(hours = hours, typeLabel = labelForPoi(poi))
             // Detour (only meaningful along a route).
             if (hasRoute && poi.detourMeters > 0) {
                 Text(
@@ -246,33 +297,94 @@ private fun PoiRow(
 }
 
 /**
- * Type label + a status chip on one line; when closed, the "opens …" text drops to its
- * own line so it stays readable on the narrow display instead of truncating.
+ * The category icon disc with the open/closed status as a small badge dot in the
+ * bottom-right corner (green=open, red=closed, grey=seasonal). Nothing is drawn for
+ * unknown/no hours, so we never imply a status we don't have. The dot has a white ring
+ * so it stays legible against any icon color.
  */
 @Composable
-private fun TypeAndStatusLine(hours: OpeningHours.Hours?, typeLabel: String) {
+private fun StatusIcon(style: CategoryStyle, hours: OpeningHours.Hours?) {
     val status = remember(hours) { hours?.status() }
-    // Hours exist but couldn't be structured (seasonal/complex) → flag without claiming.
     val seasonal = hours?.rawFallback != null
-
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                typeLabel,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+    val badge: Color? = when {
+        seasonal -> SeasonalGrey
+        status?.state == OpeningHours.OpenState.OPEN -> OpenGreen
+        status?.state == OpeningHours.OpenState.CLOSED -> ClosedRed
+        else -> null
+    }
+    Box(modifier = Modifier.size(40.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .background(style.color),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                style.icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(22.dp),
             )
-            Spacer(Modifier.size(8.dp))
-            when {
-                seasonal -> StatusChip("Seasonal", SeasonalGrey)
-                status?.state == OpeningHours.OpenState.OPEN -> StatusChip("Open", OpenGreen)
-                status?.state == OpeningHours.OpenState.CLOSED -> StatusChip("Closed", ClosedRed)
-                // UNKNOWN or no hours: type only, no status claim.
-                else -> Unit
-            }
         }
+        badge?.let {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .padding(2.dp)
+                    .clip(CircleShape)
+                    .background(it),
+            )
+        }
+    }
+}
+
+/**
+ * Compact route-distance label sitting under the icon on the left rail: bold primary
+ * `4.2km` for a POI ahead (distance to reach it), or a dim `↓ 2.1km` for one already
+ * passed (a down-arrow reads as "behind you" without spending a second line). Nothing
+ * when there's no live position. A little top padding separates it from the icon.
+ */
+@Composable
+private fun DistanceLabel(aheadMeters: Double?, behindMeters: Double?) {
+    when {
+        aheadMeters != null -> Text(
+            formatKm(aheadMeters),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            modifier = Modifier.padding(top = 3.dp),
+        )
+        behindMeters != null -> Text(
+            "↓ ${formatKm(behindMeters)}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            modifier = Modifier.padding(top = 3.dp),
+        )
+    }
+}
+
+/**
+ * Type label; when closed, the "opens …" text drops to its own line so it stays
+ * readable on the narrow display. The open/closed status itself now lives on the icon
+ * badge (see [StatusIcon]), not here.
+ */
+@Composable
+private fun TypeAndOpensLine(hours: OpeningHours.Hours?, typeLabel: String) {
+    val status = remember(hours) { hours?.status() }
+    Column {
+        Text(
+            typeLabel,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         if (status?.state == OpeningHours.OpenState.CLOSED) {
             status.opensAtLabel(todayIndex())?.let { label ->
                 Text(
@@ -284,25 +396,6 @@ private fun TypeAndStatusLine(hours: OpeningHours.Hours?, typeLabel: String) {
                 )
             }
         }
-    }
-}
-
-/** A small filled status pill (Open / Closed / Seasonal). */
-@Composable
-private fun StatusChip(text: String, color: Color) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(color)
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-    ) {
-        Text(
-            text,
-            color = Color.White,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
     }
 }
 

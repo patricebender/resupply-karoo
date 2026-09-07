@@ -74,6 +74,52 @@ class UpcomingPoisTest {
     }
 
     @Test
+    fun `aheadMetersFor returns distance ahead and null when passed`() {
+        val p = poi("w", "REST_STOP", along = 5_000.0)
+        assertEquals(3_000.0, aheadMetersFor(p, progressMeters = 2_000.0)!!, 0.0)
+        // Well behind → dropped.
+        assertNull(aheadMetersFor(p, progressMeters = 6_000.0))
+    }
+
+    @Test
+    fun `aheadMetersFor keeps a POI just behind within tolerance`() {
+        val p = poi("w", "REST_STOP", along = 1_970.0)
+        // 30m behind, tolerance 50m → kept, negative ahead.
+        assertTrue(aheadMetersFor(p, progressMeters = 2_000.0, toleranceMeters = 50.0)!! < 0)
+        // Same POI 60m behind, tolerance 50m → dropped.
+        assertNull(aheadMetersFor(p, progressMeters = 2_030.0, toleranceMeters = 50.0))
+    }
+
+    @Test
+    fun `aheadMetersFor picks the nearest crossing still ahead`() {
+        val p = Poi(
+            id = "loop", lat = 0.0, lng = 0.0, type = "REST_STOP",
+            distancesAlongRoute = listOf(1_000.0, 4_000.0, 8_000.0),
+        )
+        // At 2km, the 1km crossing is behind; nearest ahead is 4km → 2km ahead.
+        assertEquals(2_000.0, aheadMetersFor(p, progressMeters = 2_000.0)!!, 0.0)
+    }
+
+    @Test
+    fun `behindMetersFor is null when ahead, positive once passed`() {
+        val p = poi("w", "REST_STOP", along = 3_000.0)
+        // Still ahead → null.
+        assertNull(behindMetersFor(p, progressMeters = 1_000.0))
+        // Passed by 2km → 2000 behind.
+        assertEquals(2_000.0, behindMetersFor(p, progressMeters = 5_000.0)!!, 0.0)
+    }
+
+    @Test
+    fun `behindMetersFor uses the nearest crossing behind on a loop`() {
+        val p = Poi(
+            id = "loop", lat = 0.0, lng = 0.0, type = "REST_STOP",
+            distancesAlongRoute = listOf(1_000.0, 4_000.0),
+        )
+        // At 6km both crossings are behind; nearest is 4km → 2km back.
+        assertEquals(2_000.0, behindMetersFor(p, progressMeters = 6_000.0)!!, 0.0)
+    }
+
+    @Test
     fun `formatKm keeps one decimal under 10km and rounds above`() {
         assertEquals("5.2km", formatKm(5_240.0))
         assertEquals("0.8km", formatKm(800.0))

@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import io.hammerhead.karooext.KarooSystemService
+import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.StreamState
 import io.roadbook.karoo.build.BuildController
 import io.roadbook.karoo.build.BuildState
 import io.roadbook.karoo.data.Category
@@ -39,11 +41,13 @@ import io.roadbook.karoo.ui.WaybookScreen
 import io.roadbook.karoo.ui.field.ACTION_BUILD
 import io.roadbook.karoo.ui.field.EXTRA_ACTION
 import io.roadbook.karoo.ui.hoursFor
+import io.roadbook.karoo.util.streamDataFlow
 import io.roadbook.karoo.util.withKarooConnection
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,6 +65,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var configStore: ConfigStore
     private lateinit var repository: RoadbookRepository
     private lateinit var query: Deferred<PoiQuery>
+
+    // Live route progress for the overview: a long-lived connection streaming
+    // DISTANCE_TO_DESTINATION so the Waybook timeline can show where the rider is and
+    // the list can show how far each POI is ahead. Best-effort — null distance means
+    // "no live position" and the screen renders as it did before.
+    private val progressSystem by lazy { KarooSystemService(applicationContext) }
+    private val toDestMeters = MutableStateFlow<Double?>(null)
     private val regionCatalog: List<Region> by lazy { RegionCatalog.load(applicationContext) }
 
     // Region download state, hoisted so it survives navigation between screens.
@@ -77,6 +88,19 @@ class MainActivity : ComponentActivity() {
         // build the query off-thread and await it where a build actually needs it.
         query = lifecycleScope.async(Dispatchers.IO) { PoiQuery(PoiDatabase.get(applicationContext)) }
 
+        // Follow live route progress for the overview. One connection for the activity's
+        // lifetime; the stream feeds toDestMeters, which the Waybook screen turns into a
+        // position once it also knows the route length.
+        progressSystem.connect { connected ->
+            if (!connected) return@connect
+            lifecycleScope.launch {
+                progressSystem.streamDataFlow(DataType.Type.DISTANCE_TO_DESTINATION).collect { state ->
+                    toDestMeters.value = (state as? StreamState.Streaming)
+                        ?.dataPoint?.values?.get(DataType.Field.DISTANCE_TO_DESTINATION)
+                }
+            }
+        }
+
         // Launched from the "Tap to build" data field: kick off a build immediately and
         // land on the Filter screen so the rider sees status (and can tweak categories).
         val buildOnLaunch =
@@ -92,12 +116,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        runCatching { progressSystem.disconnect() }
+    }
+
     @Composable
     private fun RoadbookApp(initialScreen: Screen = Screen.Waybook) {
         val config by configStore.config.collectAsStateWithLifecycle(initialValue = RoadbookConfig())
         val buildState by repository.buildState.collectAsStateWithLifecycle()
         val pois by repository.pois.collectAsStateWithLifecycle()
         val routeLength by repository.routeLengthMeters.collectAsStateWithLifecycle()
+        val toDest by toDestMeters.collectAsStateWithLifecycle()
+        // Live position along the route, mirroring the field's math
+        // (UpcomingPoisDataType): route length − distance-to-destination. Null when we
+        // have no route or no live stream — the overview then drops the position cues.
+        val progressMeters: Double? = toDest?.takeIf { routeLength > 0.0 }
+            ?.let { (routeLength - it).coerceIn(0.0, routeLength) }
 
         var screen: Screen by remember { mutableStateOf(initialScreen) }
         // Hoisted here so the list scroll position is preserved across navigation to
@@ -108,6 +143,7 @@ class MainActivity : ComponentActivity() {
             is Screen.Waybook -> WaybookScreen(
                 pois = pois,
                 routeLengthMeters = routeLength,
+                progressMeters = progressMeters,
                 buildState = buildState,
                 onBuild = ::runBuild,
                 onClear = {

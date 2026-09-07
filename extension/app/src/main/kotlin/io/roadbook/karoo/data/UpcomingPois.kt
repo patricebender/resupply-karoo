@@ -43,11 +43,7 @@ fun upcomingByCategory(
     for (poi in pois) {
         val cat = Category.ofType(poi.type) ?: continue
         val bucket = byCat[cat] ?: continue
-        // Nearest crossing still ahead of the rider (within tolerance).
-        val ahead = poi.distancesAlongRoute
-            .map { it - progressMeters }
-            .filter { it >= -toleranceMeters }
-            .minOrNull() ?: continue
+        val ahead = aheadMetersFor(poi, progressMeters, toleranceMeters) ?: continue
         bucket.add(UpcomingPoi(poi.name, cat, ahead, poi.detourMeters))
     }
 
@@ -55,6 +51,23 @@ fun upcomingByCategory(
         list.sortedBy { it.aheadMeters }.take(perCat)
     }
 }
+
+/**
+ * How far ahead a POI is for a rider at [progressMeters], or null if it's behind (more
+ * than [toleranceMeters] past). A POI can touch the route more than once
+ * ([Poi.distancesAlongRoute]); we take its nearest crossing that is still ahead. Shared
+ * by the Upcoming POIs field and the overview list so the two never disagree on which
+ * POIs are ahead or by how much.
+ */
+fun aheadMetersFor(
+    poi: Poi,
+    progressMeters: Double,
+    toleranceMeters: Double = DEFAULT_TOLERANCE_METERS,
+): Double? =
+    poi.distancesAlongRoute
+        .map { it - progressMeters }
+        .filter { it >= -toleranceMeters }
+        .minOrNull()
 
 /**
  * Distance shown to the rider. Under 10 km keeps one decimal (`5.2km`); at or above,

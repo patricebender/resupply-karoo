@@ -30,7 +30,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -44,6 +50,8 @@ import io.roadbook.karoo.R
 import io.roadbook.karoo.build.BuildState
 import io.roadbook.karoo.data.OpeningHours
 import io.roadbook.karoo.data.Poi
+import io.roadbook.karoo.data.aheadMetersFor
+import io.roadbook.karoo.data.formatKm
 
 /**
  * The Waybook ROUTE view: a header with build/clear/filter shortcuts and a live build
@@ -54,6 +62,10 @@ import io.roadbook.karoo.data.Poi
 fun WaybookScreen(
     pois: List<Poi>,
     routeLengthMeters: Double,
+    // Live along-route position of the rider, or null when there's no route/live
+    // stream. Drives the timeline marker, per-row distance-ahead, and the initial
+    // scroll to the first POI ahead.
+    progressMeters: Double?,
     buildState: BuildState,
     onBuild: () -> Unit,
     onClear: () -> Unit,
@@ -86,15 +98,51 @@ fun WaybookScreen(
             return@Column
         }
 
-        RouteStrip(pois = pois, routeLengthMeters = routeLengthMeters)
+        // The along-route km of the row at the top of the list — drives the floating
+        // km pill on the strip so it tracks where the list is as you scroll.
+        // derivedStateOf so it only recomputes when the visible window changes.
+        val topVisibleMeters by remember(pois, routeLengthMeters) {
+            derivedStateOf {
+                if (routeLengthMeters <= 0.0) return@derivedStateOf null
+                val idx = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: return@derivedStateOf null
+                pois.getOrNull(idx)?.distancesAlongRoute?.firstOrNull()
+            }
+        }
+
+        RouteStrip(
+            pois = pois,
+            routeLengthMeters = routeLengthMeters,
+            progressMeters = progressMeters,
+            listPositionMeters = topVisibleMeters,
+        )
         HorizontalDivider()
+
+        // On entry mid-ride, jump to the first POI still ahead so "what's next" is the
+        // first thing the rider sees. Fires once per screen entry (guarded by a saved
+        // flag) so manual scrolling afterward is never yanked back. The live position
+        // usually arrives after the (cached) POIs, so we gate on progress being known —
+        // keying on that so the effect re-runs when the first stream value lands. pois
+        // is pre-sorted by along-route distance (PoiQuery), so first-ahead is monotonic.
+        var didInitialScroll by rememberSaveable { mutableStateOf(false) }
+        val canScroll = progressMeters != null && pois.isNotEmpty() && routeLengthMeters > 0.0
+        LaunchedEffect(canScroll) {
+            if (didInitialScroll || !canScroll) return@LaunchedEffect
+            val p = progressMeters ?: return@LaunchedEffect
+            val firstAhead = pois.indexOfFirst { aheadMetersFor(it, p) != null }
+            if (firstAhead > 0) listState.scrollToItem(firstAhead)
+            didInitialScroll = true
+        }
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             items(pois, key = { it.id }) { poi ->
+                val ahead = progressMeters?.let { aheadMetersFor(poi, it) }
                 PoiRow(
                     poi = poi,
                     hours = hoursOf(poi),
                     hasRoute = routeLengthMeters > 0,
+                    aheadMeters = ahead,
+                    // Known progress but no ahead-crossing ⇒ behind the rider.
+                    passed = progressMeters != null && ahead == null,
                     onClick = { onOpenPoi(poi) },
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
@@ -193,13 +241,21 @@ private fun PoiRow(
     poi: Poi,
     hours: OpeningHours.Hours?,
     hasRoute: Boolean,
+    // Meters still to ride to reach this POI; null when unknown or already passed.
+    aheadMeters: Double?,
+    // True when live progress is known and this POI is behind the rider.
+    passed: Boolean,
     onClick: () -> Unit,
 ) {
     val style = styleForType(poi.type)
+    // Passed POIs recede so the ahead ones stand out, but stay tappable (scroll up to
+    // backtrack to a water stop you rode past).
+    val rowAlpha = if (passed) 0.45f else 1f
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .alpha(rowAlpha)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -237,12 +293,38 @@ private fun PoiRow(
                 )
             }
         }
+        // Distance-ahead column: how far along the route to reach this POI. Bold for
+        // POIs ahead; a small "passed" tag for ones behind. Only shown once we have a
+        // live position — otherwise the chevron carries the row on its own.
+        AheadColumn(aheadMeters = aheadMeters, passed = passed)
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** Right-aligned distance-ahead cell: `4.2km` bold for ahead, `passed` for behind. */
+@Composable
+private fun AheadColumn(aheadMeters: Double?, passed: Boolean) {
+    when {
+        aheadMeters != null -> Text(
+            formatKm(aheadMeters),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+        )
+        passed -> Text(
+            "passed",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+        else -> return
+    }
+    Spacer(Modifier.size(8.dp))
 }
 
 /**

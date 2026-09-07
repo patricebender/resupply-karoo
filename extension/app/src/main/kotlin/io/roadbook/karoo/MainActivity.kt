@@ -138,6 +138,11 @@ class MainActivity : ComponentActivity() {
         // Hoisted here so the list scroll position is preserved across navigation to
         // the detail/filter screens and back.
         val waybookListState = rememberLazyListState()
+        // Hoisted too: the Waybook screen leaves the composition when a detail/filter is
+        // open, so a guard living there would reset and re-fire the initial auto-scroll on
+        // every return, yanking the user off the row they drilled into. Keeping it here
+        // makes "scroll to first POI ahead" a once-per-session action.
+        val didInitialScroll = remember { mutableStateOf(false) }
 
         when (val s = screen) {
             is Screen.Waybook -> WaybookScreen(
@@ -155,6 +160,7 @@ class MainActivity : ComponentActivity() {
                 // OSM hours, or a Google result already fetched this session → badge in list.
                 hoursOf = { poi -> hoursFor(poi, repository.cachedHours(poi.id)?.hours) },
                 listState = waybookListState,
+                didInitialScroll = didInitialScroll,
             )
 
             is Screen.Filter -> FilterScreen(

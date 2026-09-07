@@ -70,6 +70,20 @@ fun aheadMetersFor(
         .minOrNull()
 
 /**
+ * How far *behind* the rider a passed POI is, in meters (always ≥ 0), or null if it's
+ * still ahead. The mirror of [aheadMetersFor]: for a POI with no crossing ahead, the
+ * nearest crossing is behind, and this is how far back it is — so the list can say
+ * "2.1km back" rather than a bare "passed" for a rider who might double back.
+ */
+fun behindMetersFor(poi: Poi, progressMeters: Double): Double? {
+    if (aheadMetersFor(poi, progressMeters) != null) return null
+    return poi.distancesAlongRoute
+        .map { progressMeters - it } // positive = behind
+        .filter { it > 0.0 }
+        .minOrNull()
+}
+
+/**
  * Distance shown to the rider. Under 10 km keeps one decimal (`5.2km`); at or above,
  * rounds to a whole km (`12km`) — decimals are noise at that range on a small screen.
  */

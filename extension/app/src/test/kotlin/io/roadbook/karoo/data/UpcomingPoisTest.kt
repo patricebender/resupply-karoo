@@ -101,6 +101,25 @@ class UpcomingPoisTest {
     }
 
     @Test
+    fun `behindMetersFor is null when ahead, positive once passed`() {
+        val p = poi("w", "REST_STOP", along = 3_000.0)
+        // Still ahead → null.
+        assertNull(behindMetersFor(p, progressMeters = 1_000.0))
+        // Passed by 2km → 2000 behind.
+        assertEquals(2_000.0, behindMetersFor(p, progressMeters = 5_000.0)!!, 0.0)
+    }
+
+    @Test
+    fun `behindMetersFor uses the nearest crossing behind on a loop`() {
+        val p = Poi(
+            id = "loop", lat = 0.0, lng = 0.0, type = "REST_STOP",
+            distancesAlongRoute = listOf(1_000.0, 4_000.0),
+        )
+        // At 6km both crossings are behind; nearest is 4km → 2km back.
+        assertEquals(2_000.0, behindMetersFor(p, progressMeters = 6_000.0)!!, 0.0)
+    }
+
+    @Test
     fun `formatKm keeps one decimal under 10km and rounds above`() {
         assertEquals("5.2km", formatKm(5_240.0))
         assertEquals("0.8km", formatKm(800.0))

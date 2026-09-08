@@ -121,7 +121,7 @@ class UpcomingPoisDataType(
 
     @androidx.compose.runtime.Composable
     private fun render(f: Frame, large: Boolean, mainActivity: ComponentName) {
-        if (f.enabled.isEmpty()) return FieldMessage("Enable a category")
+        if (f.enabled.isEmpty()) return FieldMessage("Enable a category", mainActivity)
         // "Tap to build" is ONLY for the genuine no-roadbook case. Once POIs exist we
         // always show them — even without a live route stream (we just measure from km 0).
         if (f.pois.isEmpty()) return BuildPromptField(mainActivity)
@@ -140,7 +140,7 @@ class UpcomingPoisDataType(
         // Flag a genuine mid-ride deviation (ON_ROUTE=false after real progress); before
         // the start ON_ROUTE=false just means "not joined yet" and we show POIs anyway.
         val onRoute = values?.get(DataType.Field.ON_ROUTE)?.let { it >= 0.5 } ?: true
-        if (!onRoute && progress > START_GRACE_METERS) return OffRouteMessage()
+        if (!onRoute && progress > START_GRACE_METERS) return OffRouteMessage(mainActivity)
 
         val upcoming = upcomingByCategory(f.pois, f.enabled, progress)
 
@@ -151,7 +151,7 @@ class UpcomingPoisDataType(
             val rows = f.enabled
                 .filter { upcoming[it]?.isNotEmpty() == true }
                 .map { cat -> rowFor(cat, upcoming.getValue(cat), large = true) }
-            if (rows.isEmpty()) return FieldMessage("No POIs ahead")
+            if (rows.isEmpty()) return FieldMessage("No POIs ahead", mainActivity)
             LargeUpcomingField(rows, mainActivity)
         } else {
             // One category at a time, rotating. Prefer categories that have POIs ahead so

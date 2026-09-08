@@ -265,12 +265,18 @@ fun SmallUpcomingField(row: CategoryRow, activity: ComponentName) {
     }
 }
 
-/** A single centered message (empty / prompt states). */
+/**
+ * A single centered message (empty / prompt states). Tapping still opens the app — the
+ * field is a shortcut into Roadbook regardless of what it's currently showing.
+ */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-fun FieldMessage(text: String) {
+fun FieldMessage(text: String, activity: ComponentName) {
     Box(
-        modifier = GlanceModifier.fillMaxSize().padding(6.dp),
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .clickable(actionStartActivity(openAppIntent(activity))),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -332,13 +338,17 @@ private val Amber = ColorProvider(Color(0xFFFFB300))
 
 /**
  * Mid-ride deviation state: glyph + amber "Off route" — attention, not an error. Kept
- * visually distinct from the dim prompt states so a glance reads it instantly.
+ * visually distinct from the dim prompt states so a glance reads it instantly. Still
+ * tappable: off route is exactly when a rider wants to open the app and see what's around.
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-fun OffRouteMessage() {
+fun OffRouteMessage(activity: ComponentName) {
     Column(
-        modifier = GlanceModifier.fillMaxSize().padding(6.dp),
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .clickable(actionStartActivity(openAppIntent(activity))),
         verticalAlignment = Alignment.Vertical.CenterVertically,
         horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
     ) {

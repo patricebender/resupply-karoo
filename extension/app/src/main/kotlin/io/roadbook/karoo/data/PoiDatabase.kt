@@ -22,7 +22,9 @@ import java.io.File
 class PoiDatabase private constructor(private val dbFile: File) {
 
     private val db: SQLiteDatabase by lazy {
-        SQLiteDatabase.openOrCreateDatabase(dbFile.absolutePath, null).also(::ensureSchema)
+        SQLiteDatabase.openOrCreateDatabase(dbFile.absolutePath, null)
+            .also(::tunePragmas)
+            .also(::ensureSchema)
     }
 
     fun writableDatabase(): SQLiteDatabase = db
@@ -63,6 +65,23 @@ class PoiDatabase private constructor(private val dbFile: File) {
             instance ?: synchronized(this) {
                 instance ?: create(context).also { instance = it }
             }
+
+        /**
+         * Performance pragmas for the read-heavy R*Tree workload. The DB is a
+         * rebuildable cache (drop-and-reseed on version bump), so durability can be
+         * relaxed: `synchronous=NORMAL` cuts fsyncs on the big install transaction, WAL
+         * lets a query overlap a write, and `mmap_size` maps the file so reads skip the
+         * pager's read() syscalls — the biggest lever for corridor queries on the
+         * Karoo's flash. Applied once per open (before any query).
+         */
+        private fun tunePragmas(d: SQLiteDatabase) {
+            runCatching {
+                d.rawQuery("PRAGMA journal_mode=WAL", null).use { it.moveToFirst() }
+                d.execSQL("PRAGMA synchronous=NORMAL")
+                d.execSQL("PRAGMA mmap_size=268435456") // 256 MB
+                d.execSQL("PRAGMA cache_size=-8000")     // 8 MB page cache
+            }.onFailure { Timber.w(it, "failed to apply DB pragmas") }
+        }
 
         private fun ensureSchema(d: SQLiteDatabase) {
             d.execSQL(
@@ -123,6 +142,7 @@ class PoiDatabase private constructor(private val dbFile: File) {
             synchronized(this) {
                 val live = get(appCtx).writableDatabase()
                 val before = countRows(live)
+                val maxIdBefore = maxId(live)
                 live.execSQL("ATTACH DATABASE ? AS src", arrayOf<Any?>(regionFile.absolutePath))
                 try {
                     live.beginTransaction()
@@ -133,12 +153,14 @@ class PoiDatabase private constructor(private val dbFile: File) {
                                 "SELECT osm_id, lat, lng, type, category, name, tags, region_id " +
                                 "FROM src.poi",
                         )
-                        // Rebuild the R*Tree wholesale from poi. Cheap enough (~few s even
-                        // for ~300k rows) and always correct vs. tracking new ids.
-                        live.execSQL("DELETE FROM poi_rtree")
+                        // Index only the rows just inserted. `poi.id` is autoincrementing
+                        // rowid, so every new row has id > maxIdBefore; INSERT OR IGNORE
+                        // skipped the dupes, so this is exactly the coverage delta — O(delta)
+                        // instead of rebuilding the whole R*Tree on every install.
                         live.execSQL(
                             "INSERT INTO poi_rtree (id, minLat, maxLat, minLng, maxLng) " +
-                                "SELECT id, lat, lat, lng, lng FROM poi",
+                                "SELECT id, lat, lat, lng, lng FROM poi WHERE id > ?",
+                            arrayOf<Any?>(maxIdBefore),
                         )
                         live.setTransactionSuccessful()
                     } finally {
@@ -188,12 +210,14 @@ class PoiDatabase private constructor(private val dbFile: File) {
                 val before = countRows(live)
                 live.beginTransaction()
                 try {
-                    live.execSQL("DELETE FROM poi WHERE region_id = ?", arrayOf<Any?>(id))
-                    live.execSQL("DELETE FROM poi_rtree")
+                    // Drop just this region's rtree entries (by the ids about to go), then
+                    // the poi rows — O(region) instead of rebuilding the whole R*Tree.
                     live.execSQL(
-                        "INSERT INTO poi_rtree (id, minLat, maxLat, minLng, maxLng) " +
-                            "SELECT id, lat, lat, lng, lng FROM poi",
+                        "DELETE FROM poi_rtree WHERE id IN " +
+                            "(SELECT id FROM poi WHERE region_id = ?)",
+                        arrayOf<Any?>(id),
                     )
+                    live.execSQL("DELETE FROM poi WHERE region_id = ?", arrayOf<Any?>(id))
                     live.setTransactionSuccessful()
                 } finally {
                     live.endTransaction()
@@ -207,6 +231,12 @@ class PoiDatabase private constructor(private val dbFile: File) {
         private fun countRows(d: SQLiteDatabase): Int =
             d.rawQuery("SELECT COUNT(*) FROM poi", null).use { c ->
                 if (c.moveToFirst()) c.getInt(0) else 0
+            }
+
+        /** Highest `poi.id` currently in the DB (0 when empty). */
+        private fun maxId(d: SQLiteDatabase): Long =
+            d.rawQuery("SELECT COALESCE(MAX(id), 0) FROM poi", null).use { c ->
+                if (c.moveToFirst()) c.getLong(0) else 0L
             }
 
         private fun create(context: Context): PoiDatabase {

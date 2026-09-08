@@ -25,10 +25,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -52,14 +57,15 @@ sealed interface RegionDownloadState {
 }
 
 /**
- * Region picker, a two-level collapsible tree from the bundled `regions.json`: a top
- * section per [Region.group] (just "Europe" today) → the countries in it. Most countries
- * are leaves; Germany expands again to "Germany (Complete)" + its 16 Bundesländer. Per-
- * region download size comes from the live [manifest]; tapping a region's Get starts its
- * download via [onDownload].
+ * Region picker, a collapsible tree from the bundled `regions.json`: a top section per
+ * [Region.group] (just "Europe" today) → the countries in it. Most countries are leaves;
+ * Germany is itself an expandable node whose own row is the whole-country ("Complete")
+ * download and which expands to its 16 Bundesländer. Per-region download size comes from
+ * the live [manifest]; tapping a region's Get starts its download via [onDownload].
  *
  * Only one download runs at a time; while [state] is Downloading/Installing every row is
- * disabled and the active one shows progress.
+ * disabled and the active one shows progress. Removing an installed region is confirmed
+ * first (see [confirmRemove]).
  */
 @Composable
 fun RegionsScreen(
@@ -74,6 +80,28 @@ fun RegionsScreen(
     val busy = state is RegionDownloadState.Downloading ||
         state is RegionDownloadState.Installing ||
         state is RegionDownloadState.LoadingManifest
+
+    // A region pending removal — set on trash tap, cleared on confirm/cancel. Drives the
+    // confirmation dialog so a delete is never a single accidental tap.
+    var confirmRemove by remember { mutableStateOf<Region?>(null) }
+    confirmRemove?.let { region ->
+        AlertDialog(
+            onDismissRequest = { confirmRemove = null },
+            title = { Text("Remove ${region.label}?") },
+            text = { Text("This deletes its downloaded places from the device. You can download it again later.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRemove(region)
+                    confirmRemove = null
+                }) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemove = null }) { Text("Cancel") }
+            },
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -161,42 +189,36 @@ fun RegionsScreen(
                                 installed = Region.covers(installedRegions, country.region.id),
                                 removable = country.region.id in installedRegions,
                                 indent = Indent.COUNTRY,
+                                expandable = null,
                                 state = state,
                                 enabled = !busy && manifest.containsKey(country.region.id),
                                 onDownload = { onDownload(country.region) },
-                                onRemove = { onRemove(country.region) },
+                                onRemove = { confirmRemove = country.region },
                             )
                             HorizontalDivider()
                         }
                     } else {
-                        // Expandable country (Germany): its own chevron header, then the
-                        // Complete row + Bundesländer when open.
+                        // Expandable country (Germany): its own row IS the whole-country
+                        // ("Complete") download, plus a chevron that reveals the finer-
+                        // grained Bundesländer — there's no separate "Complete" row.
                         val countryOpen = expanded[country.region.id] ?: false
                         item(key = "cty-${country.region.id}") {
-                            CountryHeader(
-                                label = country.region.label,
-                                expanded = countryOpen,
-                                installed = Region.covers(installedRegions, country.region.id) ||
-                                    country.children.any { Region.covers(installedRegions, it.id) },
-                                onClick = { expanded[country.region.id] = !countryOpen },
+                            RegionRow(
+                                region = country.region,
+                                entry = manifest[country.region.id],
+                                installed = Region.covers(installedRegions, country.region.id),
+                                removable = country.region.id in installedRegions,
+                                indent = Indent.COUNTRY,
+                                expandable = countryOpen,
+                                state = state,
+                                enabled = !busy && manifest.containsKey(country.region.id),
+                                onExpandToggle = { expanded[country.region.id] = !countryOpen },
+                                onDownload = { onDownload(country.region) },
+                                onRemove = { confirmRemove = country.region },
                             )
                             HorizontalDivider()
                         }
                         if (countryOpen) {
-                            item(key = country.region.id) {
-                                RegionRow(
-                                    region = country.region,
-                                    entry = manifest[country.region.id],
-                                    installed = Region.covers(installedRegions, country.region.id),
-                                    removable = country.region.id in installedRegions,
-                                    indent = Indent.CHILD,
-                                    state = state,
-                                    enabled = !busy && manifest.containsKey(country.region.id),
-                                    onDownload = { onDownload(country.region) },
-                                    onRemove = { onRemove(country.region) },
-                                )
-                                HorizontalDivider()
-                            }
                             items(country.children, key = { it.id }) { child ->
                                 RegionRow(
                                     region = child,
@@ -206,10 +228,11 @@ fun RegionsScreen(
                                     // removable on its own.
                                     removable = child.id in installedRegions,
                                     indent = Indent.CHILD,
+                                    expandable = null,
                                     state = state,
                                     enabled = !busy && manifest.containsKey(child.id),
                                     onDownload = { onDownload(child) },
-                                    onRemove = { onRemove(child) },
+                                    onRemove = { confirmRemove = child },
                                 )
                                 HorizontalDivider()
                             }
@@ -221,8 +244,11 @@ fun RegionsScreen(
     }
 }
 
-/** Left padding tiers: a top-level country vs. a nested child (Bundesland / Complete). */
-private enum class Indent(val start: Int) { COUNTRY(16), CHILD(36) }
+/**
+ * Left-padding tiers so the tree depth reads at a glance: a country sits indented under
+ * the Europe header (past its chevron), a Bundesland deeper still under Germany.
+ */
+private enum class Indent(val start: Int) { COUNTRY(32), CHILD(52) }
 
 /** A country in the tree: its own [Region] plus any sub-regions ([children], e.g. Bundesländer). */
 private data class CountryNode(val region: Region, val children: List<Region>)
@@ -283,41 +309,26 @@ private fun GroupHeader(
     }
 }
 
-/** Expandable-country header (Germany): `>`/`v`, label, and a ✓ when anything inside is in. */
-@Composable
-private fun CountryHeader(
-    label: String,
-    expanded: Boolean,
-    installed: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            if (expanded) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = if (expanded) "Collapse $label" else "Expand $label",
-        )
-        Spacer(Modifier.size(8.dp))
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        if (installed) Text("✓", style = MaterialTheme.typography.titleMedium)
-    }
-}
-
+/**
+ * A single region row: its label + size/status on the left, and on the right the
+ * download affordance (Get / spinner / ✓ + remove). When [expandable] is non-null the row
+ * doubles as an expandable-country header — a leading chevron (`>`/`v`) whose tap fires
+ * [onExpandToggle] toggles the children, while the row's own Get/remove still act on the
+ * country as a whole (Germany's row IS the whole-country download).
+ */
 @Composable
 private fun RegionRow(
     region: Region,
     entry: RegionManifestEntry?,
     installed: Boolean,
     removable: Boolean,
-    // Left-padding tier — a top-level country vs. a nested child row.
+    // Left-padding tier — a country vs. a nested child row.
     indent: Indent,
+    // Non-null ⇒ this row is an expandable country; the value is its open/closed state.
+    expandable: Boolean?,
     state: RegionDownloadState,
     enabled: Boolean,
+    onExpandToggle: () -> Unit = {},
     onDownload: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -333,6 +344,16 @@ private fun RegionRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
+        if (expandable != null) {
+            // A wider hit target than the icon so the chevron is tappable with gloves.
+            IconButton(onClick = onExpandToggle, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    if (expandable) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = if (expandable) "Collapse ${region.label}" else "Expand ${region.label}",
+                )
+            }
+            Spacer(Modifier.size(8.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(region.label, style = MaterialTheme.typography.bodyLarge)
             val subtitle = when {

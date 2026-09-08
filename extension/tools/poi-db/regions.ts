@@ -62,10 +62,12 @@ const COUNTRIES: Array<{ id: string; label: string; geofabrik: string }> = [
 ];
 
 export const REGIONS: Region[] = [
-  // Germany Complete — merge of all 16 Bundesland extracts.
+  // Germany — whole country, merged from all 16 Bundesland extracts. Shown in the picker
+  // as the expandable "Germany" node (getting it installs the whole country); the states
+  // below are the finer-grained alternatives.
   {
     id: "germany",
-    label: "Germany (Complete)",
+    label: "Germany",
     group: "Europe",
     geofabrik: GERMANY_STATES.map((s) => `europe/germany/${s.slug}`),
   },

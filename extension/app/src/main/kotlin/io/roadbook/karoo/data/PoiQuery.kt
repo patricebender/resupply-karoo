@@ -117,13 +117,16 @@ class PoiQuery(private val database: PoiDatabase) {
             .map { it.toPoi(emptyList(), detourMeters = 0) }
     }
 
-    private data class Row(
+    private inner class Row(
         val osmId: String,
         val lat: Double,
         val lng: Double,
         val type: String,
         val name: String?,
-        val tags: Map<String, String>,
+        // Raw `tags` JSON as stored, parsed lazily in [toPoi]. queryCorridor discards most
+        // candidates (distance filter + per-segment cap) before emitting, so parsing here
+        // would be wasted work for the majority — defer it to the rows we actually return.
+        val tagsJson: String?,
     ) {
         fun toPoi(distancesAlongRoute: List<Double>, detourMeters: Int) = Poi(
             id = "osm:$osmId",
@@ -133,7 +136,7 @@ class PoiQuery(private val database: PoiDatabase) {
             name = name,
             distancesAlongRoute = distancesAlongRoute,
             detourMeters = detourMeters,
-            tags = tags,
+            tags = tagsJson?.let(::parseTags) ?: emptyMap(),
         )
     }
 
@@ -165,7 +168,7 @@ class PoiQuery(private val database: PoiDatabase) {
                         lng = c.getDouble(2),
                         type = c.getString(3),
                         name = if (c.isNull(4)) null else c.getString(4),
-                        tags = if (c.isNull(5)) emptyMap() else parseTags(c.getString(5)),
+                        tagsJson = if (c.isNull(5)) null else c.getString(5),
                     ),
                 )
             }

@@ -13,8 +13,9 @@
 // several extracts (Germany Complete = all 16 Bundesländer), reusing the merge/dedup
 // logic shared with build-multi-region.sh.
 //
-// `group` drives the picker's sections. Only Germany is broken down to Bundesland
-// granularity; other countries are whole-country entries.
+// `group` drives the picker's top-level sections (all "Europe" today). Within a group the
+// app builds a country tree: only Germany is broken down to Bundesland granularity (its
+// `germany-*` ids nest under the `germany` parent); other countries are whole-country leaves.
 
 export interface Region {
   /** Stable id: `germany`, `germany-bayern`, `italy`, … Also the filename stem. */
@@ -22,7 +23,7 @@ export interface Region {
   /** Display name shown in the picker. */
   label: string;
   /** Picker section. */
-  group: "Germany" | "Europe";
+  group: "Europe";
   /** Geofabrik path(s) under download.geofabrik.de, minus `-latest.osm.pbf`. */
   geofabrik: string | string[];
 }
@@ -61,18 +62,20 @@ const COUNTRIES: Array<{ id: string; label: string; geofabrik: string }> = [
 ];
 
 export const REGIONS: Region[] = [
-  // Germany Complete — merge of all 16 Bundesland extracts.
+  // Germany — whole country, merged from all 16 Bundesland extracts. Shown in the picker
+  // as the expandable "Germany" node (getting it installs the whole country); the states
+  // below are the finer-grained alternatives.
   {
     id: "germany",
-    label: "Germany (Complete)",
-    group: "Germany",
+    label: "Germany",
+    group: "Europe",
     geofabrik: GERMANY_STATES.map((s) => `europe/germany/${s.slug}`),
   },
   // One entry per Bundesland.
   ...GERMANY_STATES.map((s): Region => ({
     id: `germany-${s.id}`,
     label: s.label,
-    group: "Germany",
+    group: "Europe",
     geofabrik: `europe/germany/${s.slug}`,
   })),
   // Whole countries.

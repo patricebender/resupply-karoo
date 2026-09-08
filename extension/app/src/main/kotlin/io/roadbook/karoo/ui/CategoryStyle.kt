@@ -56,6 +56,25 @@ private val FALLBACK = CategoryStyle(Color(0xFF757575), Icons.Filled.Place, "Pla
 fun styleForType(type: String): CategoryStyle = STYLES[type] ?: FALLBACK
 
 /**
+ * The color + icon for a whole [Category], via its representative POI `type`. Lets the
+ * settings chip grid speak the same visual language as the route dots and list rows.
+ * Café&Bar picks the coffee cup as its face.
+ */
+fun styleForCategory(category: Category): CategoryStyle = styleForType(
+    when (category) {
+        Category.RESTAURANTS -> "FOOD"
+        Category.SUPERMARKETS -> "CONVENIENCE_STORE"
+        Category.CAFE_BAR -> "COFFEE"
+        Category.WATER -> "REST_STOP"
+        Category.TOILET -> "RESTROOM"
+        Category.BIKE -> "BIKE_SHOP"
+        Category.FUEL -> "GAS_STATION"
+        Category.ICE_CREAM -> "ICE_CREAM"
+        Category.HOTELS -> "LODGING"
+    },
+)
+
+/**
  * Human label for a POI row/detail. Water sources all share the REST_STOP type (one
  * teal-drop pin), so their distinct label comes from the pipeline's `water_subtype`
  * tag ([waterSubtypeLabel]); everything else falls back to the type label.

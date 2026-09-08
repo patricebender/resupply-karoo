@@ -1,88 +1,88 @@
 [
   {
     "id": "germany",
-    "label": "Germany (Complete)",
-    "group": "Germany"
+    "label": "Germany",
+    "group": "Europe"
   },
   {
     "id": "germany-baden-wuerttemberg",
     "label": "Baden-Württemberg",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-bayern",
     "label": "Bayern",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-berlin",
     "label": "Berlin",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-brandenburg",
     "label": "Brandenburg",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-bremen",
     "label": "Bremen",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-hamburg",
     "label": "Hamburg",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-hessen",
     "label": "Hessen",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-mecklenburg-vorpommern",
     "label": "Mecklenburg-Vorpommern",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-niedersachsen",
     "label": "Niedersachsen",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-nordrhein-westfalen",
     "label": "Nordrhein-Westfalen",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-rheinland-pfalz",
     "label": "Rheinland-Pfalz",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-saarland",
     "label": "Saarland",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-sachsen",
     "label": "Sachsen",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-sachsen-anhalt",
     "label": "Sachsen-Anhalt",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-schleswig-holstein",
     "label": "Schleswig-Holstein",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "germany-thueringen",
     "label": "Thüringen",
-    "group": "Germany"
+    "group": "Europe"
   },
   {
     "id": "italy",

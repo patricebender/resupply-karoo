@@ -33,7 +33,7 @@ import io.roadbook.karoo.data.RegionManifestEntry
 import io.roadbook.karoo.data.RoadbookConfig
 import io.roadbook.karoo.data.RoadbookRepository
 import io.roadbook.karoo.data.WikipediaClient
-import io.roadbook.karoo.ui.FilterScreen
+import io.roadbook.karoo.ui.SettingsScreen
 import io.roadbook.karoo.ui.PoiDetailScreen
 import io.roadbook.karoo.ui.RegionDownloadState
 import io.roadbook.karoo.ui.RegionsScreen
@@ -55,7 +55,7 @@ import kotlinx.coroutines.withContext
 /** In-app screens. No nav framework — a small sealed state the host switches on. */
 private sealed interface Screen {
     data object Waybook : Screen
-    data object Filter : Screen
+    data object Settings : Screen
     data object Regions : Screen
     data class Detail(val poiId: String) : Screen
 }
@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
         }
 
         // Launched from the "Tap to build" data field: kick off a build immediately and
-        // land on the Filter screen so the rider sees status (and can tweak categories).
+        // land on the Settings screen so the rider sees status (and can tweak categories).
         val buildOnLaunch =
             intent?.getStringExtra(EXTRA_ACTION) == ACTION_BUILD
         if (buildOnLaunch) runBuild()
@@ -110,7 +110,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    RoadbookApp(initialScreen = if (buildOnLaunch) Screen.Filter else Screen.Waybook)
+                    RoadbookApp(initialScreen = if (buildOnLaunch) Screen.Settings else Screen.Waybook)
                 }
             }
         }
@@ -151,11 +151,7 @@ class MainActivity : ComponentActivity() {
                 progressMeters = progressMeters,
                 buildState = buildState,
                 onBuild = ::runBuild,
-                onClear = {
-                    repository.clear()
-                    repository.setBuildState(BuildState.Idle)
-                },
-                onOpenFilter = { screen = Screen.Filter },
+                onOpenSettings = { screen = Screen.Settings },
                 onOpenPoi = { screen = Screen.Detail(it.id) },
                 // OSM hours, or a Google result already fetched this session → badge in list.
                 hoursOf = { poi -> hoursFor(poi, repository.cachedHours(poi.id)?.hours) },
@@ -163,22 +159,27 @@ class MainActivity : ComponentActivity() {
                 didInitialScroll = didInitialScroll,
             )
 
-            is Screen.Filter -> FilterScreen(
-                config = config,
-                buildState = buildState,
-                hasPins = pois.isNotEmpty(),
-                onDetourChange = { m -> lifecycleScope.launch { configStore.setDetour(m) } },
-                onCategoryToggle = { c, on ->
-                    lifecycleScope.launch { configStore.setCategoryEnabled(c, on) }
-                },
-                onBuild = ::runBuild,
-                onClear = {
-                    repository.clear()
-                    repository.setBuildState(BuildState.Idle)
-                },
-                onOpenRegions = { screen = Screen.Regions },
-                onBack = { screen = Screen.Waybook },
-            )
+            is Screen.Settings -> {
+                val installed by configStore.installedRegions
+                    .collectAsStateWithLifecycle(initialValue = emptySet())
+                SettingsScreen(
+                    config = config,
+                    buildState = buildState,
+                    hasPins = pois.isNotEmpty(),
+                    installedSummary = installedSummary(installed),
+                    onDetourChange = { m -> lifecycleScope.launch { configStore.setDetour(m) } },
+                    onCategoryToggle = { c, on ->
+                        lifecycleScope.launch { configStore.setCategoryEnabled(c, on) }
+                    },
+                    onBuild = ::runBuild,
+                    onClear = {
+                        repository.clear()
+                        repository.setBuildState(BuildState.Idle)
+                    },
+                    onOpenRegions = { screen = Screen.Regions },
+                    onBack = { screen = Screen.Waybook },
+                )
+            }
 
             is Screen.Regions -> {
                 val installed by configStore.installedRegions
@@ -282,6 +283,21 @@ class MainActivity : ComponentActivity() {
                     repository.cachePlaceId(poi.id, it.placeId) // Place ID: persisted
                     repository.cacheHours(poi.id, it)           // hours: memory, short TTL
                 }
+        }
+    }
+
+    /**
+     * A short "what's installed" line for the Settings → Data row. Empty means the
+     * untouched bundled seed (Germany), same as the picker's empty-set handling. One or
+     * two labels are spelled out; more collapse to "Germany +N".
+     */
+    private fun installedSummary(installed: Set<String>): String {
+        val ids = installed.ifEmpty { setOf(Region.SEED_REGION_ID) }
+        val labels = ids.mapNotNull { id -> regionCatalog.firstOrNull { it.id == id }?.label }
+            .ifEmpty { listOf("Germany") }
+        return when {
+            labels.size <= 2 -> labels.joinToString(", ")
+            else -> "${labels.first()} +${labels.size - 1}"
         }
     }
 

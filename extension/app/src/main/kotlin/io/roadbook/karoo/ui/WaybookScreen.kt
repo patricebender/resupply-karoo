@@ -19,9 +19,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -52,7 +52,7 @@ import io.roadbook.karoo.data.behindMetersFor
 import io.roadbook.karoo.data.formatKm
 
 /**
- * The Waybook ROUTE view: a header with build/clear/filter shortcuts and a live build
+ * The Waybook ROUTE view: a header with build + settings shortcuts and a live build
  * status line, the route distance strip, and a scrollable list of the POIs found along
  * the route. Tapping a row opens the place detail.
  */
@@ -66,8 +66,7 @@ fun WaybookScreen(
     progressMeters: Double?,
     buildState: BuildState,
     onBuild: () -> Unit,
-    onClear: () -> Unit,
-    onOpenFilter: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenPoi: (Poi) -> Unit,
     // Resolves a POI's hours (OSM, or a Google result already fetched this session) so
     // the list badge shows for both sources once known.
@@ -81,13 +80,11 @@ fun WaybookScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         Header(
             buildState = buildState,
-            hasPins = pois.isNotEmpty(),
             // When the body shows the big animated logo (first build, no pins yet),
             // keep the header status line quiet so there's only one progress cue.
             showStatusLine = pois.isNotEmpty() || buildState !is BuildState.Building,
             onBuild = onBuild,
-            onClear = onClear,
-            onOpenFilter = onOpenFilter,
+            onOpenSettings = onOpenSettings,
         )
         HorizontalDivider()
 
@@ -95,7 +92,7 @@ fun WaybookScreen(
             // One stable layout for the no-places body: the mark sits in the same spot
             // whether idle or building — starting a build just animates it in place and
             // swaps the copy, so nothing jumps.
-            EmptyState(buildState, onOpenFilter)
+            EmptyState(buildState, onBuild)
             return@Column
         }
 
@@ -155,11 +152,9 @@ fun WaybookScreen(
 @Composable
 private fun Header(
     buildState: BuildState,
-    hasPins: Boolean,
     showStatusLine: Boolean,
     onBuild: () -> Unit,
-    onClear: () -> Unit,
-    onOpenFilter: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val building = buildState is BuildState.Building
     Row(
@@ -194,13 +189,8 @@ private fun Header(
                 },
             )
         }
-        if (hasPins) {
-            IconButton(onClick = onClear, enabled = !building) {
-                Icon(Icons.Filled.Delete, contentDescription = "Clear")
-            }
-        }
-        IconButton(onClick = onOpenFilter) {
-            Icon(Icons.Filled.Tune, contentDescription = "Filter")
+        IconButton(onClick = onOpenSettings) {
+            Icon(Icons.Filled.Settings, contentDescription = "Settings")
         }
     }
 }
@@ -407,7 +397,7 @@ private fun TypeAndOpensLine(hours: OpeningHours.Hours?, typeLabel: String) {
  * shows at rest, so the searching state stays focused on the animation.
  */
 @Composable
-private fun EmptyState(buildState: BuildState, onOpenFilter: () -> Unit) {
+private fun EmptyState(buildState: BuildState, onBuild: () -> Unit) {
     val building = buildState is BuildState.Building
     Column(
         modifier = Modifier
@@ -437,23 +427,23 @@ private fun EmptyState(buildState: BuildState, onOpenFilter: () -> Unit) {
             if (building) {
                 "Tracing your route for cafés, water, shops and more…"
             } else {
-                "Load a route on the Karoo, then tap the build icon above."
+                "Load a route on the Karoo, then build to find places along it."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
-        // Kept in the layout while building (just hidden + non-clickable) so the block's
-        // height stays constant and the content above doesn't jump when it disappears.
-        Row(
-            modifier = Modifier
-                .alpha(if (building) 0f else 1f)
-                .clickable(enabled = !building, onClick = onOpenFilter),
-            verticalAlignment = Alignment.CenterVertically,
+        // The primary action when empty is to build. Kept in the layout while building
+        // (just hidden + non-clickable) so the block's height stays constant and the
+        // content above doesn't jump when it disappears.
+        Button(
+            onClick = onBuild,
+            enabled = !building,
+            modifier = Modifier.alpha(if (building) 0f else 1f),
         ) {
-            Icon(Icons.Filled.Tune, contentDescription = null)
+            Icon(Icons.Filled.Refresh, contentDescription = null)
             Spacer(Modifier.size(8.dp))
-            Text("Open filter", style = MaterialTheme.typography.titleSmall)
+            Text("Build now")
         }
     }
 }

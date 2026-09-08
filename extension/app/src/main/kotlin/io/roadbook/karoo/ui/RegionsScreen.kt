@@ -1,5 +1,6 @@
 package io.roadbook.karoo.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +14,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -23,10 +26,14 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.roadbook.karoo.data.Region.Companion.SEED_REGION_ID
 import io.roadbook.karoo.data.Region
 import io.roadbook.karoo.data.RegionManifestEntry
 
@@ -45,9 +52,11 @@ sealed interface RegionDownloadState {
 }
 
 /**
- * Region picker. A grouped, scrollable list (Germany: Complete + 16 Bundesländer, then
- * Europe countries) from the bundled `regions.json`. Per-region download size comes from
- * the live [manifest]; tapping a region starts its download via [onDownload].
+ * Region picker, a two-level collapsible tree from the bundled `regions.json`: a top
+ * section per [Region.group] (just "Europe" today) → the countries in it. Most countries
+ * are leaves; Germany expands again to "Germany (Complete)" + its 16 Bundesländer. Per-
+ * region download size comes from the live [manifest]; tapping a region's Get starts its
+ * download via [onDownload].
  *
  * Only one download runs at a time; while [state] is Downloading/Installing every row is
  * disabled and the active one shows progress.
@@ -98,35 +107,204 @@ fun RegionsScreen(
             else -> Unit
         }
 
-        // Group order follows the catalog; sections keep the catalog's within-group order.
-        val grouped = regions.groupBy { it.group }
+        // Build the display tree once per catalog/group change: each group → its country
+        // nodes (Germany carries its Bundesland children; everyone else is a leaf).
+        val tree = remember(regions) { buildRegionTree(regions) }
+        // Collapsed by default; expanded state is UI-only (survives recomposition, not nav).
+        // Keyed by node id: the group id ("Europe") and the germany parent id.
+        val expanded = remember { mutableStateMapOf<String, Boolean>() }
+
+        // Keep the branch holding an in-flight/just-finished download open so its active
+        // row stays visible without the rider having to hunt for it: open its group and,
+        // if it's a Bundesland, the Germany parent too.
+        val activeRegionId = when (state) {
+            is RegionDownloadState.Downloading -> state.regionId
+            is RegionDownloadState.Installing -> state.regionId
+            is RegionDownloadState.Done -> state.regionId
+            is RegionDownloadState.Failed -> state.regionId
+            else -> null
+        }
+        LaunchedEffect(activeRegionId) {
+            val g = regions.firstOrNull { it.id == activeRegionId }?.group ?: return@LaunchedEffect
+            expanded[g] = true
+            if (activeRegionId == SEED_REGION_ID ||
+                activeRegionId?.startsWith("$SEED_REGION_ID-") == true
+            ) {
+                expanded[SEED_REGION_ID] = true
+            }
+        }
+
         LazyColumn(modifier = Modifier.weight(1f)) {
-            grouped.forEach { (group, groupRegions) ->
-                item(key = "hdr-$group") {
-                    Text(
-                        group,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
-                    )
-                }
-                items(groupRegions, key = { it.id }) { region ->
-                    RegionRow(
-                        region = region,
-                        entry = manifest[region.id],
-                        installed = Region.covers(installedRegions, region.id),
-                        // Only a directly-installed region can be removed as a unit —
-                        // Bundesländer covered only via "germany" aren't removable alone.
-                        removable = region.id in installedRegions,
-                        state = state,
-                        enabled = !busy && manifest.containsKey(region.id),
-                        onDownload = { onDownload(region) },
-                        onRemove = { onRemove(region) },
+            tree.forEach { group ->
+                val groupOpen = expanded[group.id] ?: false
+                item(key = "grp-${group.id}") {
+                    GroupHeader(
+                        title = group.title,
+                        expanded = groupOpen,
+                        installedCount = group.countries.count {
+                            Region.covers(installedRegions, it.region.id)
+                        },
+                        total = group.countries.size,
+                        onClick = { expanded[group.id] = !groupOpen },
                     )
                     HorizontalDivider()
                 }
+                if (!groupOpen) return@forEach
+
+                group.countries.forEach { country ->
+                    if (country.children.isEmpty()) {
+                        // Leaf country — a plain get/installed row.
+                        item(key = country.region.id) {
+                            RegionRow(
+                                region = country.region,
+                                entry = manifest[country.region.id],
+                                installed = Region.covers(installedRegions, country.region.id),
+                                removable = country.region.id in installedRegions,
+                                indent = Indent.COUNTRY,
+                                state = state,
+                                enabled = !busy && manifest.containsKey(country.region.id),
+                                onDownload = { onDownload(country.region) },
+                                onRemove = { onRemove(country.region) },
+                            )
+                            HorizontalDivider()
+                        }
+                    } else {
+                        // Expandable country (Germany): its own chevron header, then the
+                        // Complete row + Bundesländer when open.
+                        val countryOpen = expanded[country.region.id] ?: false
+                        item(key = "cty-${country.region.id}") {
+                            CountryHeader(
+                                label = country.region.label,
+                                expanded = countryOpen,
+                                installed = Region.covers(installedRegions, country.region.id) ||
+                                    country.children.any { Region.covers(installedRegions, it.id) },
+                                onClick = { expanded[country.region.id] = !countryOpen },
+                            )
+                            HorizontalDivider()
+                        }
+                        if (countryOpen) {
+                            item(key = country.region.id) {
+                                RegionRow(
+                                    region = country.region,
+                                    entry = manifest[country.region.id],
+                                    installed = Region.covers(installedRegions, country.region.id),
+                                    removable = country.region.id in installedRegions,
+                                    indent = Indent.CHILD,
+                                    state = state,
+                                    enabled = !busy && manifest.containsKey(country.region.id),
+                                    onDownload = { onDownload(country.region) },
+                                    onRemove = { onRemove(country.region) },
+                                )
+                                HorizontalDivider()
+                            }
+                            items(country.children, key = { it.id }) { child ->
+                                RegionRow(
+                                    region = child,
+                                    entry = manifest[child.id],
+                                    installed = Region.covers(installedRegions, child.id),
+                                    // A Bundesland covered only via "germany" isn't
+                                    // removable on its own.
+                                    removable = child.id in installedRegions,
+                                    indent = Indent.CHILD,
+                                    state = state,
+                                    enabled = !busy && manifest.containsKey(child.id),
+                                    onDownload = { onDownload(child) },
+                                    onRemove = { onRemove(child) },
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+/** Left padding tiers: a top-level country vs. a nested child (Bundesland / Complete). */
+private enum class Indent(val start: Int) { COUNTRY(16), CHILD(36) }
+
+/** A country in the tree: its own [Region] plus any sub-regions ([children], e.g. Bundesländer). */
+private data class CountryNode(val region: Region, val children: List<Region>)
+
+/** A top-level [group] section and its ordered [countries]. */
+private data class GroupNode(val id: String, val title: String, val countries: List<CountryNode>)
+
+/**
+ * Fold the flat catalog into the display tree. Germany's `germany-*` Bundesländer become
+ * children of the `germany` node; every other region is a childless country. Within a
+ * group, Germany leads (it's the seed/home country), then the rest in catalog order.
+ */
+private fun buildRegionTree(regions: List<Region>): List<GroupNode> =
+    regions.groupBy { it.group }.map { (group, inGroup) ->
+        val children = inGroup.filter { it.id.startsWith("$SEED_REGION_ID-") }
+        val countries = inGroup
+            .filter { !it.id.startsWith("$SEED_REGION_ID-") }
+            .map { CountryNode(it, if (it.id == SEED_REGION_ID) children else emptyList()) }
+            .sortedByDescending { it.region.id == SEED_REGION_ID }
+        GroupNode(id = group, title = group, countries = countries)
+    }
+
+/** Top section header: `>` collapsed / `v` open, name, and an "N/M" installed counter. */
+@Composable
+private fun GroupHeader(
+    title: String,
+    expanded: Boolean,
+    installedCount: Int,
+    total: Int,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (expanded) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
+        if (installedCount > 0) {
+            Text(
+                "$installedCount/$total",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+/** Expandable-country header (Germany): `>`/`v`, label, and a ✓ when anything inside is in. */
+@Composable
+private fun CountryHeader(
+    label: String,
+    expanded: Boolean,
+    installed: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (expanded) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = if (expanded) "Collapse $label" else "Expand $label",
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        if (installed) Text("✓", style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -136,6 +314,8 @@ private fun RegionRow(
     entry: RegionManifestEntry?,
     installed: Boolean,
     removable: Boolean,
+    // Left-padding tier — a top-level country vs. a nested child row.
+    indent: Indent,
     state: RegionDownloadState,
     enabled: Boolean,
     onDownload: () -> Unit,
@@ -149,7 +329,7 @@ private fun RegionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(start = indent.start.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {

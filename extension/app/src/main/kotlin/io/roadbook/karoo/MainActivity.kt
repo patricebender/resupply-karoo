@@ -1,5 +1,6 @@
 package io.roadbook.karoo
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -80,6 +82,12 @@ class MainActivity : ComponentActivity() {
     private val regionManifest =
         androidx.compose.runtime.mutableStateOf<Map<String, RegionManifestEntry>>(emptyMap())
 
+    // Bumped on every fresh entry from the data field (onCreate + onNewIntent). The app is
+    // singleTop, so a re-tap re-uses this Activity and the composition survives — observing
+    // this tick lets the overview re-arm its "jump to current position" scroll each time,
+    // even though the rider may have scrolled the list meanwhile.
+    private val entryTick = mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         configStore = ConfigStore(applicationContext)
@@ -116,6 +124,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // singleTop: a re-tap of the field lands here instead of a fresh onCreate. Re-handle
+    // the build extra and bump the entry tick so the overview snaps back to the rider's
+    // current position (the composition — and its scroll guard — outlived the last visit).
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) runBuild()
+        entryTick.intValue++
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         runCatching { progressSystem.disconnect() }
@@ -144,6 +162,16 @@ class MainActivity : ComponentActivity() {
         // makes "scroll to first POI ahead" a once-per-session action.
         val didInitialScroll = remember { mutableStateOf(false) }
 
+        // Each fresh field-tap (entryTick bump) re-arms the auto-scroll and returns to the
+        // overview: the rider wants "what's next from here", not wherever they'd scrolled.
+        // Skips the initial composition (tick 0) so first launch keeps initialScreen.
+        val tick = entryTick.intValue
+        LaunchedEffect(tick) {
+            if (tick == 0) return@LaunchedEffect
+            didInitialScroll.value = false
+            screen = Screen.Waybook
+        }
+
         when (val s = screen) {
             is Screen.Waybook -> WaybookScreen(
                 pois = pois,
@@ -157,6 +185,7 @@ class MainActivity : ComponentActivity() {
                 },
                 onOpenFilter = { screen = Screen.Filter },
                 onOpenPoi = { screen = Screen.Detail(it.id) },
+                reentryKey = tick,
                 // OSM hours, or a Google result already fetched this session → badge in list.
                 hoursOf = { poi -> hoursFor(poi, repository.cachedHours(poi.id)?.hours) },
                 listState = waybookListState,

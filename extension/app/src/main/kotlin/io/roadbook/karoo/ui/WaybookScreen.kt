@@ -77,6 +77,10 @@ fun WaybookScreen(
     // Hoisted guard (see MainActivity): true once the initial "scroll to first POI
     // ahead" has run, so returning from a detail view doesn't yank the user back.
     didInitialScroll: MutableState<Boolean>,
+    // Bumped by MainActivity on every fresh field-tap entry. Re-keys the auto-scroll so a
+    // re-entry snaps back to the current position even when [progressMeters] hasn't
+    // changed (the guard is reset alongside this, so it fires exactly once per entry).
+    reentryKey: Int,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Header(
@@ -125,7 +129,7 @@ fun WaybookScreen(
         // keying on that so the effect re-runs when the first stream value lands. pois
         // is pre-sorted by along-route distance (PoiQuery), so first-ahead is monotonic.
         val canScroll = progressMeters != null && pois.isNotEmpty() && routeLengthMeters > 0.0
-        LaunchedEffect(canScroll) {
+        LaunchedEffect(canScroll, reentryKey) {
             if (didInitialScroll.value || !canScroll) return@LaunchedEffect
             val p = progressMeters ?: return@LaunchedEffect
             val firstAhead = pois.indexOfFirst { aheadMetersFor(it, p) != null }

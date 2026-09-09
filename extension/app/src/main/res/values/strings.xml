@@ -3,6 +3,26 @@
     <string name="app_name">Roadbook</string>
     <string name="extension_name">Roadbook</string>
     <string name="action_build">Build Roadbook</string>
-    <string name="field_upcoming_pois">Upcoming POIs</string>
-    <string name="field_upcoming_pois_desc">Next POIs ahead on your route, per category</string>
+    <string name="field_upcoming_pois">POIs (all, rotating)</string>
+    <string name="field_upcoming_pois_desc">Next POIs ahead, cycling through every category</string>
+
+    <!-- Single-category fields: one amenity per field, same card as the rotating field. -->
+    <string name="field_pois_restaurants">Restaurants ahead</string>
+    <string name="field_pois_restaurants_desc">Next restaurants ahead on your route</string>
+    <string name="field_pois_supermarkets">Supermarkets ahead</string>
+    <string name="field_pois_supermarkets_desc">Next supermarkets ahead on your route</string>
+    <string name="field_pois_cafe_bar">Café &amp; Bar ahead</string>
+    <string name="field_pois_cafe_bar_desc">Next cafés &amp; bars ahead on your route</string>
+    <string name="field_pois_water">Water ahead</string>
+    <string name="field_pois_water_desc">Next water sources ahead on your route</string>
+    <string name="field_pois_toilet">Toilets ahead</string>
+    <string name="field_pois_toilet_desc">Next toilets ahead on your route</string>
+    <string name="field_pois_bike">Bike shops ahead</string>
+    <string name="field_pois_bike_desc">Next bike shops ahead on your route</string>
+    <string name="field_pois_fuel">Fuel stations ahead</string>
+    <string name="field_pois_fuel_desc">Next fuel stations ahead on your route</string>
+    <string name="field_pois_ice_cream">Ice cream ahead</string>
+    <string name="field_pois_ice_cream_desc">Next ice cream ahead on your route</string>
+    <string name="field_pois_hotels">Hotels ahead</string>
+    <string name="field_pois_hotels_desc">Next hotels ahead on your route</string>
 </resources>

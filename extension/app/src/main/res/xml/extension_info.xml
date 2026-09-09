@@ -12,6 +12,63 @@
         description="@string/field_upcoming_pois_desc"
         graphical="true"
         icon="@drawable/ic_roadbook" />
+    <!-- Single-category fields. typeId must match CategoryPoiDataType.typeIdFor (category.id).
+         description is REQUIRED — omitting it NPEs the Karoo AppStoreService in a restart
+         loop (see memory upcoming-pois-datafield). -->
+    <DataType
+        typeId="upcoming-pois-restaurants"
+        displayName="@string/field_pois_restaurants"
+        description="@string/field_pois_restaurants_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
+    <DataType
+        typeId="upcoming-pois-supermarkets"
+        displayName="@string/field_pois_supermarkets"
+        description="@string/field_pois_supermarkets_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
+    <DataType
+        typeId="upcoming-pois-cafe_bar"
+        displayName="@string/field_pois_cafe_bar"
+        description="@string/field_pois_cafe_bar_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
+    <DataType
+        typeId="upcoming-pois-water"
+        displayName="@string/field_pois_water"
+        description="@string/field_pois_water_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
+    <DataType
+        typeId="upcoming-pois-toilet"
+        displayName="@string/field_pois_toilet"
+        description="@string/field_pois_toilet_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
+    <DataType
+        typeId="upcoming-pois-bike"
+        displayName="@string/field_pois_bike"
+        description="@string/field_pois_bike_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
+    <DataType
+        typeId="upcoming-pois-fuel"
+        displayName="@string/field_pois_fuel"
+        description="@string/field_pois_fuel_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
+    <DataType
+        typeId="upcoming-pois-ice_cream"
+        displayName="@string/field_pois_ice_cream"
+        description="@string/field_pois_ice_cream_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
+    <DataType
+        typeId="upcoming-pois-hotels"
+        displayName="@string/field_pois_hotels"
+        description="@string/field_pois_hotels_desc"
+        graphical="true"
+        icon="@drawable/ic_roadbook" />
     <BonusAction
         actionId="build"
         displayName="@string/action_build" />

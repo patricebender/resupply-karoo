@@ -12,6 +12,7 @@ import io.hammerhead.karooext.models.Symbol
 import io.roadbook.karoo.BuildConfig
 import io.roadbook.karoo.build.BuildController
 import io.roadbook.karoo.build.BuildState
+import io.roadbook.karoo.data.Category
 import io.roadbook.karoo.data.ConfigStore
 import io.roadbook.karoo.data.Poi
 import io.roadbook.karoo.data.PoiDatabase
@@ -66,7 +67,11 @@ class RoadbookExtension : KarooExtension("roadbook", BuildConfig.VERSION_NAME) {
      * [onCreate] so [karooSystem]/[repository]/[configStore] are ready.
      */
     override val types: List<DataTypeImpl> by lazy {
-        listOf(UpcomingPoisDataType(karooSystem, repository, configStore, extension))
+        // The all-categories rotating field, plus one single-category field per category so a
+        // rider can pin just the amenity they care about. Generated from the enum so adding a
+        // category needs no wiring here (only an extension_info.xml <DataType> + strings).
+        listOf(UpcomingPoisDataType(karooSystem, repository, configStore, extension)) +
+            Category.entries.map { CategoryPoiDataType(it, karooSystem, repository, configStore, extension) }
     }
 
     override fun onBonusAction(actionId: String) {

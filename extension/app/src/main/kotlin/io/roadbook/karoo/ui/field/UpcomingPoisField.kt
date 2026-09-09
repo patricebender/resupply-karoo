@@ -259,6 +259,33 @@ fun FieldMessage(text: String, activity: ComponentName, interactive: Boolean) {
     }
 }
 
+/**
+ * Disabled state for a single-category field: its category isn't enabled in settings. Shows
+ * the category glyph over "Enable <Category>" so it's clear which amenity the field is for and
+ * how to switch it on. Tapping opens the app (where the rider can enable it).
+ */
+@androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+@androidx.compose.runtime.Composable
+fun CategoryDisabledField(category: Category, activity: ComponentName, interactive: Boolean) {
+    val style = styleFor(category)
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .tapToOpen(interactive, openAppIntent(activity)),
+        verticalAlignment = Alignment.Vertical.CenterVertically,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text(style.glyph, style = TextStyle(fontSize = 22.sp))
+        Spacer(GlanceModifier.height(2.dp))
+        Text(
+            "Enable ${category.label}",
+            style = TextStyle(color = Dim, fontSize = 13.sp, fontWeight = FontWeight.Medium),
+            maxLines = 2,
+        )
+    }
+}
+
 /** Intent-extra key: when MainActivity sees this, it kicks off a build on launch. */
 const val EXTRA_ACTION = "roadbook.field.action"
 const val ACTION_BUILD = "build"

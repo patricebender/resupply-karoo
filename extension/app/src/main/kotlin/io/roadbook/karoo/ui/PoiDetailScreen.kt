@@ -34,6 +34,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -186,11 +189,11 @@ fun PoiDetailScreen(
                 }
             }
 
-            // Website as a scannable QR, in the same block style.
-            website?.let {
-                Spacer(Modifier.height(16.dp))
-                WebsiteQr(it, context)
-            }
+            // "Open on phone": a scannable QR for the place in Google Maps, with a
+            // toggle to the website QR when one exists. Maps is always available (every
+            // POI has coordinates), so this block always shows.
+            Spacer(Modifier.height(16.dp))
+            OpenOnPhoneQr(mapsUrl = mapsUrlFor(poi), website = website, context = context)
 
             // Description (on-demand, online).
             DescriptionSection(
@@ -633,19 +636,64 @@ private fun formatAddress(tags: Map<String, String>): String? {
 }
 
 /**
- * Website block: a scannable QR (far easier to open on a phone than typing a URL off the
- * Karoo) plus the URL, centered inside the same card style as the other blocks. Tapping
- * the QR still opens the link directly if a browser is reachable.
+ * A Google Maps universal URL for the place: the name plus a coordinate anchor, so the pin
+ * carries the real POI name. Coordinates-only would pin exactly but label it with a
+ * reverse-geocoded address (useless); a name search reads better. Generic names ("Shell")
+ * can occasionally surface a few nearby matches — accepted for the readable label.
+ *
+ * Water and toilet POIs are the exception: their "name" is a generic label ("Fountain",
+ * "Water"), so a name search yields a useless list of matches. For those we drop the name
+ * and search coordinates only — the pin lands on the exact spot, which is all that's
+ * useful there. Unnamed POIs of any type also fall back to bare coordinates.
+ *
+ * The https form (not a `geo:` URI, which hands off to Apple Maps on iPhone) is a Google
+ * Maps universal link: a phone with the app opens it there, one without falls back to
+ * Google Maps in the browser.
+ */
+private fun mapsUrlFor(poi: Poi): String {
+    val coords = "${poi.lat},${poi.lng}"
+    val genericLabelOnly = poi.type == "REST_STOP" || poi.type == "RESTROOM"
+    val query = poi.name?.takeIf { it.isNotBlank() && !genericLabelOnly }
+        ?.let { Uri.encode("$it $coords") } ?: coords
+    return "https://www.google.com/maps/search/?api=1&query=$query"
+}
+
+private enum class PhoneTarget { MAPS, WEBSITE }
+
+/**
+ * "Open on phone" block: a scannable QR (far easier than typing a URL off the Karoo),
+ * centered in the same card style as the other blocks. Defaults to a Google Maps QR for
+ * the place; when the POI has a [website], a compact toggle switches the QR to the site.
+ * Tapping the QR still opens the target directly if a browser/Maps is reachable.
  */
 @Composable
-private fun WebsiteQr(url: String, context: android.content.Context) {
-    SectionLabel("Website")
+private fun OpenOnPhoneQr(mapsUrl: String, website: String?, context: android.content.Context) {
+    var target by remember(mapsUrl, website) { mutableStateOf(PhoneTarget.MAPS) }
+    val onWebsite = target == PhoneTarget.WEBSITE && website != null
+    val payload = if (onWebsite) website!! else mapsUrl
+
+    SectionLabel("Open on phone")
     Spacer(Modifier.height(6.dp))
     InfoCard {
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (website != null) {
+                SingleChoiceSegmentedButtonRow {
+                    SegmentedButton(
+                        selected = target == PhoneTarget.MAPS,
+                        onClick = { target = PhoneTarget.MAPS },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    ) { Text("Maps") }
+                    SegmentedButton(
+                        selected = target == PhoneTarget.WEBSITE,
+                        onClick = { target = PhoneTarget.WEBSITE },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    ) { Text("Website") }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
@@ -653,23 +701,31 @@ private fun WebsiteQr(url: String, context: android.content.Context) {
                     .padding(10.dp),
             ) {
                 Image(
-                    painter = rememberQrCodePainter(url),
-                    contentDescription = "QR code for $url",
+                    painter = rememberQrCodePainter(payload),
+                    contentDescription = "QR code for $payload",
+                    // Tapping opens the target on the Karoo only for the website — the maps
+                    // query URL has no handler here, so leave that QR scan-only.
                     modifier = Modifier
                         .size(140.dp)
-                        .clickable {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
-                            }
-                        },
+                        .then(
+                            if (onWebsite) {
+                                Modifier.clickable {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(payload))
+                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                        )
+                                    }
+                                }
+                            } else {
+                                Modifier
+                            },
+                        ),
                 )
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                url,
+                if (target == PhoneTarget.WEBSITE) payload else "Scan to open in Google Maps",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

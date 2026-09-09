@@ -71,7 +71,7 @@ jobs:
           gh release download regions-latest --pattern 'manifest.json' --dir seed --clobber
           SCHEMA="$(jq -r '.schemaVersion' seed/manifest.json)"
           APP_VER="$(grep -oP 'BUNDLED_DB_VERSION\s*=\s*\K[0-9]+' \
-            extension/app/src/main/kotlin/io/roadbook/karoo/data/PoiDatabase.kt)"
+            extension/app/src/main/kotlin/io/resupply/karoo/data/PoiDatabase.kt)"
           echo "regions release schemaVersion=$SCHEMA, app BUNDLED_DB_VERSION=$APP_VER"
           if [[ "$SCHEMA" != "$APP_VER" ]]; then
             echo "::error::regions-latest is schema v$SCHEMA but the app expects v$APP_VER." \
@@ -84,7 +84,7 @@ jobs:
             > extension/app/src/main/assets/pois-germany.sqlite
           ls -la extension/app/src/main/assets/pois-germany.sqlite
 
-      - name: Build APK
+      - name: Build signed release APK
         if: ${{ steps.rp.outputs.releases_created == 'true' }}
         working-directory: extension
         env:
@@ -96,9 +96,29 @@ jobs:
           # Without it BuildConfig.PLACES_API_KEY is empty and the feature is disabled,
           # leaving POIs without OSM hours with a bare detail page.
           PLACES_API_KEY: ${{ secrets.PLACES_API_KEY }}
-        run: ./gradlew :app:assembleDebug --no-daemon
+          # Release signing. When these are set, build.gradle.kts signs `release` with the
+          # stable store key; unset, it would fall back to debug (never for a real release).
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          # Karoo library manifest: release-asset download prefix. generateManifest writes
+          # this into manifest.json and substitutes $BASE_URL$ in the merged AndroidManifest.
+          BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.rp.outputs['extension--tag_name'] }}
+        run: |
+          # generateManifest runs automatically as a dependency of the manifest-merge task,
+          # but invoke it explicitly so manifest.json is emitted even if that wiring changes.
+          ./gradlew :app:generateManifest :app:assembleRelease --no-daemon
 
-      - name: Attach APK to release
+      - name: Rasterize library icon
+        if: ${{ steps.rp.outputs.releases_created == 'true' }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq librsvg2-bin
+          rsvg-convert -w 512 -h 512 \
+            extension/app/resupply-icon.svg -o extension/app/resupply.png
+          ls -la extension/app/resupply.png
+
+      - name: Attach release assets
         if: ${{ steps.rp.outputs.releases_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -106,5 +126,15 @@ jobs:
           # namespaced per path — the bare `tag_name` output is empty here.
           TAG: ${{ steps.rp.outputs['extension--tag_name'] }}
         run: |
-          cp extension/app/build/outputs/apk/debug/app-debug.apk "roadbook-${TAG}.apk"
-          gh release upload "$TAG" "roadbook-${TAG}.apk" --clobber
+          set -euo pipefail
+          # The library update mechanism fetches assets by fixed name at the release's
+          # download path (app-release.apk, manifest.json, resupply.png). Keep those names.
+          cp extension/app/build/outputs/apk/release/app-release.apk app-release.apk
+          # Also publish a versioned copy for humans sideloading from the releases page.
+          cp app-release.apk "resupply-${TAG}.apk"
+          ASSETS=(app-release.apk "resupply-${TAG}.apk" extension/app/manifest.json extension/app/resupply.png)
+          # Screenshots are optional; include any that were committed next to the module.
+          for shot in extension/app/preview*.png; do
+            [ -e "$shot" ] && ASSETS+=("$shot")
+          done
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber

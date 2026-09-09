@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Canonical Resupply icon (512x512): dark rounded tile with the route + destination pin.
+  Source of truth for the app/extension vector (res/drawable/ic_resupply.xml) and for the
+  library store icon PNG, which CI rasterizes from this file (see the "Rasterize library
+  icon" step in the release workflow). Keep this in sync with ic_resupply.xml if the
+  artwork changes.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="tile" x1="256" y1="16" x2="256" y2="496" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#20242B"/>
+      <stop offset="1" stop-color="#121419"/>
+    </linearGradient>
+    <linearGradient id="route" x1="121" y1="480" x2="386" y2="74" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF5E3A"/>
+      <stop offset="1" stop-color="#FFA24A"/>
+    </linearGradient>
+    <linearGradient id="pin" x1="380" y1="68" x2="380" y2="136" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF7A45"/>
+      <stop offset="1" stop-color="#F0421B"/>
+    </linearGradient>
+  </defs>
+
+  <!-- tile -->
+  <path fill="url(#tile)"
+    d="M128,16 L384,16 A112,112 0 0 1 496,128 L496,384 A112,112 0 0 1 384,496 L128,496 A112,112 0 0 1 16,384 L16,128 A112,112 0 0 1 128,16 Z"/>
+
+  <!-- route -->
+  <path fill="none" stroke="url(#route)" stroke-width="14" stroke-linecap="round"
+    d="M 100 400 C 168 316 150 264 236 252 S 342 232 380 150"/>
+
+  <!-- passed waypoints -->
+  <circle cx="132" cy="354" r="11" fill="#161A21" stroke="#E9EDF3" stroke-width="5"/>
+  <circle cx="236" cy="252" r="11" fill="#161A21" stroke="#E9EDF3" stroke-width="5"/>
+
+  <!-- highlighted waypoint (tip on route end) -->
+  <circle cx="380" cy="102" r="34" fill="url(#pin)"/>
+  <path fill="#F0421B" d="M 356 124 L 380 150 L 404 124 Z"/>
+  <circle cx="380" cy="102" r="12.5" fill="#FFFFFF"/>
+</svg>

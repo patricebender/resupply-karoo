@@ -5,11 +5,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:name=".RoadbookApplication"
+        android:name=".ResupplyApplication"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
-        android:theme="@style/Theme.Roadbook">
+        android:theme="@style/Theme.Resupply">
 
         <activity
             android:name=".MainActivity"
@@ -23,7 +23,7 @@
         </activity>
 
         <service
-            android:name=".extension.RoadbookExtension"
+            android:name=".extension.ResupplyExtension"
             android:exported="true"
             tools:ignore="ExportedService">
             <!-- Discovered by the Karoo System as an extension. -->
@@ -34,6 +34,13 @@
                 android:name="io.hammerhead.karooext.EXTENSION_INFO"
                 android:resource="@xml/extension_info" />
         </service>
+
+        <!-- Karoo Extensions library: where the on-device store fetches version/update
+             info. $BASE_URL$ is substituted at build time by the generateManifest Gradle
+             task (CI only); locally it stays literal and is harmless for sideloading. -->
+        <meta-data
+            android:name="io.hammerhead.karooext.MANIFEST_URL"
+            android:value="$BASE_URL$/manifest.json" />
 
     </application>
 

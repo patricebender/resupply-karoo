@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Roadbook</string>
-    <string name="extension_name">Roadbook</string>
-    <string name="action_build">Build Roadbook</string>
+    <string name="app_name">Resupply</string>
+    <string name="extension_name">Resupply</string>
+    <string name="action_build">Build Resupply</string>
     <string name="field_upcoming_pois">POIs (all, rotating)</string>
     <string name="field_upcoming_pois_desc">Next POIs ahead, cycling through every category</string>
 

@@ -18,7 +18,7 @@ The extension is versioned with **semantic versioning** driven by
 3. **Merge the Release PR** when you want to cut a release. That:
    - creates tag `extension-vX.Y.Z` and a GitHub Release, then
    - builds the APK (`versionName` = the released version, `versionCode` = CI run number)
-     and attaches `roadbook-extension-vX.Y.Z.apk` to the release.
+     and attaches `resupply-vX.Y.Z.apk` to the release.
 4. Install: paste the release APK URL into the Hammerhead Companion app.
 
 ## Notes

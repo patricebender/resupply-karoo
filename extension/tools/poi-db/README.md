@@ -100,5 +100,5 @@ apps re-seed and downloaded region files stay compatible:
 ## Keep in sync
 
 `categories.ts` / `contract.ts` mirror the Kotlin `Category` enum
-(`data/RoadbookConfig.kt`) and the karoo-ext `Symbol.POI.Types`. Changing categories
+(`data/ResupplyConfig.kt`) and the karoo-ext `Symbol.POI.Types`. Changing categories
 here means changing them there too.

@@ -33,5 +33,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "roadbook"
+rootProject.name = "resupply"
 include(":app")

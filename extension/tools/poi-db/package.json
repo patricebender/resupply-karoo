@@ -1,5 +1,5 @@
 {
-  "name": "roadbook-poi-db",
+  "name": "resupply-poi-db",
   "version": "0.1.0",
   "private": true,
   "description": "Build the bundled POI SQLite asset from an OpenStreetMap extract",

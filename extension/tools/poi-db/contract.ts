@@ -1,6 +1,6 @@
 // Shared POI vocabulary for the data pipeline. `type` values must be a subset of
 // karoo-ext Symbol.POI.Types so the extension can render them directly as map pins,
-// and the Kotlin `Category` enum (data/RoadbookConfig.kt) must stay in sync with the
+// and the Kotlin `Category` enum (data/ResupplyConfig.kt) must stay in sync with the
 // `Category` union below.
 
 /** POI category toggles the rider switches on/off when building. */

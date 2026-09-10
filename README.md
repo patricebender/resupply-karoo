@@ -1,10 +1,11 @@
 <div align="center">
 
-<img src="extension/app/brand/png/resupply-icon.png" alt="Resupply" width="128" height="128">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="extension/app/brand/resupply-wordmark-dark.svg">
+  <img src="extension/app/brand/resupply-wordmark-light.svg" alt="Resupply" width="420">
+</picture>
 
-# Resupply for Karoo
-
-**Offline POIs along your route — coffee, food, water, bike shops, fuel — no signal needed.**
+**for Karoo — offline POIs along your route, no signal needed**
 
 </div>
 

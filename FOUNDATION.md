@@ -153,7 +153,11 @@ through the **Karoo HTTP bridge** (so they work over the paired phone, not just 
   **hours themselves are never persisted** — kept in memory with a short TTL and re-fetched,
   per Maps ToS. Opening-hours parsing of the OSM `opening_hours` string lives in
   `data/OpeningHours.kt` (a pragmatic subset: weekday table, 24/7, "opens at", seasonal
-  fallback).
+  fallback). Whenever a Places lookup supplied any field shown on the detail screen (hours,
+  address, website, phone), the **Google Maps wordmark** is rendered once at the bottom of
+  that screen (`drawable/ic_google_maps_wordmark.xml`, tinted to the surface) — the Places
+  policy requires the attribution to name "Google Maps" and stay visible alongside its
+  content.
 
 ## Data
 

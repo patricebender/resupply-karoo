@@ -114,6 +114,11 @@ and a CI-built APK attached as a release asset. Normal pushes don't publish an A
 POI data from OpenStreetMap contributors, © OpenStreetMap contributors, available under the
 [Open Database License](https://www.openstreetmap.org/copyright).
 
+Opening hours and contact details for a POI can be filled in on demand from **Google Maps**
+(Places API) when OpenStreetMap has none. That content is shown live with a Google Maps
+attribution and is not stored on the device — only the resolved Place ID is cached, which
+the Places policy permits.
+
 ## License
 
 [Apache-2.0](LICENSE).

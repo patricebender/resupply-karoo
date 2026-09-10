@@ -50,12 +50,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.alexzhirkevich.qrose.rememberQrCodePainter
+import io.resupply.karoo.R
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.PlacesClient
 import io.resupply.karoo.data.Poi
@@ -130,11 +133,18 @@ fun PoiDetailScreen(
 
             // Contact fields are source-agnostic: OSM first, then the Google result once
             // it's fetched — so the page looks the same however the data arrived.
-            val address = remember(poi.tags, googleHours) {
-                formatAddress(poi.tags) ?: googleHours?.address
-            }
+            val osmAddress = remember(poi.tags) { formatAddress(poi.tags) }
+            val address = osmAddress ?: googleHours?.address
+            val osmPhone = poi.tags["phone"]
             val website = poi.tags["website"] ?: googleHours?.website
-            val phone = poi.tags["phone"] ?: googleHours?.phone
+            val phone = osmPhone ?: googleHours?.phone
+
+            // Per-card attribution: the Google Maps wordmark rides inside a card only when
+            // that card's shown data actually came from Google (Places policy: credit in
+            // the same container as the content).
+            val contactViaGoogle = (osmAddress == null && googleHours?.address != null) ||
+                (osmPhone == null && googleHours?.phone != null)
+            val hoursViaGoogle = osmHours == null && googleHours != null
 
             // Status pill sits centered on its own line, above the route context pills,
             // so a long "Open 24/7" + "at 12.3 km" + "detour 400 m" never crowds one row.
@@ -173,6 +183,7 @@ fun PoiDetailScreen(
                 googleHours = googleHours,
                 onGoogleHours = { googleHours = it },
                 loadGoogleHours = loadGoogleHours,
+                viaGoogle = hoursViaGoogle,
             )
 
             // Address + phone.
@@ -186,6 +197,7 @@ fun PoiDetailScreen(
                         if (address != null) Spacer(Modifier.height(10.dp))
                         IconTextRow(Icons.Filled.Call, it)
                     }
+                    if (contactViaGoogle) GoogleMapsCredit()
                 }
             }
 
@@ -272,6 +284,7 @@ private fun OpeningHoursBlock(
     googleHours: PlacesClient.Result?,
     onGoogleHours: (PlacesClient.Result?) -> Unit,
     loadGoogleHours: (suspend () -> PlacesClient.Result?)?,
+    viaGoogle: Boolean,
 ) {
     // Nothing to show and no way to look it up → skip the block entirely.
     if (osmHours == null && loadGoogleHours == null) return
@@ -280,16 +293,41 @@ private fun OpeningHoursBlock(
     Spacer(Modifier.height(6.dp))
     InfoCard {
         when {
-            osmHours != null -> HoursDetail(osmHours, viaGoogle = false)
-            googleHours != null -> HoursDetail(googleHours.hours, viaGoogle = true)
+            osmHours != null -> HoursDetail(osmHours)
+            googleHours != null -> HoursDetail(googleHours.hours)
             else -> GoogleHoursFallback(loadGoogleHours!!, onGoogleHours)
         }
+        // Attribution rides inside the card only when Google supplied actual hours — not for
+        // the "Place could not be found" note, which carries no Google content to credit.
+        // (Google hours are either a real schedule, 24/7, or unknown; never rawFallback.)
+        val hasGoogleHoursContent = googleHours?.hours?.let { !it.unknown } == true
+        if (viaGoogle && hasGoogleHoursContent) GoogleMapsCredit()
     }
 }
 
-/** The hours detail: weekday table, or the "opens…"/24-7/seasonal line, + attribution. */
+/**
+ * The Google Maps attribution wordmark, sized per the Places policy (16–19dp) and tinted to
+ * the surface for contrast. Rendered inside whichever card shows Google-sourced content.
+ */
 @Composable
-private fun HoursDetail(hours: OpeningHours.Hours, viaGoogle: Boolean) {
+private fun GoogleMapsCredit() {
+    Spacer(Modifier.height(10.dp))
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Image(
+            painter = painterResource(R.drawable.ic_google_maps_wordmark),
+            contentDescription = "Google Maps",
+            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+            modifier = Modifier.height(16.dp),
+        )
+    }
+}
+
+/**
+ * The hours detail: weekday table, or the "opens…"/24-7/seasonal line. Source attribution
+ * (the Google Maps wordmark) is shown once at the screen level, not here.
+ */
+@Composable
+private fun HoursDetail(hours: OpeningHours.Hours) {
     val today = remember { todayIndex() }
     val status = remember(hours) { hours.status() }
 
@@ -299,9 +337,8 @@ private fun HoursDetail(hours: OpeningHours.Hours, viaGoogle: Boolean) {
             Text(hours.rawFallback!!, style = MaterialTheme.typography.bodyMedium)
         // Resolved but no hours on record (e.g. Google had none) → a clean centered
         // "not listed" note, never a false table or a "Closed" claim. Terminal: we've
-        // already looked, so no action here. The "via Google" footer is redundant with
-        // the copy, so it's suppressed below for this case.
-        hours.unknown || hours.schedule.isEmpty() -> UnknownHoursNote(viaGoogle)
+        // already looked, so no action here.
+        hours.unknown || hours.schedule.isEmpty() -> UnknownHoursNote()
         else -> {
             // When closed now, lead with a centered "opens …" callout, then the full week.
             if (status.state == OpeningHours.OpenState.CLOSED) {
@@ -321,25 +358,17 @@ private fun HoursDetail(hours: OpeningHours.Hours, viaGoogle: Boolean) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (viaGoogle) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "via Google",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
     }
 }
 
 /**
  * "Hours not listed" — the honest terminal state when a source resolved the place but
- * carries no usable hours. Centered, muted, no open/closed claim; a [viaGoogle] flag
- * notes we already checked Google so the rider knows there's nothing more to try.
+ * carries no usable hours. Centered, muted, no open/closed claim. Reached only after a
+ * Google Maps lookup that came back empty, so it says as much.
  */
 @Composable
-private fun UnknownHoursNote(viaGoogle: Boolean) {
+private fun UnknownHoursNote() {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -357,15 +386,13 @@ private fun UnknownHoursNote(viaGoogle: Boolean) {
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center,
         )
-        if (viaGoogle) {
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "Google has none for this place",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "Place could not be found",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -442,16 +469,16 @@ private fun GoogleHoursFallback(
                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Searching Google…",
+                    "Searching…",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
-            // Nothing came back from Google either — say so plainly and offer one more try.
+            // Nothing resolved — say so plainly and offer a retry. No source to credit yet.
             failed -> {
                 Text(
-                    "Google doesn't list hours for this place.",
+                    "Place could not be found.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -460,7 +487,8 @@ private fun GoogleHoursFallback(
                 OutlinedButton(onClick = fetch) { Text("Search again") }
             }
 
-            // First view: OSM has no hours; offer a single, explicit Google lookup.
+            // First view: OSM has no hours; offer a single lookup. The source (Google Maps)
+            // is credited once the data lands, not on the button.
             else -> {
                 Icon(
                     Icons.Filled.Schedule,
@@ -475,13 +503,6 @@ private fun GoogleHoursFallback(
                     color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center,
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "Check Google for this place",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
                 Spacer(Modifier.height(14.dp))
                 Button(onClick = fetch) {
                     Icon(
@@ -490,7 +511,7 @@ private fun GoogleHoursFallback(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.size(8.dp))
-                    Text("Search Google")
+                    Text("Search Internet")
                 }
             }
         }

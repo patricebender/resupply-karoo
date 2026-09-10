@@ -1,4 +1,4 @@
-# Roadbook for Karoo 3 — Foundation
+# Resupply for Karoo 3 — Foundation
 
 A Karoo 3 extension that turns a loaded route into an offline guide of POIs along the way
 (coffee, food, water, bike shops, fuel), so a rider can plan refuels and stops without
@@ -28,9 +28,9 @@ no backend and no live third-party query dependency at build time.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Karoo 3 extension (Kotlin, io.roadbook.karoo)               │
+│  Karoo 3 extension (Kotlin, io.resupply.karoo)               │
 │                                                              │
-│  MainActivity (Compose)          RoadbookExtension           │
+│  MainActivity (Compose)          ResupplyExtension           │
 │   Waybook / Filter / Detail       (map-layer service)        │
 │        │                            │                        │
 │        │  onBuild()                 │  onBonusAction("build") │
@@ -45,7 +45,7 @@ no backend and no live third-party query dependency at build time.
 │              seeded from bundled asset                       │
 │                        │                                     │
 │                        ▼                                     │
-│              RoadbookRepository (StateFlow)                  │
+│              ResupplyRepository (StateFlow)                  │
 │        POIs + BuildState + offline JSON cache               │
 │           │                          │                       │
 │           ▼                          ▼                       │
@@ -56,8 +56,8 @@ no backend and no live third-party query dependency at build time.
 Both build triggers — the in-app "Build" button and the in-ride `BonusAction` — call the
 same `BuildController.runBuild()`, serialized by a process-wide mutex so overlapping
 triggers can't race. The controller resolves the route (or, with no route, the current
-location), runs the spatial query, and publishes the result through `RoadbookRepository`.
-The map layer (`RoadbookExtension.startMap`) and the Compose screens both observe that
+location), runs the spatial query, and publishes the result through `ResupplyRepository`.
+The map layer (`ResupplyExtension.startMap`) and the Compose screens both observe that
 repository, so a build updates the map pins and the list in lockstep.
 
 ### On-device POI database
@@ -90,7 +90,7 @@ POIs live in a spatial SQLite database:
 
 ### Detour radius and categories
 
-- **Detour radius:** 500 m to 5000 m in 500 m steps, default 500 m (`data/RoadbookConfig.kt`).
+- **Detour radius:** 500 m to 5000 m in 500 m steps, default 500 m (`data/ResupplyConfig.kt`).
 - **Categories:** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops, Fuel
   stations, Ice Cream. Default enabled: **Water + Bike**. Each category maps to a set of OSM
   tags and to a `Symbol.POI` type for the map pin (table below).
@@ -105,7 +105,7 @@ This is a glanceable device, often used mid-ride with gloves. The UI must always
 - **Every async action has visible state.** A build is a state machine —
   `Idle → Building → Success(count, per-category breakdown, timestamp) | Error(message)` —
   and the UI is a function of that state. Source of truth: `BuildState` in
-  `RoadbookRepository` (a `StateFlow` the UI collects).
+  `ResupplyRepository` (a `StateFlow` the UI collects).
 - **Controls disable while busy.** Build and config inputs disable during a build; the
   process-wide mutex in `BuildController` prevents concurrent builds regardless of trigger.
 - **Confirm success glanceably.** Success shows the POI count with a relative timestamp and
@@ -185,7 +185,7 @@ repair shops, and unattended automats are filtered out. `Ice Cream` exists in th
 is rebuilt with an `amenity=ice_cream` rule.
 
 The category set must stay in sync across three places: the Kotlin `Category` enum
-(`data/RoadbookConfig.kt`), the pipeline `categories.ts`/`contract.ts`, and the karoo-ext
+(`data/ResupplyConfig.kt`), the pipeline `categories.ts`/`contract.ts`, and the karoo-ext
 `Symbol.POI.Types`.
 
 ## karoo-ext facts we rely on (verified in source)
@@ -221,15 +221,15 @@ a release asset. Normal pushes do not publish an APK. Full detail in
 ## Repo layout
 
 ```
-roadbook/
+resupply-karoo/
   FOUNDATION.md            # this doc
   README.md
   docs/releasing.md
   extension/               # Kotlin Android app (karoo-ext)
-    app/src/main/kotlin/io/roadbook/karoo/
+    app/src/main/kotlin/io/resupply/karoo/
       data/                # config, repository, POI DB + spatial query, hours, clients
       build/               # BuildController + BuildState
-      extension/           # RoadbookExtension (map layer + BonusAction)
+      extension/           # ResupplyExtension (map layer + BonusAction)
       ui/                  # Compose screens (Waybook, Filter, Detail, RouteStrip)
       util/                # polyline decode + geometry
     app/src/main/assets/   # bundled pois-*.sqlite

@@ -1,4 +1,4 @@
-# Roadbook for Karoo
+# Resupply for Karoo
 
 A [Hammerhead Karoo](https://www.hammerhead.io/) extension that turns a loaded route into an
 offline guide of POIs along the way — coffee, food, water, bike shops, fuel — so you can plan

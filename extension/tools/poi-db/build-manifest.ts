@@ -32,7 +32,7 @@ const HERE = new URL(".", import.meta.url).pathname;
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
 
 const DEFAULT_BASE_URL =
-  "https://github.com/patricebender/roadbook-karoo/releases/download/regions-latest/";
+  "https://github.com/patricebender/resupply-karoo/releases/download/regions-latest/";
 const baseUrl = (process.env.REGIONS_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/?$/, "/");
 
 interface ManifestRegion {

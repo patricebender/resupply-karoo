@@ -1,5 +1,5 @@
 # Anchor Gradle output dirs to the module roots. A bare `build/` would also match
-# the source package io/roadbook/karoo/build/, dropping it from the tree — which
+# the source package io/resupply/karoo/build/, dropping it from the tree — which
 # broke the CI (case-sensitive Linux) build while compiling fine locally.
 /.gradle/
 /build/
@@ -8,3 +8,8 @@ local.properties
 *.iml
 .idea/
 .DS_Store
+
+# Generated at release time for the Karoo extensions library (see generateManifest
+# in app/build.gradle.kts). Attached to the GitHub release, never committed.
+/app/manifest.json
+/app/resupply.png

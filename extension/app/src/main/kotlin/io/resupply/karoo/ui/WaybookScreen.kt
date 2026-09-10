@@ -1,5 +1,13 @@
 package io.resupply.karoo.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -88,6 +96,10 @@ fun WaybookScreen(
             // When the body shows the big animated logo (first build, no pins yet),
             // keep the header status line quiet so there's only one progress cue.
             showStatusLine = pois.isNotEmpty() || buildState !is BuildState.Building,
+            // The header icon only appears once a build has landed places. While empty
+            // the big body logo is the sole icon; when the list takes over, the squircle
+            // glides into the header from the left. So there's never two icons at once.
+            showIcon = pois.isNotEmpty(),
             onBuild = onBuild,
             onOpenSettings = onOpenSettings,
         )
@@ -158,6 +170,7 @@ fun WaybookScreen(
 private fun Header(
     buildState: BuildState,
     showStatusLine: Boolean,
+    showIcon: Boolean,
     onBuild: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -174,12 +187,37 @@ private fun Header(
         // same reason the placeholder uses it. Image (not Icon) so it keeps its own
         // route/dot colours instead of being flattened to a single tint. The text uses
         // onSurface so it flips with the theme.
-        Image(
-            painter = painterResource(R.drawable.ic_resupply),
-            contentDescription = null,
-            modifier = Modifier.size(28.dp),
-        )
-        Spacer(Modifier.size(8.dp))
+        //
+        // The icon is absent until a build lands places; then it glides in from the left
+        // (slide + fade) while "RESUPPLY" stays anchored — so the mark reads as arriving,
+        // not as the whole wordmark shifting. expandHorizontally lets the text slide over
+        // to make room instead of jumping. Slower, eased motion keeps it modern, not cute.
+        AnimatedVisibility(
+            visible = showIcon,
+            enter = fadeIn(animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing)) +
+                slideInHorizontally(
+                    animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+                    initialOffsetX = { -it },
+                ) +
+                expandHorizontally(
+                    animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.Start,
+                ),
+            exit = fadeOut(animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing)) +
+                shrinkHorizontally(
+                    animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Start,
+                ),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(R.drawable.ic_resupply),
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+            }
+        }
         Text(
             "RESUPPLY",
             style = MaterialTheme.typography.titleMedium,

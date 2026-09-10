@@ -332,7 +332,7 @@ private fun HoursDetail(hours: OpeningHours.Hours) {
     val status = remember(hours) { hours.status() }
 
     when {
-        hours.is247 -> Text("Open 24 hours, every day", style = MaterialTheme.typography.bodyMedium)
+        hours.is247 -> AlwaysOpenCallout()
         hours.rawFallback != null ->
             Text(hours.rawFallback!!, style = MaterialTheme.typography.bodyMedium)
         // Resolved but no hours on record (e.g. Google had none) → a clean centered
@@ -432,6 +432,47 @@ private fun OpensCallout(label: String) {
             rest,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+/**
+ * The 24/7 headline: instead of a flat "open every day" line, the rider gets a centered
+ * green callout mirroring [OpensCallout] — a big "24/7" set against a soft green panel, a
+ * clock glyph, and a supporting line. It's the whole story for an always-open place, so it
+ * earns the space; the closed and always-open states now read as a designed pair.
+ */
+@Composable
+private fun AlwaysOpenCallout() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(OpenGreen.copy(alpha = 0.12f))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.Schedule,
+                contentDescription = null,
+                tint = OpenGreen,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                "24/7",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = OpenGreen,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Open around the clock, every day",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
     }
 }

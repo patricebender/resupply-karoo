@@ -27,9 +27,10 @@ import androidx.compose.ui.unit.sp
 import io.resupply.karoo.data.Poi
 
 /**
- * The route timeline: a colored dot per POI at its position along the route, with
- * start/total distance labels underneath. The dots themselves are the axis — there's
- * no separate track bar.
+ * The route timeline: a thin horizontal track line for the route, with a colored dot per
+ * POI at its position along the route. Each dot splays above or below the track by which
+ * side of the route the POI is on and how far the detour is. Start/total labels sit in the
+ * top lane.
  *
  * Mid-ride it becomes a live "you are here": [progressMeters] places a red rider
  * playhead at the current position and dims passed POI dots. [listPositionMeters] drives
@@ -54,6 +55,7 @@ fun RouteStrip(
     val riderHalo = Color(0xFFFFFFFF)
     // Read theme colors here (composable scope) so the Canvas lambda can use them.
     val listMarkColor = MaterialTheme.colorScheme.primary
+    val trackColor = MaterialTheme.colorScheme.outlineVariant
     val hasRoute = routeLengthMeters > 0.0
     val progressFrac = progressMeters
         ?.takeIf { hasRoute }
@@ -75,10 +77,12 @@ fun RouteStrip(
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val fullWidth = maxWidth
             // A floating rounded pill sits in a lane ABOVE the dot lane, showing the
-            // list's current km, with a bracket dropping onto the dot lane. The POI dots
-            // themselves ARE the timeline axis — no separate track bar underneath.
+            // list's current km, with a bracket dropping onto the dot lane. A thin
+            // horizontal track line marks the route; POI dots splay off it by detour side.
             val pillLaneH = 18.dp
-            val dotZoneH = 22.dp
+            // Tall enough that a max-detour dot splayed to the lane edge stays clear of the
+            // pill lane above and the km labels below (half-lane carries splay + dot radius).
+            val dotZoneH = 34.dp
 
             Canvas(
                 modifier = Modifier
@@ -96,16 +100,39 @@ fun RouteStrip(
 
                 val riderX = progressFrac?.let { xAt(it) }
 
-                // POI dots on the timeline; those behind the rider dim to "passed".
+                // The route line itself: a thin horizontal track through the middle. The
+                // dots splay off it by detour, so without this reference an off-center dot
+                // has nothing to read "above/below the route" against.
+                drawLine(
+                    trackColor,
+                    Offset(left, dotLaneY),
+                    Offset(right, dotLaneY),
+                    strokeWidth = 1.dp.toPx(),
+                )
+
+                // POI dots, offset off the track by which side of the route they're on
+                // (left above, right below) AND how far the detour is: near-route POIs hug
+                // the line, far ones splay to the lane edge. So vertical position carries
+                // meaning, which de-clutters a dense route instead of smearing one row.
+                // Normalize against the farthest detour on this route (with a floor so an
+                // all-near route isn't exaggerated). Those behind the rider dim to "passed".
                 val dotRadius = 4.dp.toPx()
+                val minSplay = 3.dp.toPx()                 // even a near POI clears the track
+                val maxSplay = dotZoneH.toPx() / 2f - dotRadius  // farthest sits at the lane edge
+                val detourScale = maxOf(500, pois.maxOfOrNull { it.detourMeters } ?: 0).toFloat()
                 for (poi in pois) {
                     val along = poi.distancesAlongRoute.firstOrNull() ?: continue
                     val frac = (along / routeLengthMeters).coerceIn(0.0, 1.0).toFloat()
                     val passed = progressFrac != null && frac < progressFrac
+                    // side +1 (left) draws above; screen Y grows downward, so subtract.
+                    val splay = if (poi.detourSide == 0) 0f
+                        else minSplay + (maxSplay - minSplay) *
+                            (poi.detourMeters / detourScale).coerceIn(0f, 1f)
+                    val dotY = dotLaneY - poi.detourSide * splay
                     drawCircle(
                         color = styleForType(poi.type).color.let { if (passed) it.copy(alpha = 0.3f) else it },
                         radius = dotRadius,
-                        center = Offset(xAt(frac), dotLaneY),
+                        center = Offset(xAt(frac), dotY),
                     )
                 }
 

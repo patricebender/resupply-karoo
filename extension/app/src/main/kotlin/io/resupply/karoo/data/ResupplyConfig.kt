@@ -39,9 +39,12 @@ data class ResupplyConfig(
     val enabledCategories: Set<Category> = setOf(Category.WATER, Category.BIKE),
 ) {
     companion object {
-        const val DEFAULT_DETOUR_METERS = 500
-        const val MIN_DETOUR_METERS = 500
-        const val MAX_DETOUR_METERS = 5000
-        const val DETOUR_STEP_METERS = 500
+        /**
+         * Selectable detour radii. Irregular by design: tight 100/250 m options for
+         * on-route resupply, then 500 m increments up to 5 km. The settings slider snaps
+         * to these; nothing else assumes a uniform step.
+         */
+        val DETOUR_OPTIONS_METERS = listOf(100, 250, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000)
+        const val DEFAULT_DETOUR_METERS = 250
     }
 }

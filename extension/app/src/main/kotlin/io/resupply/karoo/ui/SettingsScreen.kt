@@ -122,15 +122,16 @@ fun SettingsScreen(
                 formatDistance(config.detourMeters),
                 style = MaterialTheme.typography.titleMedium,
             )
+            val options = ResupplyConfig.DETOUR_OPTIONS_METERS
+            val currentIndex = options.indexOfFirst { it >= config.detourMeters }
+                .let { if (it < 0) options.lastIndex else it }
             Slider(
-                value = config.detourMeters.toFloat(),
+                value = currentIndex.toFloat(),
                 onValueChange = { raw ->
-                    val step = ResupplyConfig.DETOUR_STEP_METERS
-                    onDetourChange((raw / step).roundToInt() * step)
+                    onDetourChange(options[raw.roundToInt().coerceIn(0, options.lastIndex)])
                 },
-                valueRange = ResupplyConfig.MIN_DETOUR_METERS.toFloat()..ResupplyConfig.MAX_DETOUR_METERS.toFloat(),
-                steps = (ResupplyConfig.MAX_DETOUR_METERS - ResupplyConfig.MIN_DETOUR_METERS) /
-                    ResupplyConfig.DETOUR_STEP_METERS - 1,
+                valueRange = 0f..options.lastIndex.toFloat(),
+                steps = options.size - 2,
                 enabled = !building,
             )
 

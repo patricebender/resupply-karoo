@@ -1,18 +1,28 @@
-<!-- Adaptive-icon background: the roadbook dark tile gradient, full-bleed. -->
+<!--
+  Adaptive-icon background: the Resupply dark base (#0F1A18) full-bleed with the two faint
+  contour lines. Converted from resupply-adaptive-background.svg (viewBox 432); the contour
+  group is scaled 0.84375 as in the source.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
-        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
-            <gradient
-                android:type="linear"
-                android:startX="54" android:startY="0"
-                android:endX="54" android:endY="108">
-                <item android:offset="0" android:color="#20242B" />
-                <item android:offset="1" android:color="#121419" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    android:viewportWidth="432"
+    android:viewportHeight="432">
+    <path
+        android:pathData="M0,0 L432,0 L432,432 L0,432 Z"
+        android:fillColor="#0F1A18" />
+    <group
+        android:scaleX="0.84375"
+        android:scaleY="0.84375">
+        <path
+            android:pathData="M-40 452 C 90 400 150 470 300 402 S 470 330 560 360"
+            android:strokeColor="#2A3A36"
+            android:strokeWidth="8"
+            android:strokeAlpha="0.5" />
+        <path
+            android:pathData="M-40 512 C 90 460 150 530 300 462 S 470 390 560 420"
+            android:strokeColor="#2A3A36"
+            android:strokeWidth="8"
+            android:strokeAlpha="0.5" />
+    </group>
 </vector>

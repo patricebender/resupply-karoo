@@ -43,6 +43,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.resupply.karoo.R
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.OpeningHours
@@ -167,13 +168,24 @@ private fun Header(
             .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Logo mark only — no wordmark. The status line carries the context.
-        // Image (not Icon) so the mark keeps its own route/pin gradients instead
-        // of being flattened to a single tint.
+        // Wordmark: the full squircle icon (dark tile behind the R) + "RESUPPLY" as themed
+        // text. The squircle is used (not the transparent mark) so the cream R keeps its
+        // dark backing and stays readable on both the light and dark Karoo themes — the
+        // same reason the placeholder uses it. Image (not Icon) so it keeps its own
+        // route/dot colours instead of being flattened to a single tint. The text uses
+        // onSurface so it flips with the theme.
         Image(
-            painter = painterResource(R.drawable.ic_resupply_mark),
+            painter = painterResource(R.drawable.ic_resupply),
             contentDescription = null,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(28.dp),
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(
+            "RESUPPLY",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.5.sp,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.size(10.dp))
         Box(modifier = Modifier.weight(1f)) {
@@ -411,12 +423,14 @@ private fun EmptyState(buildState: BuildState, onBuild: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Same slot, same size — only the renderer changes when a build starts, so the
-        // static mark appears to spring to life rather than being replaced.
+        // static squircle appears to spring to life rather than being replaced. The full
+        // squircle (dark tile behind the R) is used here so the letterform stays readable;
+        // the animation draws the same tile.
         if (building) {
             ResupplyLoadingLogo(size = 72.dp)
         } else {
             Image(
-                painter = painterResource(R.drawable.ic_resupply_mark),
+                painter = painterResource(R.drawable.ic_resupply),
                 contentDescription = null,
                 modifier = Modifier.size(72.dp),
             )

@@ -11,47 +11,101 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.min
 
-// Resupply brand colours (match the mark drawable).
-private val RouteStart = Color(0xFFFF5E3A)
-private val RouteEnd = Color(0xFFFFA24A)
-private val PinTop = Color(0xFFFF7A45)
-private val PinBottom = Color(0xFFF0421B)
+// Resupply brand colours (match the ic_resupply squircle).
+private val Cream = Color(0xFFF2EDE3)
+private val Tile = Color(0xFF0F1A18)
+private val Contour = Color(0xFF2A3A36)
+private val RouteOrange = Color(0xFFE8873B)
+private val DotCyan = Color(0xFF5FC7E3)
+private val DotYellow = Color(0xFFF2C14E)
+private val DotPurple = Color(0xFFC79BE8)
 
-// The mark artwork lives in a 372x392 space (resupply-mark-compact, origin-shifted).
-// We describe the route + node positions here and scale to the canvas at draw time.
-private const val ART_W = 372f
-private const val ART_H = 392f
+// The animation lives in the same 512x512 space as ic_resupply: a dark squircle tile with
+// faint contour lines, the "R" letterform, the stepped route and three waypoint dots. We
+// describe the geometry here and scale it to the canvas at draw time. Drawing the full
+// squircle (tile behind the R) keeps the letterform readable — matching the static icon.
+private const val ART = 512f
 
-// Route control points in art space (same curve as ic_resupply_mark).
+// Squircle tile outline (rounded rect, corner radius 116), parsed once.
+private val tilePath: Path = PathParser()
+    .parsePathString(
+        "M116,0 L396,0 A116,116 0 0 1 512,116 L512,396 " +
+            "A116,116 0 0 1 396,512 L116,512 A116,116 0 0 1 0,396 " +
+            "L0,116 A116,116 0 0 1 116,0 Z",
+    )
+    .toPath()
+
+// Faint background contour curves (clipped to the tile).
+private val contour1: Path = PathParser()
+    .parsePathString("M-40 452 C 90 400 150 470 300 402 C 450 334 470 330 560 360")
+    .toPath()
+private val contour2: Path = PathParser()
+    .parsePathString("M-40 512 C 90 460 150 530 300 462 C 450 394 470 390 560 420")
+    .toPath()
+
+// Route: the stepped polyline (same points as ic_resupply), traced start→end.
 private val routePath = Path().apply {
-    moveTo(24f, 358f)
-    cubicTo(100f, 266f, 78f, 212f, 166f, 204f)
-    // "S 272 186 312 108" — smooth cubic; reflected control of the previous is (254,196).
-    cubicTo(254f, 196f, 272f, 186f, 312f, 108f)
+    moveTo(52f, 404f)
+    lineTo(152f, 404f)
+    lineTo(228f, 282f)
+    lineTo(332f, 282f)
+    lineTo(398f, 152f)
+    lineTo(462f, 152f)
 }
 
-// Fractional positions (0..1 along the route) of the two passed waypoints. The pin
-// sits at the end (1.0) and is drawn separately.
-private val NODE_FRACTIONS = floatArrayOf(0.34f, 0.70f)
+// "R" letterform, parsed from the same path data as the drawable and pre-transformed by
+// the source's translate(157,118) scale(1.054).
+private val letterR: Path = PathParser()
+    .parsePathString(
+        "M0 0 H58 V260 H0 Z M58 0 H120 A68 68 0 0 1 120 136 H58 Z " +
+            "M58 46 H120 A22 22 0 0 1 120 90 H58 Z M104 136 H164 L188 260 H128 Z",
+    )
+    .toPath()
+    .apply {
+        // The R's bowl is a counter (hole) — keep it open with even-odd winding, matching
+        // ic_resupply's android:fillType="evenOdd". PathParser().toPath() defaults to
+        // NonZero, which would fill the bowl solid.
+        fillType = PathFillType.EvenOdd
+        transform(
+            Matrix().apply {
+                translate(157f, 118f)
+                scale(1.054f, 1.054f)
+            },
+        )
+    }
+
+// Each dot sits on a route vertex; the fraction is its position along the polyline (0..1),
+// computed from the segment lengths. Cyan at (152,404), yellow at (332,282), purple at the
+// terminus (462,152).
+private data class Dot(val fraction: Float, val color: Color)
+private val DOTS = listOf(
+    Dot(0.179f, DotCyan),
+    Dot(0.624f, DotYellow),
+    Dot(1.0f, DotPurple),
+)
 
 /**
- * Animated roadbook loading mark: the route is traced by a bright travelling head that
- * loops from start to the destination pin; each passed waypoint lights up as the head
- * reaches it, and the pin gives a soft pulse at the top of every loop. Used as the
- * centrepiece of the build/"searching" state so the wait reads as the roadbook being
- * traced along the route.
+ * Animated Resupply loading squircle: the same icon as the static ic_resupply (dark tile,
+ * R letterform, route + dots) with the stepped route traced by a bright travelling head
+ * that loops from start to the final waypoint; each coloured dot pops as the head reaches
+ * it. Because it draws the full squircle (tile behind the R), the static icon and this
+ * animation read as one thing springing to life. Used as the centrepiece of the
+ * build/"searching" state so the wait reads as the route being traced.
  */
 @Composable
 fun ResupplyLoadingLogo(
@@ -59,8 +113,7 @@ fun ResupplyLoadingLogo(
     size: Dp = 96.dp,
 ) {
     val transition = rememberInfiniteTransition(label = "resupply-loading")
-    // One full trace of the route per cycle, with a brief hold at the end (via the
-    // easing tail) before it restarts.
+    // One full trace of the route per cycle, restarting cleanly at the end.
     val progress by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
@@ -77,98 +130,72 @@ fun ResupplyLoadingLogo(
 }
 
 private fun DrawScope.drawResupply(progress: Float) {
-    // Scale the art-space path into the canvas (uniform, centred).
-    val scale = min(this.size.width / ART_W, this.size.height / ART_H)
-    val dx = (this.size.width - ART_W * scale) / 2f
-    val dy = (this.size.height - ART_H * scale) / 2f
-
-    val path = Path().apply {
-        addPath(routePath)
-        transform(
-            androidx.compose.ui.graphics.Matrix().apply {
-                translate(dx, dy)
-                scale(scale, scale)
-            },
-        )
+    // Scale the 512-space geometry into the canvas (uniform, centred).
+    val scale = min(this.size.width, this.size.height) / ART
+    val dx = (this.size.width - ART * scale) / 2f
+    val dy = (this.size.height - ART * scale) / 2f
+    val toCanvas = Matrix().apply {
+        translate(dx, dy)
+        scale(scale, scale)
     }
 
+    fun scaled(src: Path) = Path().apply {
+        fillType = src.fillType
+        addPath(src)
+        transform(toCanvas)
+    }
+
+    // Squircle tile + faint contours (clipped to the tile), then the R on top.
+    val tile = scaled(tilePath)
+    drawPath(tile, color = Tile)
+    clipPath(tile) {
+        drawPath(scaled(contour1), color = Contour, alpha = 0.5f, style = Stroke(width = 8f * scale))
+        drawPath(scaled(contour2), color = Contour, alpha = 0.5f, style = Stroke(width = 8f * scale))
+    }
+    drawPath(scaled(letterR), color = Cream)
+
+    val path = scaled(routePath)
     val measure = PathMeasure().apply { setPath(path, false) }
     val length = measure.length
-    val stroke = 30f * scale
+    val casingWidth = 54f * scale
+    val routeWidth = 22f * scale
 
-    val routeBrush = Brush.linearGradient(
-        colors = listOf(RouteStart, RouteEnd),
-        start = Offset(dx + 45f * scale, dy + ART_H * scale),
-        end = Offset(dx + 316f * scale, dy),
-    )
-
-    // Base route always fully present (this is the resting logo); the traced portion
-    // just rides a touch brighter on top so a highlight appears to sweep along it.
-    drawPath(path, brush = routeBrush, alpha = 0.55f, style = Stroke(width = stroke, cap = StrokeCap.Round))
+    // Dark casing under the whole route (always full — this is the resting icon).
+    drawPath(path, color = Tile, style = Stroke(width = casingWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    // Base orange at low alpha; the traced portion rides brighter on top so a highlight
+    // sweeps along the route.
+    drawPath(path, color = RouteOrange, alpha = 0.5f, style = Stroke(width = routeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
 
     val headLen = length * progress
     if (headLen > 0f) {
         val traced = Path()
         measure.getSegment(0f, headLen, traced, true)
-        drawPath(traced, brush = routeBrush, style = Stroke(width = stroke, cap = StrokeCap.Round))
+        drawPath(traced, color = RouteOrange, style = Stroke(width = routeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 
-    // Passed waypoints: solid white nodes that "pop" as the head reaches them.
-    for (frac in NODE_FRACTIONS) {
-        val pos = measure.getPosition(length * frac)
-        val reached = progress >= frac
-        // Pop window: a short scale-up right as the head arrives, settling to 1.0.
-        val since = progress - frac
+    // Waypoint dots: pop (with a short halo) as the head reaches each one, in brand colour.
+    val dotOutline = 12f * scale
+    val baseR = 26f * scale
+    for (dot in DOTS) {
+        val pos = measure.getPosition(length * dot.fraction)
+        val since = progress - dot.fraction
+        // Pop window: a brief scale-up right as the head arrives, settling to 1.0.
         val pop = if (since in 0f..0.12f) 1f + (0.12f - since) / 0.12f * 0.6f else 1f
-        val baseR = 16f * scale
-        // Nodes stay visible at rest (matching the static mark); reaching one just
-        // brightens it fully and pops it.
-        val alpha = if (reached) 1f else 0.8f
-        // Soft halo on the freshly-reached node.
+        // Dots stay visible at rest (matching the static icon); reaching one brightens it.
+        val alpha = if (progress >= dot.fraction) 1f else 0.85f
+        // Soft halo on the freshly-reached dot.
         if (since in 0f..0.18f) {
-            drawCircle(Color.White, radius = baseR * (1.8f + since * 2f), center = pos, alpha = 0.12f)
+            drawCircle(dot.color, radius = baseR * (1.8f + since * 2f), center = pos, alpha = 0.12f)
         }
-        drawCircle(Color.White, radius = baseR * pop, center = pos, alpha = alpha)
+        val r = baseR * pop
+        drawCircle(dot.color, radius = r, center = pos, alpha = alpha)
+        drawCircle(Tile, radius = r, center = pos, alpha = alpha, style = Stroke(width = dotOutline))
     }
 
     // Travelling head: a bright dot riding the tip of the traced route.
     if (progress > 0f && progress < 1f) {
         val head = measure.getPosition(headLen)
-        drawCircle(Color.White, radius = stroke * 0.42f, center = head, alpha = 0.9f)
-        drawCircle(RouteEnd, radius = stroke * 0.42f, center = head, alpha = 0.35f)
+        drawCircle(Color.White, radius = routeWidth * 0.6f, center = head, alpha = 0.9f)
+        drawCircle(RouteOrange, radius = routeWidth * 0.6f, center = head, alpha = 0.35f)
     }
-
-    // Destination pin at the route end. Pulses as the head arrives / on loop restart.
-    val pinPos = measure.getPosition(length)
-    val arrival = progress // near 1.0 → arriving
-    val pinPop = when {
-        arrival >= 0.9f -> 1f + (arrival - 0.9f) / 0.1f * 0.18f
-        else -> 1f
-    }
-    val pinReached = progress >= 0.94f
-    // The pin is the brand anchor — always solid; arrival only adds the halo + pop.
-    val pinR = 42f * scale * pinPop
-    val pinBrush = Brush.verticalGradient(
-        colors = listOf(PinTop, PinBottom),
-        startY = pinPos.y - pinR,
-        endY = pinPos.y + pinR,
-    )
-    val pinAlpha = 1f
-    // Arrival halo.
-    if (pinReached) {
-        drawCircle(PinTop, radius = pinR * 1.7f, center = pinPos, alpha = 0.14f)
-    }
-    // Pin head (circle) + tail (triangle), scaled from art space around pinPos.
-    drawCircle(brush = pinBrush, radius = pinR, center = pinPos, alpha = pinAlpha)
-    val tail = Path().apply {
-        val t = 26f * scale * pinPop // half-width of the tail base
-        val h = 46f * scale * pinPop // tail drop below the circle centre
-        moveTo(pinPos.x - t, pinPos.y + pinR * 0.62f)
-        lineTo(pinPos.x, pinPos.y + h)
-        lineTo(pinPos.x + t, pinPos.y + pinR * 0.62f)
-        close()
-    }
-    drawPath(tail, brush = pinBrush, alpha = pinAlpha)
-    // White eye.
-    drawCircle(Color.White, radius = 17f * scale * pinPop, center = pinPos, alpha = pinAlpha)
 }

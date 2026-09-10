@@ -1,4 +1,12 @@
+<div align="center">
+
+<img src="extension/app/brand/png/resupply-icon.png" alt="Resupply" width="128" height="128">
+
 # Resupply for Karoo
+
+**Offline POIs along your route — coffee, food, water, bike shops, fuel — no signal needed.**
+
+</div>
 
 A [Hammerhead Karoo](https://www.hammerhead.io/) extension that turns a loaded route into an
 offline guide of POIs along the way — coffee, food, water, bike shops, fuel — so you can plan

@@ -36,6 +36,7 @@ class PoiQuery(private val database: PoiDatabase) {
         val row: Row,
         val distanceToRoute: Double,
         val distanceAlong: Double,
+        val side: Int,
     )
 
     /**
@@ -70,10 +71,10 @@ class PoiQuery(private val database: PoiDatabase) {
         val cumulative = cumulativeDistances(route)
         val bySegment = HashMap<Int, MutableList<Candidate>>()
         for (r in candidates) {
-            val (d, along) = distanceToRoute(route, cumulative, LatLng(r.lat, r.lng))
-            if (d > maxRadius) continue
-            val seg = (along / SEGMENT_METERS).toInt()
-            bySegment.getOrPut(seg) { ArrayList() }.add(Candidate(r, d, along))
+            val proj = distanceToRoute(route, cumulative, LatLng(r.lat, r.lng))
+            if (proj.distance > maxRadius) continue
+            val seg = (proj.along / SEGMENT_METERS).toInt()
+            bySegment.getOrPut(seg) { ArrayList() }.add(Candidate(r, proj.distance, proj.along, proj.side))
         }
 
         val out = ArrayList<Poi>()
@@ -97,6 +98,7 @@ class PoiQuery(private val database: PoiDatabase) {
                     c.row.toPoi(
                         distancesAlongRoute = listOf(c.distanceAlong.roundToInt().toDouble()),
                         detourMeters = c.distanceToRoute.roundToInt(),
+                        detourSide = c.side,
                     ),
                 )
             }
@@ -128,7 +130,7 @@ class PoiQuery(private val database: PoiDatabase) {
         // would be wasted work for the majority — defer it to the rows we actually return.
         val tagsJson: String?,
     ) {
-        fun toPoi(distancesAlongRoute: List<Double>, detourMeters: Int) = Poi(
+        fun toPoi(distancesAlongRoute: List<Double>, detourMeters: Int, detourSide: Int = 0) = Poi(
             id = "osm:$osmId",
             lat = lat,
             lng = lng,
@@ -136,6 +138,7 @@ class PoiQuery(private val database: PoiDatabase) {
             name = name,
             distancesAlongRoute = distancesAlongRoute,
             detourMeters = detourMeters,
+            detourSide = detourSide,
             tags = tagsJson?.let(::parseTags) ?: emptyMap(),
         )
     }

@@ -37,15 +37,25 @@ fun cumulativeDistances(route: List<LatLng>): DoubleArray {
 }
 
 /**
- * Distance (meters) from point [p] to the route polyline, against the nearest
- * *segment*, plus the cumulative route distance at the closest point. Uses a
- * local equirectangular projection around [p]. Mirrors backend distanceToRoute.
+ * A point projected onto the route: the cross-track [distance] (meters) to the nearest
+ * segment, the cumulative route distance [along] at the closest point, and which [side]
+ * of the route the point lies on relative to travel direction — `+1` left, `-1` right,
+ * `0` exactly on the line. [side] is the sign of the 2D cross product of the winning
+ * segment's direction and the point-relative vector; the UI decides how that maps to
+ * screen up/down.
+ */
+data class RouteProjection(val distance: Double, val along: Double, val side: Int)
+
+/**
+ * Project point [p] onto the route polyline against the nearest *segment*, using a
+ * local equirectangular projection around [p]. Mirrors backend distanceToRoute (which
+ * only needs distance+along); [RouteProjection.side] is the on-device addition.
  */
 fun distanceToRoute(
     route: List<LatLng>,
     cumulative: DoubleArray,
     p: LatLng,
-): Pair<Double, Double> {
+): RouteProjection {
     val mPerDegLat = METERS_PER_DEG_LAT
     val mPerDegLng = METERS_PER_DEG_LAT * cos(Math.toRadians(p.lat))
     val px = p.lng * mPerDegLng
@@ -53,6 +63,7 @@ fun distanceToRoute(
 
     var best = Double.POSITIVE_INFINITY
     var bestAlong = 0.0
+    var bestSide = 0
     for (i in 1 until route.size) {
         val a = route[i - 1]
         val b = route[i]
@@ -67,9 +78,12 @@ fun distanceToRoute(
         if (d < best) {
             best = d
             bestAlong = cumulative[i - 1] + hypot(cx - ax, cy - ay)
+            // Cross product (segment dir) × (a→p): +ve is left of travel direction.
+            val cross = dx * (py - ay) - dy * (px - ax)
+            bestSide = if (cross > 0) 1 else if (cross < 0) -1 else 0
         }
     }
-    return Pair(best, bestAlong)
+    return RouteProjection(best, bestAlong, bestSide)
 }
 
 /**

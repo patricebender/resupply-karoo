@@ -17,5 +17,7 @@ data class Poi(
     val distancesAlongRoute: List<Double> = emptyList(),
     /** Cross-track distance from the route line, in meters. 0 for /nearby results. */
     val detourMeters: Int = 0,
+    /** Which side of the route the POI is on: +1 left, -1 right, 0 unknown/on-line (and /nearby). */
+    val detourSide: Int = 0,
     val tags: Map<String, String> = emptyMap(),
 )

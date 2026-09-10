@@ -1,63 +1,62 @@
 <!--
-  Adaptive-icon foreground: route + destination pin from the roadbook mark,
-  scaled and centered into the adaptive-icon safe zone (inner ~66%). Authored
-  in 512-space to match the tile artwork, wrapped in a group that scales 0.62
-  about the canvas center so nothing is clipped by the icon mask.
+  Adaptive-icon foreground: the Resupply mark (R letterform + stepped route + three
+  coloured waypoint dots), placed in the adaptive-icon safe zone. Converted from
+  resupply-adaptive-foreground.svg (viewBox 432): the artwork group carries the source's
+  translate(100.8 100.8) scale(0.45), which keeps it inside the mask. The R's own
+  translate(157 118) scale(1.054) is nested as a second group.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="512"
-    android:viewportHeight="512">
+    android:viewportWidth="432"
+    android:viewportHeight="432">
     <group
-        android:scaleX="0.62"
-        android:scaleY="0.62"
-        android:pivotX="256"
-        android:pivotY="256">
+        android:translateX="100.8"
+        android:translateY="100.8"
+        android:scaleX="0.45"
+        android:scaleY="0.45">
 
-        <!-- route -->
-        <path
-            android:pathData="M 100 400 C 168 316 150 264 236 252 S 342 232 380 150"
-            android:strokeWidth="14"
-            android:strokeLineCap="round">
-            <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:strokeColor">
-                <gradient
-                    android:type="linear"
-                    android:startX="121" android:startY="480"
-                    android:endX="386" android:endY="74">
-                    <item android:offset="0" android:color="#FF5E3A" />
-                    <item android:offset="1" android:color="#FFA24A" />
-                </gradient>
-            </aapt:attr>
-        </path>
+        <!-- "R" letterform -->
+        <group
+            android:translateX="157"
+            android:translateY="118"
+            android:scaleX="1.054"
+            android:scaleY="1.054">
+            <path
+                android:pathData="M0 0 H58 V260 H0 Z M58 0 H120 A68 68 0 0 1 120 136 H58 Z M58 46 H120 A22 22 0 0 1 120 90 H58 Z M104 136 H164 L188 260 H128 Z"
+                android:fillColor="#F2EDE3"
+                android:fillType="evenOdd" />
+        </group>
 
-        <!-- passed waypoints -->
+        <!-- route: dark casing then orange -->
         <path
-            android:pathData="M 132 354 m -11 0 a 11 11 0 1 0 22 0 a 11 11 0 1 0 -22 0"
-            android:fillColor="#161A21"
-            android:strokeColor="#E9EDF3"
-            android:strokeWidth="5" />
+            android:pathData="M52 404 L152 404 L228 282 L332 282 L398 152 L462 152"
+            android:strokeColor="#0F1A18"
+            android:strokeWidth="54"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
         <path
-            android:pathData="M 236 252 m -11 0 a 11 11 0 1 0 22 0 a 11 11 0 1 0 -22 0"
-            android:fillColor="#161A21"
-            android:strokeColor="#E9EDF3"
-            android:strokeWidth="5" />
+            android:pathData="M52 404 L152 404 L228 282 L332 282 L398 152 L462 152"
+            android:strokeColor="#E8873B"
+            android:strokeWidth="22"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
 
-        <!-- highlighted waypoint -->
-        <path android:pathData="M 380 102 m -34 0 a 34 34 0 1 0 68 0 a 34 34 0 1 0 -68 0">
-            <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
-                <gradient
-                    android:type="linear"
-                    android:startX="380" android:startY="68"
-                    android:endX="380" android:endY="136">
-                    <item android:offset="0" android:color="#FF7A45" />
-                    <item android:offset="1" android:color="#F0421B" />
-                </gradient>
-            </aapt:attr>
-        </path>
-        <path android:pathData="M 356 124 L 380 150 L 404 124 Z" android:fillColor="#F0421B" />
+        <!-- waypoint dots -->
         <path
-            android:pathData="M 380 102 m -12.5 0 a 12.5 12.5 0 1 0 25 0 a 12.5 12.5 0 1 0 -25 0"
-            android:fillColor="#FFFFFF" />
+            android:pathData="M 152 404 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0"
+            android:fillColor="#5FC7E3"
+            android:strokeColor="#0F1A18"
+            android:strokeWidth="12" />
+        <path
+            android:pathData="M 332 282 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0"
+            android:fillColor="#F2C14E"
+            android:strokeColor="#0F1A18"
+            android:strokeWidth="12" />
+        <path
+            android:pathData="M 462 152 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0"
+            android:fillColor="#C79BE8"
+            android:strokeColor="#0F1A18"
+            android:strokeWidth="12" />
     </group>
 </vector>

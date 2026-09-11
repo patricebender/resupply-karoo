@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +59,7 @@ import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.aheadMetersFor
 import io.resupply.karoo.data.behindMetersFor
+import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.formatKm
 
 /**
@@ -73,6 +75,9 @@ fun WaybookScreen(
     // stream. Drives the timeline marker, per-row distance-ahead, and the initial
     // scroll to the first POI ahead.
     progressMeters: Double?,
+    // Whether a route is loaded on the Karoo (and its name/distance). Drives the empty
+    // state: route hero + "Find places" when loaded, a "load a route" explainer when not.
+    routeState: RouteState,
     buildState: BuildState,
     onBuild: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -100,16 +105,20 @@ fun WaybookScreen(
             // the big body logo is the sole icon; when the list takes over, the squircle
             // glides into the header from the left. So there's never two icons at once.
             showIcon = pois.isNotEmpty(),
+            // No build affordance until there's something to build along: hide the header
+            // refresh action while empty and no route is loaded. Once pois exist, or a route
+            // is loaded, the action is meaningful again.
+            showBuild = pois.isNotEmpty() || routeState is RouteState.Loaded,
             onBuild = onBuild,
             onOpenSettings = onOpenSettings,
         )
         HorizontalDivider()
 
         if (pois.isEmpty()) {
-            // One stable layout for the no-places body: the mark sits in the same spot
-            // whether idle or building — starting a build just animates it in place and
-            // swaps the copy, so nothing jumps.
-            EmptyState(buildState, onBuild)
+            // No places yet: either a route is loaded (show its hero + "Find places") or
+            // nothing is (a calm "load a route" explainer, no build affordance). Both keep
+            // the mark in the same slot so a build animates in place without a jump.
+            EmptyState(routeState, buildState, onBuild)
             return@Column
         }
 
@@ -171,6 +180,7 @@ private fun Header(
     buildState: BuildState,
     showStatusLine: Boolean,
     showIcon: Boolean,
+    showBuild: Boolean,
     onBuild: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -231,17 +241,20 @@ private fun Header(
         }
         // Build/rebuild: primary tint when there's work, muted after a build. While
         // building the icon just goes disabled — the single spinner lives in the
-        // status line, so we never show two spinners at once.
-        IconButton(onClick = onBuild, enabled = !building) {
-            Icon(
-                Icons.Filled.Refresh,
-                contentDescription = "Build",
-                tint = when {
-                    building -> MaterialTheme.colorScheme.onSurfaceVariant
-                    buildState is BuildState.Success -> MaterialTheme.colorScheme.onSurfaceVariant
-                    else -> MaterialTheme.colorScheme.primary
-                },
-            )
+        // status line, so we never show two spinners at once. Hidden entirely when there's
+        // nothing to build (empty + no route loaded), so we never offer an impossible build.
+        if (showBuild) {
+            IconButton(onClick = onBuild, enabled = !building) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = "Build",
+                    tint = when {
+                        building -> MaterialTheme.colorScheme.onSurfaceVariant
+                        buildState is BuildState.Success -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.primary
+                    },
+                )
+            }
         }
         IconButton(onClick = onOpenSettings) {
             Icon(Icons.Filled.Settings, contentDescription = "Settings")
@@ -444,14 +457,36 @@ private fun TypeAndOpensLine(hours: OpeningHours.Hours?, typeLabel: String) {
 }
 
 /**
- * The no-places body, shared by the idle and building states so the layout never jumps:
- * the mark holds the same slot throughout. Idle shows the static mark with a hint to load
- * a route; while building, the same mark animates in place (route traced, waypoints
- * lighting up) and the copy switches to the live build phase. The filter shortcut only
- * shows at rest, so the searching state stays focused on the animation.
+ * The no-places body. Two faces, chosen by whether a route is loaded — but both keep the
+ * mark in the exact same slot/size so switching between them (and the build animation)
+ * never jumps:
+ *  - a route is loaded → [RouteReadyState]: the route's name + distance and a single
+ *    "Find places" action (which animates the mark in place while building).
+ *  - nothing loaded → [NoRouteState]: a calm explainer, no build affordance — you can't
+ *    build a roadbook without a route, so we don't pretend you can.
+ * While a build is running we always show the route-ready face (the mark is mid-animation),
+ * regardless of the latest route signal, so the animation isn't yanked away.
  */
 @Composable
-private fun EmptyState(buildState: BuildState, onBuild: () -> Unit) {
+private fun EmptyState(routeState: RouteState, buildState: BuildState, onBuild: () -> Unit) {
+    val building = buildState is BuildState.Building
+    val loaded = routeState as? RouteState.Loaded
+    if (loaded != null || building) {
+        RouteReadyState(loaded, buildState, onBuild)
+    } else {
+        NoRouteState()
+    }
+}
+
+/**
+ * Route loaded, nothing built yet: the route's name as the hero, its distance below, and a
+ * single primary "Find places" action. While building, the same mark animates in place
+ * (route traced, waypoints lighting up) and the copy switches to the live build phase — the
+ * button stays in the layout (hidden + inert) so nothing shifts. [route] may be null only
+ * transiently while a build runs before the signal has settled.
+ */
+@Composable
+private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, onBuild: () -> Unit) {
     val building = buildState is BuildState.Building
     Column(
         modifier = Modifier
@@ -461,9 +496,7 @@ private fun EmptyState(buildState: BuildState, onBuild: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Same slot, same size — only the renderer changes when a build starts, so the
-        // static squircle appears to spring to life rather than being replaced. The full
-        // squircle (dark tile behind the R) is used here so the letterform stays readable;
-        // the animation draws the same tile.
+        // static squircle appears to spring to life rather than being replaced.
         if (building) {
             ResupplyLoadingLogo(size = 72.dp)
         } else {
@@ -475,23 +508,30 @@ private fun EmptyState(buildState: BuildState, onBuild: () -> Unit) {
         }
         Spacer(Modifier.height(16.dp))
         Text(
-            if (building) (buildState as BuildState.Building).phase else "No places yet",
+            if (building) {
+                (buildState as BuildState.Building).phase
+            } else {
+                route?.name?.takeIf { it.isNotBlank() } ?: "Your route"
+            },
             style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(8.dp))
         Text(
             if (building) {
                 "Tracing your route for cafés, water, shops and more…"
             } else {
-                "Load a route on the Karoo, then build to find places along it."
+                routeSubtitle(route)
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(16.dp))
-        // The primary action when empty is to build. Kept in the layout while building
-        // (just hidden + non-clickable) so the block's height stays constant and the
-        // content above doesn't jump when it disappears.
+        // The primary action: find places along the loaded route. Kept in the layout while
+        // building (hidden + non-clickable) so the block's height stays constant.
         Button(
             onClick = onBuild,
             enabled = !building,
@@ -499,7 +539,53 @@ private fun EmptyState(buildState: BuildState, onBuild: () -> Unit) {
         ) {
             Icon(Icons.Filled.Refresh, contentDescription = null)
             Spacer(Modifier.size(8.dp))
-            Text("Build now")
+            Text("Find places")
         }
+    }
+}
+
+/** The route's distance line, with a "· reversed" note when riding it backwards. */
+private fun routeSubtitle(route: RouteState.Loaded?): String {
+    val km = route?.distanceMeters?.takeIf { it > 0.0 }?.let { formatKm(it) }
+    return when {
+        km != null && route.reversed -> "$km · reversed"
+        km != null -> km
+        else -> "Ready to search"
+    }
+}
+
+/**
+ * No route loaded: a calm explainer with the static mark and no build button. Building a
+ * roadbook needs a route to trace, so we guide the rider to load one rather than offering an
+ * action that can't do what they'd expect. Same mark slot/size as [RouteReadyState] so the
+ * two states cross-fade in place if the route signal flips.
+ */
+@Composable
+private fun NoRouteState() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_resupply),
+            contentDescription = null,
+            modifier = Modifier.size(72.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Ready when you are",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Load a route on your Karoo and Resupply will find places along it.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }

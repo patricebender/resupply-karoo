@@ -6,6 +6,7 @@ import io.hammerhead.karooext.models.HttpResponseState
 import io.hammerhead.karooext.models.KarooEvent
 import io.hammerhead.karooext.models.OnHttpResponse
 import io.hammerhead.karooext.models.OnHttpResponse.MakeHttpRequest
+import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.OnStreamState
 import io.hammerhead.karooext.models.StreamState
 import kotlinx.coroutines.channels.awaitClose
@@ -91,6 +92,17 @@ fun KarooSystemService.streamDataFlow(dataTypeId: String): Flow<StreamState> = c
     val listenerId = addConsumer(OnStreamState.StartStreaming(dataTypeId)) { event: OnStreamState ->
         trySendBlocking(event.state)
     }
+    awaitClose { removeConsumer(listenerId) }
+}
+
+/**
+ * Cold flow of the Karoo navigation state, subscribing on collect and unsubscribing on
+ * cancel. Lets the app and the data field track "is a route loaded" live (and its name /
+ * distance), so a build is only ever offered when there's a route to build along. Same
+ * consumer pattern as [streamDataFlow].
+ */
+fun KarooSystemService.navStateFlow(): Flow<OnNavigationState.NavigationState> = callbackFlow {
+    val listenerId = addConsumer<OnNavigationState> { event -> trySendBlocking(event.state) }
     awaitClose { removeConsumer(listenerId) }
 }
 

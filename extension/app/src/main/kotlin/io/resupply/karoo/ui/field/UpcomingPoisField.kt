@@ -343,6 +343,38 @@ fun BuildPromptField(activity: ComponentName, interactive: Boolean) {
     }
 }
 
+/**
+ * "No route" prompt: nothing is loaded to build a roadbook along, so — unlike
+ * [BuildPromptField] — this does NOT offer to build. Tapping just opens the app (where the
+ * rider sees the same "load a route" explainer). Keeps a rider from triggering a surprise
+ * nearby search by tapping the field before a route is on the Karoo.
+ */
+@androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+@androidx.compose.runtime.Composable
+fun LoadRoutePromptField(activity: ComponentName, interactive: Boolean) {
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .tapToOpen(interactive, openAppIntent(activity)),
+        verticalAlignment = Alignment.Vertical.CenterVertically,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text("🧭", style = TextStyle(fontSize = 22.sp))
+        Spacer(GlanceModifier.height(2.dp))
+        Text(
+            "Load a route",
+            style = TextStyle(color = Primary, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+        )
+        Text(
+            "to find places",
+            style = TextStyle(color = Dim, fontSize = 11.sp),
+            maxLines = 1,
+        )
+    }
+}
+
 private val Amber = ColorProvider(Color(0xFFFFB300))
 
 /**

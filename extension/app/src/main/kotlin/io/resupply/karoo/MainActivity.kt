@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.StreamState
 import io.resupply.karoo.build.BuildController
 import io.resupply.karoo.build.BuildState
@@ -34,7 +35,9 @@ import io.resupply.karoo.data.RegionCatalogClient
 import io.resupply.karoo.data.RegionManifestEntry
 import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.ResupplyRepository
+import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.WikipediaClient
+import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.ui.SettingsScreen
 import io.resupply.karoo.ui.PoiDetailScreen
 import io.resupply.karoo.ui.RegionDownloadState
@@ -43,6 +46,8 @@ import io.resupply.karoo.ui.WaybookScreen
 import io.resupply.karoo.ui.field.ACTION_BUILD
 import io.resupply.karoo.ui.field.EXTRA_ACTION
 import io.resupply.karoo.ui.hoursFor
+import io.resupply.karoo.util.awaitOnce
+import io.resupply.karoo.util.navStateFlow
 import io.resupply.karoo.util.streamDataFlow
 import io.resupply.karoo.util.withKarooConnection
 import androidx.compose.runtime.LaunchedEffect
@@ -74,6 +79,10 @@ class MainActivity : ComponentActivity() {
     // "no live position" and the screen renders as it did before.
     private val progressSystem by lazy { KarooSystemService(applicationContext) }
     private val toDestMeters = MutableStateFlow<Double?>(null)
+    // Whether a route is loaded (and its name/distance), followed live off the same
+    // connection. Drives the landing screen's route hero vs "load a route" explainer and
+    // gates the build action — a roadbook only makes sense along a route.
+    private val routeState = MutableStateFlow<RouteState>(RouteState.Unknown)
     private val regionCatalog: List<Region> by lazy { RegionCatalog.load(applicationContext) }
 
     // Region download state, hoisted so it survives navigation between screens.
@@ -107,18 +116,22 @@ class MainActivity : ComponentActivity() {
                         ?.dataPoint?.values?.get(DataType.Field.DISTANCE_TO_DESTINATION)
                 }
             }
+            lifecycleScope.launch {
+                progressSystem.navStateFlow().collect { routeState.value = it.toRouteState() }
+            }
         }
 
-        // Launched from the "Tap to build" data field: kick off a build immediately and
-        // land on the Settings screen so the rider sees status (and can tweak categories).
-        val buildOnLaunch =
-            intent?.getStringExtra(EXTRA_ACTION) == ACTION_BUILD
-        if (buildOnLaunch) runBuild()
+        // Launched from the "Tap to build" data field: kick off a build immediately, but
+        // only when a route is actually loaded. Otherwise we just land on the Waybook screen,
+        // which shows the route hero + build progress when a route is loaded and the "load a
+        // route" explainer when not — never a surprise nearby-search build. Always land on
+        // Waybook (not Settings): it now carries the build feedback itself.
+        if (intent?.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) buildIfRouteLoaded()
 
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    ResupplyApp(initialScreen = if (buildOnLaunch) Screen.Settings else Screen.Waybook)
+                    ResupplyApp(initialScreen = Screen.Waybook)
                 }
             }
         }
@@ -130,7 +143,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) runBuild()
+        if (intent.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) buildIfRouteLoaded()
         entryTick.intValue++
     }
 
@@ -146,6 +159,7 @@ class MainActivity : ComponentActivity() {
         val pois by repository.pois.collectAsStateWithLifecycle()
         val routeLength by repository.routeLengthMeters.collectAsStateWithLifecycle()
         val toDest by toDestMeters.collectAsStateWithLifecycle()
+        val route by routeState.collectAsStateWithLifecycle()
         // Live position along the route, mirroring the field's math
         // (UpcomingPoisDataType): route length − distance-to-destination. Null when we
         // have no route or no live stream — the overview then drops the position cues.
@@ -177,6 +191,7 @@ class MainActivity : ComponentActivity() {
                 pois = pois,
                 routeLengthMeters = routeLength,
                 progressMeters = progressMeters,
+                routeState = route,
                 buildState = buildState,
                 onBuild = ::runBuild,
                 onOpenSettings = { screen = Screen.Settings },
@@ -259,6 +274,26 @@ class MainActivity : ComponentActivity() {
                         onBack = { screen = Screen.Waybook },
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Build only if a route is loaded. Used by the data-field entry point ([ACTION_BUILD]):
+     * a field tap must never kick off a surprise nearby search. Prefers the already-observed
+     * [routeState]; if it hasn't settled yet (the connection may still be coming up at intent
+     * time), reads the nav state once. When no route is loaded we do nothing — the Waybook
+     * screen shows the "load a route" explainer.
+     */
+    private fun buildIfRouteLoaded() {
+        when (routeState.value) {
+            is RouteState.Loaded -> runBuild()
+            RouteState.None -> Unit
+            RouteState.Unknown -> lifecycleScope.launch {
+                val loaded = withKarooConnection(applicationContext) { system ->
+                    system.awaitOnce<OnNavigationState>()?.state?.toRouteState()
+                } is RouteState.Loaded
+                if (loaded) runBuild()
             }
         }
     }

@@ -16,22 +16,27 @@ import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.ConfigStore
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.ResupplyRepository
+import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.UpcomingPoi
 import io.resupply.karoo.data.formatDetour
 import io.resupply.karoo.data.formatKm
 import io.resupply.karoo.data.elideName
+import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.data.upcomingByCategory
 import io.resupply.karoo.ui.field.BuildPromptField
 import io.resupply.karoo.ui.field.CategoryRow
 import io.resupply.karoo.ui.field.FieldMessage
+import io.resupply.karoo.ui.field.LoadRoutePromptField
 import io.resupply.karoo.ui.field.OffRouteMessage
 import io.resupply.karoo.ui.field.PoiCell
+import io.resupply.karoo.util.navStateFlow
 import io.resupply.karoo.util.streamDataFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -86,6 +91,14 @@ abstract class UpcomingPoisBaseDataType(
         val progressFlow = karooSystem.streamDataFlow(DataType.Type.DISTANCE_TO_DESTINATION)
             .map { it as? StreamState.Streaming }
 
+        // Live route state, so the empty field shows "Tap to build" only when a route is
+        // actually loaded and "Load a route" otherwise. Combined with progress into one
+        // "live" pair to keep the top-level combine at its 5-arg typed overload. Seeded with
+        // Unknown so the field renders before the first nav event arrives.
+        val routeFlow = karooSystem.navStateFlow().map { it.toRouteState() }
+            .onStart { emit(RouteState.Unknown) }
+        val liveFlow = combine(progressFlow, routeFlow) { stream, route -> stream to route }
+
         // MainActivity, launched when the rider taps the field (open app / "Tap to build").
         val mainActivity = ComponentName(context.packageName, MAIN_ACTIVITY_CLASS)
 
@@ -94,10 +107,10 @@ abstract class UpcomingPoisBaseDataType(
                 repository.pois,
                 repository.routeLengthMeters,
                 configStore.config.map { it.enabledCategories },
-                progressFlow,
+                liveFlow,
                 rotation,
-            ) { pois, routeLen, enabled, stream, tick ->
-                Frame(pois, routeLen, enabled, stream, tick)
+            ) { pois, routeLen, enabled, live, tick ->
+                Frame(pois, routeLen, enabled, live.first, live.second, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
                     render(f, config, mainActivity, interactive)
@@ -118,6 +131,7 @@ abstract class UpcomingPoisBaseDataType(
         val routeLenMeters: Double,
         val enabled: Set<Category>,
         val stream: StreamState.Streaming?,
+        val routeState: RouteState,
         val rotationTick: Long,
     )
 
@@ -159,9 +173,17 @@ abstract class UpcomingPoisBaseDataType(
     @androidx.compose.runtime.Composable
     private fun render(f: Frame, config: ViewConfig, mainActivity: ComponentName, interactive: Boolean) {
         if (f.enabled.isEmpty()) return renderNoCategories(mainActivity, interactive)
-        // "Tap to build" is ONLY for the genuine no-roadbook case. Once POIs exist we
-        // always show them — even without a live route stream (we just measure from km 0).
-        if (f.pois.isEmpty()) return BuildPromptField(mainActivity, interactive)
+        // No roadbook yet: offer "Tap to build" only when a route is actually loaded to build
+        // along; otherwise a "load a route" prompt that just opens the app (never a surprise
+        // nearby search from a stray field tap). Once POIs exist we always show them — even
+        // without a live route stream (we just measure from km 0).
+        if (f.pois.isEmpty()) {
+            return if (f.routeState is RouteState.Loaded) {
+                BuildPromptField(mainActivity, interactive)
+            } else {
+                LoadRoutePromptField(mainActivity, interactive)
+            }
+        }
 
         // Live route progress, when available: route length − distance-to-destination.
         // Missing stream / no route length ⇒ progress 0 (show POIs from the start) rather

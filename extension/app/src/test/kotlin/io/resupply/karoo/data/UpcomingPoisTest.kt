@@ -1,5 +1,7 @@
 package io.resupply.karoo.data
 
+import io.resupply.karoo.util.LatLng
+import io.resupply.karoo.util.haversine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -23,6 +25,10 @@ class UpcomingPoisTest {
         detourMeters = detour,
     )
 
+    // The route-distance metric the fields/overview pass for a route build.
+    private fun aheadOf(progressMeters: Double, toleranceMeters: Double = DEFAULT_TOLERANCE_METERS):
+        (Poi) -> Double? = { aheadMetersFor(it, progressMeters, toleranceMeters) }
+
     @Test
     fun `orders by ahead-on-route and drops passed POIs`() {
         val pois = listOf(
@@ -30,7 +36,7 @@ class UpcomingPoisTest {
             poi("b", "REST_STOP", along = 6_000.0),
             poi("c", "REST_STOP", along = 3_000.0),
         )
-        val out = upcomingByCategory(pois, setOf(Category.WATER), progressMeters = 2_000.0)
+        val out = upcomingByCategory(pois, setOf(Category.WATER), distanceOf = aheadOf(2_000.0))
         val water = out.getValue(Category.WATER)
         // "a" at 1km is behind 2km progress → dropped; remaining ordered nearest-first.
         assertEquals(listOf(1_000.0, 4_000.0), water.map { it.aheadMeters })
@@ -39,7 +45,7 @@ class UpcomingPoisTest {
     @Test
     fun `takes at most perCat per category`() {
         val pois = (0..9).map { poi("w$it", "REST_STOP", along = (it + 1) * 1_000.0) }
-        val out = upcomingByCategory(pois, setOf(Category.WATER), progressMeters = 0.0, perCat = 3)
+        val out = upcomingByCategory(pois, setOf(Category.WATER), perCat = 3, distanceOf = aheadOf(0.0))
         assertEquals(3, out.getValue(Category.WATER).size)
     }
 
@@ -50,7 +56,7 @@ class UpcomingPoisTest {
             poi("f", "GAS_STATION", along = 2_000.0),
         )
         val out = upcomingByCategory(
-            pois, setOf(Category.WATER, Category.FUEL), progressMeters = 0.0,
+            pois, setOf(Category.WATER, Category.FUEL), distanceOf = aheadOf(0.0),
         )
         assertEquals(5_000.0, out.getValue(Category.WATER).single().aheadMeters, 0.0)
         assertEquals(2_000.0, out.getValue(Category.FUEL).single().aheadMeters, 0.0)
@@ -60,7 +66,7 @@ class UpcomingPoisTest {
     fun `tolerance keeps a POI right at the rider`() {
         val pois = listOf(poi("w", "REST_STOP", along = 1_970.0))
         val out = upcomingByCategory(
-            pois, setOf(Category.WATER), progressMeters = 2_000.0, toleranceMeters = 50.0,
+            pois, setOf(Category.WATER), distanceOf = aheadOf(2_000.0, toleranceMeters = 50.0),
         )
         // 30m behind but within 50m tolerance → still shown.
         assertEquals(1, out.getValue(Category.WATER).size)
@@ -70,7 +76,39 @@ class UpcomingPoisTest {
     @Test
     fun `empty enabled set yields empty map`() {
         val pois = listOf(poi("w", "REST_STOP", along = 1_000.0))
-        assertTrue(upcomingByCategory(pois, emptySet(), progressMeters = 0.0).isEmpty())
+        assertTrue(upcomingByCategory(pois, emptySet(), distanceOf = aheadOf(0.0)).isEmpty())
+    }
+
+    @Test
+    fun `nearby metric orders by straight-line distance from the rider`() {
+        // Same category, different locations; rider at origin. Distance grows with longitude.
+        val near = Poi(id = "near", lat = 0.0, lng = 0.001, type = "REST_STOP", name = "near")
+        val far = Poi(id = "far", lat = 0.0, lng = 0.01, type = "REST_STOP", name = "far")
+        val rider = LatLng(0.0, 0.0)
+        val out = upcomingByCategory(listOf(far, near), setOf(Category.WATER)) { p ->
+            haversine(rider, LatLng(p.lat, p.lng))
+        }
+        val water = out.getValue(Category.WATER)
+        // Nearest-first: the closer POI leads, and its distance is smaller.
+        assertEquals(listOf("near", "far"), water.map { it.name })
+        assertTrue(water[0].aheadMeters < water[1].aheadMeters)
+    }
+
+    @Test
+    fun `nearby metric with no fix drops everything`() {
+        val pois = listOf(poi("w", "REST_STOP", along = 0.0))
+        val rider: LatLng? = null
+        val out = upcomingByCategory(pois, setOf(Category.WATER)) { p ->
+            rider?.let { haversine(it, LatLng(p.lat, p.lng)) }
+        }
+        // No location → null for every POI → empty category list.
+        assertTrue(out.getValue(Category.WATER).isEmpty())
+    }
+
+    @Test
+    fun `poiSourceFor maps route length to source`() {
+        assertEquals(PoiSource.ROUTE, poiSourceFor(1_234.0))
+        assertEquals(PoiSource.NEARBY, poiSourceFor(0.0))
     }
 
     @Test

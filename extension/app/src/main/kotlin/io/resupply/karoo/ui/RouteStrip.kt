@@ -1,18 +1,33 @@
 package io.resupply.karoo.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -25,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.resupply.karoo.data.Poi
+import io.resupply.karoo.util.LatLng
+import io.resupply.karoo.util.haversine
 
 /**
  * The route timeline: a thin horizontal track line for the route, with a colored dot per
@@ -37,6 +54,12 @@ import io.resupply.karoo.data.Poi
  * a floating km pill (with a bracket line) that slides along the strip to show where the
  * scrolled list currently sits, so exploring the list and reading the timeline stay in
  * sync. Both are optional — without them the strip is the static build-time summary.
+ *
+ * **Nearby mode:** when there's no route ([routeLengthMeters] == 0) but a [riderLocation] is
+ * given, the same band becomes a proximity "radar": the rider sits at the left edge, the
+ * x-axis is straight-line distance out to [nearbyRadiusMeters], and each POI dot is placed by
+ * its distance (splayed by category so same-distance dots don't collide). A "Live · N places"
+ * pill shows the auto-refresh status where the header has no room. See [NearbyRadar].
  */
 @Composable
 fun RouteStrip(
@@ -46,7 +69,16 @@ fun RouteStrip(
     progressMeters: Double? = null,
     // Along-route position of the top of the list; drives the floating km pill + bracket.
     listPositionMeters: Double? = null,
+    // Nearby mode (routeLengthMeters == 0): rider position for the proximity radar.
+    riderLocation: LatLng? = null,
+    // Nearby mode: the detour radius, i.e. the radar's right-edge distance.
+    nearbyRadiusMeters: Int = 0,
 ) {
+    // Nearby proximity radar takes over when there's no route but we have a rider fix.
+    if (routeLengthMeters <= 0.0 && riderLocation != null) {
+        NearbyRadar(pois, riderLocation, nearbyRadiusMeters, modifier)
+        return
+    }
     // "You are here" must pop on both the light and dark ride themes and never blend
     // into a POI dot — a fixed high-chroma red, not the theme accent (which on some
     // themes matches a category color). The marker is a vertical playhead that cuts
@@ -239,4 +271,126 @@ private fun DrawScope.drawRiderMarker(x: Float, topY: Float, bottomY: Float, col
 
     // The bright red playhead.
     drawLine(color, Offset(x, topY), Offset(x, bottomY), strokeWidth = stem)
+}
+
+/**
+ * Proximity "radar" — the RouteStrip band repurposed for a nearby (no-route) build. The rider
+ * sits at the left edge; the x-axis is straight-line distance from them, out to
+ * [radiusMeters] at the right. Each POI is a dot at its distance, splayed above/below the
+ * baseline by category so same-distance dots of different types don't collide (there's no
+ * "detour side" without a route). The auto-refresh "Live" status lives in the header chip, so
+ * the band stays uncluttered. Reuses the same lane geometry, dot radius, and category colours
+ * as the route timeline so the two read as one component.
+ */
+@Composable
+private fun NearbyRadar(
+    pois: List<Poi>,
+    rider: LatLng,
+    radiusMeters: Int,
+    modifier: Modifier = Modifier,
+) {
+    val baselineColor = MaterialTheme.colorScheme.outlineVariant
+    val riderColor = Color(0xFF2E7D32)   // green — the rider anchor (bike glyph)
+    // Radar spans out to the detour radius; guard against a zero so we never divide by it.
+    val radius = radiusMeters.coerceAtLeast(1).toDouble()
+
+    // Distance to each POI, so a dot's x tracks the rider live as they move.
+    val distances = pois.map { haversine(rider, LatLng(it.lat, it.lng)) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 8.dp),
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val fullWidth = maxWidth
+            val pillLaneH = 18.dp
+            val dotZoneH = 34.dp
+
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(pillLaneH + dotZoneH),
+            ) {
+                val left = 0f
+                val right = size.width
+                val laneTop = pillLaneH.toPx()
+                val baselineY = laneTop + dotZoneH.toPx() / 2f
+                // Insets so dots aren't clipped at the edges. The left is wider to clear the
+                // bike anchor glyph (~18dp) sitting at x=0 — a near-rider POI dot then starts
+                // just past the bike rather than under it. Right inset just avoids edge clip.
+                val leftInset = 24.dp.toPx()
+                val rightInset = 6.dp.toPx()
+                fun xAt(frac: Float) = left + leftInset + frac * (right - left - leftInset - rightInset)
+
+                // Baseline the dots read against. Starts at the dot axis origin (past the bike
+                // anchor at the left edge) so the line doesn't cut across the glyph.
+                drawLine(
+                    baselineColor,
+                    Offset(left + leftInset, baselineY),
+                    Offset(right, baselineY),
+                    strokeWidth = 1.dp.toPx(),
+                )
+
+                // Category splay: assign each category a lane above/below the baseline so
+                // same-distance dots of different types don't overlap. Alternate up/down by
+                // category index; magnitude grows with lane count but stays within the zone.
+                val dotRadius = 4.dp.toPx()
+                val maxSplay = dotZoneH.toPx() / 2f - dotRadius
+                val cats = pois.mapNotNull { io.resupply.karoo.data.Category.ofType(it.type) }
+                    .distinct()
+                fun splayFor(catIndex: Int): Float {
+                    if (catIndex < 0) return 0f
+                    // 0→0, 1→+, 2→−, 3→+2, 4→−2 … so lanes fan out symmetrically.
+                    val step = (catIndex + 1) / 2
+                    val dir = if (catIndex % 2 == 1) 1 else -1
+                    val lanes = (cats.size + 1) / 2
+                    val unit = if (lanes == 0) 0f else maxSplay / lanes
+                    return (dir * step * unit).coerceIn(-maxSplay, maxSplay)
+                }
+
+                for ((i, poi) in pois.withIndex()) {
+                    val d = distances[i]
+                    if (d > radius) continue
+                    val frac = (d / radius).coerceIn(0.0, 1.0).toFloat()
+                    val catIndex = io.resupply.karoo.data.Category.ofType(poi.type)
+                        ?.let { cats.indexOf(it) } ?: -1
+                    val dotY = baselineY - splayFor(catIndex)
+                    drawCircle(
+                        color = styleForType(poi.type).color,
+                        radius = dotRadius,
+                        center = Offset(xAt(frac), dotY),
+                    )
+                }
+                // (The rider anchor is a bike glyph overlaid at the left edge — see below —
+                // rather than a Canvas playhead: it marks the origin of the distance axis,
+                // "you", not a moving position, so it shouldn't borrow the route strip's
+                // moving-playhead language.)
+            }
+
+            // Rider anchor: a small bike glyph pinned to the left edge, on the baseline. The
+            // x-axis is distance FROM the rider, so "you" are always at 0 (the left) — the
+            // glyph makes that legible without implying motion (the POI dots are what move as
+            // the rider rides). Vertically centered on the baseline (top lane + half dot zone).
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.DirectionsBike,
+                contentDescription = "You",
+                tint = riderColor,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(y = pillLaneH + dotZoneH / 2 - 9.dp) // center 18dp icon on baseline
+                    .size(18.dp),
+            )
+
+            // Right-edge scale label = the radius. Left is the rider (0), shown by the bike.
+            Text(
+                formatDistance(radius),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.TopEnd),
+            )
+            // The "Live" status now lives in the header (a chip replacing the rebuild button),
+            // so the band stays uncluttered: just the bike anchor, POI dots, and the scale.
+        }
+    }
 }

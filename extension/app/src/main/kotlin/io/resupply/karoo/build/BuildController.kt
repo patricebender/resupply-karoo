@@ -59,11 +59,16 @@ class BuildController(
                     }
                 }
                 else -> {
-                    val loc = withTimeoutOrNull(NAV_READ_TIMEOUT_MS) {
+                    // No route: build around the rider. This needs a location fix — with no
+                    // satellite reception the Karoo may have none, so tell the rider we're
+                    // waiting on GPS rather than sitting on the generic "Searching…".
+                    publish(BuildState.Building("Waiting for GPS…"))
+                    val loc = withTimeoutOrNull(LOCATION_READ_TIMEOUT_MS) {
                         system.awaitOnce<OnLocationChanged>()
-                    } ?: return fail("No route or location available")
+                    } ?: return fail("No GPS signal - try again later")
                     Timber.d("build nearby: ${loc.lat},${loc.lng}")
                     repository.setRouteLength(0.0) // nearby: no route → strip hidden
+                    publish(BuildState.Building()) // fix acquired → back to "Searching…"
                     withContext(Dispatchers.IO) {
                         query.queryNearby(
                             LatLng(loc.lat, loc.lng), config.detourMeters, config.enabledCategories,
@@ -114,6 +119,10 @@ class BuildController(
 
     private companion object {
         const val NAV_READ_TIMEOUT_MS = 5_000L
+        // A location fix can take longer than a nav-state read — a cold GPS lock isn't
+        // instant. Wait longer before giving up so a rider who just powered on isn't told
+        // "no fix" prematurely, but not so long the build appears hung with no reception.
+        const val LOCATION_READ_TIMEOUT_MS = 15_000L
         // One build at a time across the whole process (app + BonusAction).
         val mutex = Mutex()
     }

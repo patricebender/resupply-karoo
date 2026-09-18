@@ -7,6 +7,7 @@ import io.hammerhead.karooext.models.KarooEvent
 import io.hammerhead.karooext.models.OnHttpResponse
 import io.hammerhead.karooext.models.OnHttpResponse.MakeHttpRequest
 import io.hammerhead.karooext.models.OnNavigationState
+import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnStreamState
 import io.hammerhead.karooext.models.StreamState
 import kotlinx.coroutines.channels.awaitClose
@@ -103,6 +104,17 @@ fun KarooSystemService.streamDataFlow(dataTypeId: String): Flow<StreamState> = c
  */
 fun KarooSystemService.navStateFlow(): Flow<OnNavigationState.NavigationState> = callbackFlow {
     val listenerId = addConsumer<OnNavigationState> { event -> trySendBlocking(event.state) }
+    awaitClose { removeConsumer(listenerId) }
+}
+
+/**
+ * Cold flow of the rider's location, subscribing on collect and unsubscribing on cancel.
+ * Powers the nearby-POI fields: with no route to measure along, distance is straight-line
+ * from here to each POI, recomputed as the rider moves. Same consumer pattern as
+ * [streamDataFlow].
+ */
+fun KarooSystemService.locationFlow(): Flow<OnLocationChanged> = callbackFlow {
+    val listenerId = addConsumer<OnLocationChanged> { event -> trySendBlocking(event) }
     awaitClose { removeConsumer(listenerId) }
 }
 

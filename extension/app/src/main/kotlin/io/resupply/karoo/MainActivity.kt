@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.StreamState
 import io.resupply.karoo.build.BuildController
@@ -46,7 +47,9 @@ import io.resupply.karoo.ui.WaybookScreen
 import io.resupply.karoo.ui.field.ACTION_BUILD
 import io.resupply.karoo.ui.field.EXTRA_ACTION
 import io.resupply.karoo.ui.hoursFor
+import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.awaitOnce
+import io.resupply.karoo.util.locationFlow
 import io.resupply.karoo.util.navStateFlow
 import io.resupply.karoo.util.streamDataFlow
 import io.resupply.karoo.util.withKarooConnection
@@ -58,6 +61,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** In-app screens. No nav framework — a small sealed state the host switches on. */
 private sealed interface Screen {
@@ -83,6 +87,9 @@ class MainActivity : ComponentActivity() {
     // connection. Drives the landing screen's route hero vs "load a route" explainer and
     // gates the build action — a roadbook only makes sense along a route.
     private val routeState = MutableStateFlow<RouteState>(RouteState.Unknown)
+    // Rider location, followed live off the same connection. Powers the overview's nearby
+    // list distances (straight-line to each POI) when the current set is a /nearby build.
+    private val riderLocation = MutableStateFlow<LatLng?>(null)
     private val regionCatalog: List<Region> by lazy { RegionCatalog.load(applicationContext) }
 
     // Region download state, hoisted so it survives navigation between screens.
@@ -119,14 +126,16 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch {
                 progressSystem.navStateFlow().collect { routeState.value = it.toRouteState() }
             }
+            lifecycleScope.launch {
+                progressSystem.locationFlow().collect { riderLocation.value = LatLng(it.lat, it.lng) }
+            }
         }
 
-        // Launched from the "Tap to build" data field: kick off a build immediately, but
-        // only when a route is actually loaded. Otherwise we just land on the Waybook screen,
-        // which shows the route hero + build progress when a route is loaded and the "load a
-        // route" explainer when not — never a surprise nearby-search build. Always land on
-        // Waybook (not Settings): it now carries the build feedback itself.
-        if (intent?.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) buildIfRouteLoaded()
+        // Launched from a "Tap to build" / "Tap for nearby" data field: kick off a build (see
+        // buildFromField for the route/nearby/no-fix decision). Always land on Waybook (not
+        // Settings): it carries the build feedback itself, and shows the NearbyReadyState
+        // prompt when a build isn't started for want of a GPS fix.
+        if (intent?.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) buildFromField()
 
         setContent {
             MaterialTheme {
@@ -143,7 +152,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) buildIfRouteLoaded()
+        if (intent.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) buildFromField()
         entryTick.intValue++
     }
 
@@ -160,6 +169,8 @@ class MainActivity : ComponentActivity() {
         val routeLength by repository.routeLengthMeters.collectAsStateWithLifecycle()
         val toDest by toDestMeters.collectAsStateWithLifecycle()
         val route by routeState.collectAsStateWithLifecycle()
+        val rider by riderLocation.collectAsStateWithLifecycle()
+        val nearbyLive by repository.nearbyLive.collectAsStateWithLifecycle()
         // Live position along the route, mirroring the field's math
         // (UpcomingPoisDataType): route length − distance-to-destination. Null when we
         // have no route or no live stream — the overview then drops the position cues.
@@ -192,6 +203,9 @@ class MainActivity : ComponentActivity() {
                 routeLengthMeters = routeLength,
                 progressMeters = progressMeters,
                 routeState = route,
+                riderLocation = rider,
+                nearbyLive = nearbyLive,
+                nearbyRadiusMeters = config.detourMeters,
                 buildState = buildState,
                 onBuild = ::runBuild,
                 onOpenSettings = { screen = Screen.Settings },
@@ -279,23 +293,41 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Build only if a route is loaded. Used by the data-field entry point ([ACTION_BUILD]):
-     * a field tap must never kick off a surprise nearby search. Prefers the already-observed
-     * [routeState]; if it hasn't settled yet (the connection may still be coming up at intent
-     * time), reads the nav state once. When no route is loaded we do nothing — the Waybook
-     * screen shows the "load a route" explainer.
+     * Build on a data-field tap ([ACTION_BUILD]). A route build if one is loaded, otherwise a
+     * nearby build around the rider — the field prompt ("Tap for nearby") made that intent
+     * explicit, so this is never a surprise search. [BuildController] itself picks route vs
+     * nearby from the live nav state; we just trigger it.
+     *
+     * One case we *don't* auto-build: no route AND no location fix. A nearby build would just
+     * spin on "Waiting for GPS…" and fail, so we drop the rider on the overview instead (its
+     * [NearbyReadyState] with a manual "Find places nearby" button) — they can retry once a
+     * fix lands rather than watching an auto-build fail.
+     *
+     * The observed [routeState]/[riderLocation] flows are still at their initial values at
+     * intent time (the [progressSystem] connection hasn't emitted yet on a cold launch), so we
+     * can't read them synchronously here. Resolve both once over a short-lived connection,
+     * bounded so a tap never hangs, then decide.
      */
-    private fun buildIfRouteLoaded() {
-        when (routeState.value) {
-            is RouteState.Loaded -> runBuild()
-            RouteState.None -> Unit
-            RouteState.Unknown -> lifecycleScope.launch {
-                val loaded = withKarooConnection(applicationContext) { system ->
-                    system.awaitOnce<OnNavigationState>()?.state?.toRouteState()
-                } is RouteState.Loaded
-                if (loaded) runBuild()
-            }
-        }
+    private fun buildFromField() = lifecycleScope.launch {
+        val hasRoute = routeState.value is RouteState.Loaded
+        val hasFix = riderLocation.value != null
+        // Fast path: a flow already settled to a usable value → build without re-resolving.
+        if (hasRoute || hasFix) return@launch runBuild()
+
+        val resolved = withKarooConnection(applicationContext) { system ->
+            val route = withTimeoutOrNull(STATE_READ_TIMEOUT_MS) {
+                system.awaitOnce<OnNavigationState>()
+            }?.state?.toRouteState()
+            if (route is RouteState.Loaded) return@withKarooConnection true
+            // No route: only build if a location fix is actually available.
+            withTimeoutOrNull(STATE_READ_TIMEOUT_MS) {
+                system.awaitOnce<OnLocationChanged>()
+            } != null
+        } ?: false
+
+        if (resolved) runBuild()
+        // else: no route and no fix → do nothing; the overview's NearbyReadyState lets the
+        // rider retry manually once GPS is available.
     }
 
     /** Build from the app by spinning up a short-lived Karoo connection. */
@@ -440,6 +472,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
+        // Bounded wait for the nav/location state on a field-tap build decision, so a tap
+        // never hangs while the Karoo connection settles.
+        const val STATE_READ_TIMEOUT_MS = 5_000L
+
         // Categories where opening hours matter enough to spend a Google lookup.
         val GOOGLE_HOURS_CATEGORIES = setOf(
             Category.SUPERMARKETS, Category.CAFE_BAR, Category.RESTAURANTS, Category.FUEL,

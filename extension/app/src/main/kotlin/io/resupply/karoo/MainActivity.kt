@@ -200,6 +200,7 @@ class MainActivity : ComponentActivity() {
         when (val s = screen) {
             is Screen.Waybook -> WaybookScreen(
                 pois = pois,
+                enabledCategories = config.enabledCategories,
                 routeLengthMeters = routeLength,
                 progressMeters = progressMeters,
                 routeState = route,

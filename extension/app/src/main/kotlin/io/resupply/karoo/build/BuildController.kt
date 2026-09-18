@@ -35,9 +35,6 @@ class BuildController(
     /** Run a build. Serialized so overlapping triggers can't race. */
     suspend fun runBuild(): BuildState = mutex.withLock {
         val config = configStore.config.first()
-        if (config.enabledCategories.isEmpty()) {
-            return fail("Enable at least one category")
-        }
 
         repository.clear()
         publish(BuildState.Building())
@@ -55,7 +52,7 @@ class BuildController(
                     // Cache the route length so the Waybook strip can place POI dots.
                     repository.setRouteLength(cumulativeDistances(route).lastOrNull() ?: 0.0)
                     withContext(Dispatchers.IO) {
-                        query.queryCorridor(route, config.detourMeters, config.enabledCategories)
+                        query.queryCorridor(route, config.detourMeters)
                     }
                 }
                 else -> {
@@ -70,9 +67,7 @@ class BuildController(
                     repository.setRouteLength(0.0) // nearby: no route → strip hidden
                     publish(BuildState.Building()) // fix acquired → back to "Searching…"
                     withContext(Dispatchers.IO) {
-                        query.queryNearby(
-                            LatLng(loc.lat, loc.lng), config.detourMeters, config.enabledCategories,
-                        )
+                        query.queryNearby(LatLng(loc.lat, loc.lng), config.detourMeters)
                     }
                 }
             }

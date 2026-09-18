@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -137,7 +138,6 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 }
                 val here = LatLng(loc.lat, loc.lng)
                 val config = configStore.config.first()
-                if (config.enabledCategories.isEmpty()) return@collect
 
                 // We're route-less with a fix and something to search → auto-refresh is active.
                 // Set the "Live" flag now (not only on a changed refetch) so the badge reflects
@@ -151,7 +151,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
 
                 val pois = try {
                     withContext(Dispatchers.IO) {
-                        query.await().queryNearby(here, config.detourMeters, config.enabledCategories)
+                        query.await().queryNearby(here, config.detourMeters)
                     }
                 } catch (e: Exception) {
                     Timber.w(e, "nearby refresh query failed")
@@ -195,19 +195,30 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
         Timber.d("startMap: observing roadbook POIs")
         var shownIds = emptyList<String>()
 
-        // Draw pins whenever the repository changes (build, clear, route-removed, or a
-        // background nearby refresh). Only the pin drawing lives here — the route-removed
-        // clear and the nearby refresher are extension-lifetime (see onCreate), since the map
-        // layer is subscribed/cancelled as the ride view comes and goes.
-        val drawJob = repository.pois
-            .onEach { pois ->
-                // Remove any pins no longer present, then show the current set.
-                val newIds = pois.map { it.id }
-                val removed = shownIds - newIds.toSet()
-                if (removed.isNotEmpty()) emitter.onNext(HideSymbols(removed))
-                if (pois.isNotEmpty()) emitter.onNext(ShowSymbols(pois.map { it.toSymbol() }))
-                shownIds = newIds
-                Timber.d("map: drew ${pois.size} POIs")
+        // Draw pins whenever the built set OR the enabled-category filter changes (build,
+        // clear, route-removed, background nearby refresh, or a category toggle). The build
+        // holds every category in memory; only the enabled subset is drawn, so toggling a
+        // category on/off adds/removes its pins instantly with no rebuild. Only the pin
+        // drawing lives here — the route-removed clear and the nearby refresher are
+        // extension-lifetime (see onCreate), since the map layer is subscribed/cancelled as
+        // the ride view comes and goes.
+        val drawJob = combine(repository.pois, configStore.config) { pois, cfg ->
+            // The built set (every category) and the visible subset (enabled only). We hide
+            // against the *whole* built set, not just what this session drew, so a category
+            // toggled off — or pins left over from a previous map session (shownIds resets when
+            // the map layer is re-subscribed) — are always cleared.
+            val visible = pois.filter { Category.ofType(it.type) in cfg.enabledCategories }
+            pois.map { it.id } to visible
+        }
+            .onEach { (allIds, visible) ->
+                // Hide every built pin that isn't currently visible (disabled category, removed,
+                // or stale from a prior session), then show the visible subset.
+                val visibleIds = visible.map { it.id }.toSet()
+                val toHide = (shownIds.toSet() + allIds) - visibleIds
+                if (toHide.isNotEmpty()) emitter.onNext(HideSymbols(toHide.toList()))
+                if (visible.isNotEmpty()) emitter.onNext(ShowSymbols(visible.map { it.toSymbol() }))
+                shownIds = visibleIds.toList()
+                Timber.d("map: drew ${visible.size}/${allIds.size} POIs")
             }
             .launchIn(scope)
 

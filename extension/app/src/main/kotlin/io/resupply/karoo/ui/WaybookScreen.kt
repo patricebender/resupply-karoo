@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.resupply.karoo.R
 import io.resupply.karoo.build.BuildState
+import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.PoiSource
@@ -78,6 +80,10 @@ import io.resupply.karoo.util.haversine
 @Composable
 fun WaybookScreen(
     pois: List<Poi>,
+    // The categories the rider currently wants shown. The build holds every category in
+    // memory; this filters `pois` to the enabled subset at render time, so toggling a
+    // category updates the overview instantly with no rebuild.
+    enabledCategories: Set<Category>,
     routeLengthMeters: Double,
     // Live along-route position of the rider, or null when there's no route/live
     // stream. Drives the timeline marker, per-row distance-ahead, and the initial
@@ -110,22 +116,43 @@ fun WaybookScreen(
     // changed (the guard is reset alongside this, so it fires exactly once per entry).
     reentryKey: Int,
 ) {
+    // Show only the enabled categories. The build keeps every category in memory, so this is
+    // the sole gate on what the overview renders — re-enabling a category surfaces it instantly.
+    // All downstream logic (source derivation, strip, radar, list, auto-scroll) operates on this
+    // filtered set. We keep the raw [pois] to tell "nothing built" apart from "built, but every
+    // category is toggled off" (below) — the two want different empty faces.
+    val visiblePois = remember(pois, enabledCategories) {
+        pois.filter { Category.ofType(it.type) in enabledCategories }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Header(
             buildState = buildState,
             // When the body shows the big animated logo (first build, no pins yet),
-            // keep the header status line quiet so there's only one progress cue.
+            // keep the header status line quiet so there's only one progress cue. Keyed on the
+            // built set (not the filtered one) so filtering all categories out doesn't yank the
+            // header back to its pre-build look.
             showStatusLine = pois.isNotEmpty() || buildState !is BuildState.Building,
-            // The header icon only appears once a build has landed places. While empty
-            // the big body logo is the sole icon; when the list takes over, the squircle
-            // glides into the header from the left. So there's never two icons at once.
-            showIcon = pois.isNotEmpty(),
+            // The header icon only appears once the list takes over the body. While the body
+            // shows the big mark — nothing built (empty state) OR built-but-all-categories-off
+            // (NoCategoriesState) — the header icon stays hidden so there's never two at once.
+            // Keyed on the VISIBLE set, not the raw built set, so the all-off face counts as
+            // "big mark showing".
+            showIcon = visiblePois.isNotEmpty(),
             // Nearby auto-refresh active → header shows a "Live" chip (and no rebuild button,
             // which would be redundant when the set refreshes itself).
             nearbyLive = nearbyLive,
             onOpenSettings = onOpenSettings,
         )
         HorizontalDivider()
+
+        // A roadbook exists but every category is toggled off → don't dangle the "Find places"
+        // build prompt (a rebuild would change nothing — the POIs are already in memory, just
+        // filtered out). Show a distinct "no categories selected" face that points at Settings.
+        if (pois.isNotEmpty() && visiblePois.isEmpty()) {
+            NoCategoriesState(onOpenSettings)
+            return@Column
+        }
 
         if (pois.isEmpty()) {
             // No places yet: a route is loaded (its hero + "Find places"), or nothing is (a
@@ -134,6 +161,11 @@ fun WaybookScreen(
             EmptyState(routeState, buildState, onBuild)
             return@Column
         }
+
+        // Past both empty guards: there IS a roadbook and at least one enabled category resolves
+        // to POIs. From here on the list/strip/scroll render the visible (filtered) set only.
+        @Suppress("NAME_SHADOWING")
+        val pois = visiblePois
 
         // Route vs nearby, derived from the built route length (same signal the fields use).
         // A nearby set has no along-route positions, so the strip/scroll/detour cues don't
@@ -564,6 +596,44 @@ private fun TypeAndOpensLine(hours: OpeningHours.Hours?, typeLabel: String) {
 }
 
 /**
+ * Shown when a roadbook is built but every category is toggled off, so the filtered list is
+ * empty. Distinct from [EmptyState]: the POIs exist in memory, so a rebuild would be pointless —
+ * the fix is to re-enable a category. Points the rider straight at Settings instead of offering a
+ * build. Keeps the same 72.dp mark slot + centered layout as the other empty faces so switching
+ * to/from it doesn't jump.
+ */
+@Composable
+private fun NoCategoriesState(onOpenSettings: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_resupply),
+            contentDescription = null,
+            modifier = Modifier.size(72.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "No categories selected",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(20.dp))
+        // Same dark pill as the build CTAs, but with a gear — it opens Settings (where the
+        // category chips are) rather than triggering a build; nothing to rebuild, only re-enable.
+        DarkPillButton(onClick = onOpenSettings, icon = Icons.Filled.Settings) {
+            Text("Choose categories", style = MaterialTheme.typography.titleSmall, color = ButtonCream)
+        }
+    }
+}
+
+/**
  * The no-places body. Two faces, chosen by whether a route is loaded — but both keep the
  * mark in the exact same slot/size so switching between them (and the build animation)
  * never jumps:
@@ -717,6 +787,9 @@ private val LiveGreen = Color(0xFF66BB6A)      // brighter than OpenGreen so it 
 private fun DarkPillButton(
     onClick: () -> Unit,
     enabled: Boolean = true,
+    // The leading glyph — a location pin for the build CTAs, a gear for the "choose categories"
+    // action (which opens Settings, not a build).
+    icon: ImageVector = Icons.Filled.Place,
     label: @Composable () -> Unit,
 ) {
     Row(
@@ -729,7 +802,7 @@ private fun DarkPillButton(
             .padding(horizontal = 22.dp, vertical = 13.dp),
     ) {
         Icon(
-            Icons.Filled.Place,
+            icon,
             contentDescription = null,
             tint = ButtonCream,
             modifier = Modifier.size(20.dp),

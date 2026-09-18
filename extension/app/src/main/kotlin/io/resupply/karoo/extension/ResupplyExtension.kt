@@ -12,12 +12,16 @@ import io.hammerhead.karooext.models.Symbol
 import io.resupply.karoo.BuildConfig
 import io.resupply.karoo.build.BuildController
 import io.resupply.karoo.build.BuildState
+import io.resupply.karoo.build.refetchThresholdMeters
 import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.ConfigStore
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.PoiDatabase
 import io.resupply.karoo.data.PoiQuery
 import io.resupply.karoo.data.ResupplyRepository
+import io.resupply.karoo.util.LatLng
+import io.resupply.karoo.util.haversine
+import io.resupply.karoo.util.locationFlow
 import io.resupply.karoo.util.withKarooConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -25,9 +29,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
@@ -48,6 +54,16 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
     // Connected in onCreate, disconnected in onDestroy.
     private lateinit var karooSystem: KarooSystemService
 
+    // Whether a route is currently loaded. The nearby refresher only runs route-less (a route
+    // build is a deliberate one-shot along a fixed polyline). Atomic: written by the nav
+    // consumer thread, read by the refresher loop.
+    private val routeLoaded = java.util.concurrent.atomic.AtomicBoolean(false)
+    // Identity of the last route we saw navigating (name + distance), so we can tell a genuine
+    // route *change* from repeated events for the same route. Null when route-less.
+    @Volatile private var lastRouteKey: String? = null
+    // Lifetime consumer id for the nav-state watcher (removed in onDestroy).
+    private var navConsumerId: String? = null
+
     override fun onCreate() {
         super.onCreate()
         repository = ResupplyRepository.get(applicationContext)
@@ -59,7 +75,98 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
         query = scope.async { PoiQuery(PoiDatabase.get(applicationContext)) }
 
         karooSystem = KarooSystemService(applicationContext)
-        karooSystem.connect { connected -> Timber.d("karooSystem connected=$connected") }
+        karooSystem.connect { connected ->
+            Timber.d("karooSystem connected=$connected")
+            if (connected) {
+                watchNavState()
+                startNearbyRefresher()
+            }
+        }
+    }
+
+    /**
+     * Track route-loaded state for the extension's lifetime, and clear the roadbook whenever
+     * the route context stops matching the current POIs — navigation stops (route removed), a
+     * *different* route is loaded, or a route is loaded while a route-less (nearby) set is
+     * showing. In every case the overview then shows its "build" prompt for the new context
+     * (no stale POIs, no manual rebuild button needed). Live nearby mode ends the moment a
+     * route loads (the refresher's route-gate flips [nearbyLive] off). Lives here — not in
+     * [startMap] — because the map layer is subscribed/cancelled as the ride view comes and
+     * goes, but this must run whenever the extension is alive so the refresher's gate stays
+     * current.
+     */
+    private fun watchNavState() {
+        navConsumerId = karooSystem.addConsumer<OnNavigationState> { event ->
+            val state = event.state
+            routeLoaded.set(state is OnNavigationState.NavigationState.NavigatingRoute)
+
+            // A route's identity: name + distance. A route-less state (idle, nearby) has a null
+            // key, so nearby→route is a key change too and clears the same way.
+            val key = (state as? OnNavigationState.NavigationState.NavigatingRoute)
+                ?.let { "${it.name}|${it.routeDistance}" }
+
+            // Clear when the context changes and there are POIs to drop: route removed, a
+            // different route loaded, or a route loaded over a nearby set (null → key). A
+            // route reloaded identical to the current one (same key) keeps its roadbook.
+            if (key != lastRouteKey && repository.pois.value.isNotEmpty()) {
+                Timber.d("route context changed ($lastRouteKey → $key) → clearing roadbook")
+                repository.clear() // also flips nearbyLive off
+                repository.setBuildState(BuildState.Idle)
+            }
+            lastRouteKey = key
+        }
+    }
+
+    /**
+     * Background nearby refresh: while riding without a route, keep the nearest POIs fresh as
+     * the rider moves — no manual rebuild. Runs for the extension's lifetime (NOT tied to the
+     * transient map layer). Distance-driven, not a timer: refetch once the rider has moved past
+     * [refetchThresholdMeters] (half the detour radius, floored). Silent — no clear/flash, no
+     * notification, no BuildState churn — so it never disturbs the ride. Keeps the last set on
+     * an empty result or a query failure.
+     */
+    private fun startNearbyRefresher() {
+        scope.launch {
+            var lastFetchCenter: LatLng? = null
+            karooSystem.locationFlow().collect { loc ->
+                if (routeLoaded.get()) {
+                    // A route is loaded → not our job; reset so re-entering route-less refetches.
+                    lastFetchCenter = null
+                    repository.setNearbyLive(false)
+                    return@collect
+                }
+                val here = LatLng(loc.lat, loc.lng)
+                val config = configStore.config.first()
+                if (config.enabledCategories.isEmpty()) return@collect
+
+                // We're route-less with a fix and something to search → auto-refresh is active.
+                // Set the "Live" flag now (not only on a changed refetch) so the badge reflects
+                // "tracking you", including right after a manual nearby build. It stays true
+                // until a route loads or the roadbook is cleared.
+                repository.setNearbyLive(true)
+
+                val threshold = refetchThresholdMeters(config.detourMeters)
+                val moved = lastFetchCenter?.let { haversine(it, here) } ?: Double.MAX_VALUE
+                if (moved < threshold) return@collect
+
+                val pois = try {
+                    withContext(Dispatchers.IO) {
+                        query.await().queryNearby(here, config.detourMeters, config.enabledCategories)
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "nearby refresh query failed")
+                    return@collect // keep last set, retry next tick (lastFetchCenter unchanged)
+                }
+                if (pois.isNotEmpty()) {
+                    repository.setPois(pois)
+                    repository.setRouteLength(0.0) // nearby: no route → strip hidden
+                    Timber.d("nearby refresh: ${pois.size} POIs @ ${here.lat},${here.lng}")
+                }
+                // Advance the center even on an empty result so we don't re-query the DB on
+                // every tick in a POI-free area; keep the last non-empty set on the map/fields.
+                lastFetchCenter = here
+            }
+        }
     }
 
     /**
@@ -88,7 +195,10 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
         Timber.d("startMap: observing roadbook POIs")
         var shownIds = emptyList<String>()
 
-        // Draw pins whenever the repository changes (build, clear, route-removed).
+        // Draw pins whenever the repository changes (build, clear, route-removed, or a
+        // background nearby refresh). Only the pin drawing lives here — the route-removed
+        // clear and the nearby refresher are extension-lifetime (see onCreate), since the map
+        // layer is subscribed/cancelled as the ride view comes and goes.
         val drawJob = repository.pois
             .onEach { pois ->
                 // Remove any pins no longer present, then show the current set.
@@ -101,26 +211,14 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
             }
             .launchIn(scope)
 
-        // Clear the roadbook when the rider stops navigating (route removed).
-        // Reuse the shared, already-connected karooSystem.
-        val navConsumerId = karooSystem.addConsumer<OnNavigationState> { event ->
-            if (event.state is OnNavigationState.NavigationState.Idle &&
-                repository.pois.value.isNotEmpty()
-            ) {
-                Timber.d("route removed → clearing roadbook")
-                repository.clear()
-                repository.setBuildState(BuildState.Idle)
-            }
-        }
-
         emitter.setCancellable {
             Timber.d("startMap: cancelled")
             drawJob.cancel()
-            karooSystem.removeConsumer(navConsumerId)
         }
     }
 
     override fun onDestroy() {
+        navConsumerId?.let { karooSystem.removeConsumer(it) }
         karooSystem.disconnect()
         scope.cancel()
         super.onDestroy()

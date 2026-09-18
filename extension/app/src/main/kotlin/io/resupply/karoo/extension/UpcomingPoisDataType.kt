@@ -5,6 +5,7 @@ import androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.models.ViewConfig
 import io.resupply.karoo.data.ConfigStore
+import io.resupply.karoo.data.PoiSource
 import io.resupply.karoo.data.ResupplyRepository
 import io.resupply.karoo.ui.field.FieldMessage
 import io.resupply.karoo.ui.field.LargeUpcomingField
@@ -44,22 +45,27 @@ class UpcomingPoisDataType(
         // through the rest on the rotation tick.
         val capacity = capacityFor(config.viewSize.second)
 
-        // Categories that actually have something ahead, sorted nearest-first (each list is
+        // Categories that actually have something to show, sorted nearest-first (each list is
         // already nearest-first inside upcomingByCategory, so .first() is its nearest). An
         // enabled-but-empty category would just be a blank card, so we drop it.
         val ahead = r.enabled
             .filter { r.upcoming[it]?.isNotEmpty() == true }
             .sortedBy { r.upcoming.getValue(it).first().aheadMeters }
 
-        if (capacity <= 1) {
-            // Slot only fits one card: single rotating category. Prefer categories with POIs
-            // ahead; fall back to all enabled if none do (so the field still shows *something*).
-            val cats = ahead.ifEmpty { r.enabled.toList() }
-            val cat = cats[(tick % cats.size).toInt()]
-            return SmallUpcomingField(rowFor(cat, r.upcoming[cat].orEmpty(), large = false), activity, interactive)
+        // Nothing to show → a message, not a card. Do this BEFORE the single-card path so a
+        // small slot doesn't cycle through empty categories rendering a bare "–" hero (which
+        // reads as broken). Copy depends on the build: route "ahead" vs nearby "around here".
+        if (ahead.isEmpty()) {
+            val emptyText = if (r.source == PoiSource.NEARBY) "No places nearby" else "No POIs ahead"
+            return FieldMessage(emptyText, activity, interactive)
         }
 
-        if (ahead.isEmpty()) return FieldMessage("No POIs ahead", activity, interactive)
+        if (capacity <= 1) {
+            // Slot only fits one card: rotate through the categories that HAVE a POI (ahead is
+            // non-empty here), so the rider never sees a blank "–" card.
+            val cat = ahead[(tick % ahead.size).toInt()]
+            return SmallUpcomingField(rowFor(cat, r.upcoming.getValue(cat), large = false), activity, interactive)
+        }
 
         // Fill the slot: a page is `capacity` cards (a 2-col grid, as many rows as the height
         // fits — computed in capacityFor so cards never clip). If there are FEWER categories

@@ -344,31 +344,37 @@ fun BuildPromptField(activity: ComponentName, interactive: Boolean) {
 }
 
 /**
- * "No route" prompt: nothing is loaded to build a roadbook along, so — unlike
- * [BuildPromptField] — this does NOT offer to build. Tapping just opens the app (where the
- * rider sees the same "load a route" explainer). Keeps a rider from triggering a surprise
- * nearby search by tapping the field before a route is on the Karoo.
+ * "Tap for nearby" prompt: no route is loaded, so there's nothing to build a roadbook along —
+ * but the rider can still find places around their current location. Unlike a bare open-app
+ * prompt, this carries the `ACTION_BUILD` intent so the tap explicitly kicks off a nearby
+ * build (the prompt copy makes that intent clear, so it's never a *surprise* search). Modeled
+ * on [BuildPromptField]; the compass glyph distinguishes "nearby" from the route build's map.
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-fun LoadRoutePromptField(activity: ComponentName, interactive: Boolean) {
+fun NearbyPromptField(activity: ComponentName, interactive: Boolean) {
+    val intent = Intent()
+        .setComponent(activity)
+        .setAction(Intent.ACTION_MAIN)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        .putExtra(EXTRA_ACTION, ACTION_BUILD)
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
             .padding(6.dp)
-            .tapToOpen(interactive, openAppIntent(activity)),
+            .tapToOpen(interactive, intent),
         verticalAlignment = Alignment.Vertical.CenterVertically,
         horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
     ) {
         Text("🧭", style = TextStyle(fontSize = 22.sp))
         Spacer(GlanceModifier.height(2.dp))
         Text(
-            "Load a route",
+            "Tap for nearby",
             style = TextStyle(color = Primary, fontSize = 14.sp, fontWeight = FontWeight.Bold),
             maxLines = 1,
         )
         Text(
-            "to find places",
+            "no route",
             style = TextStyle(color = Dim, fontSize = 11.sp),
             maxLines = 1,
         )

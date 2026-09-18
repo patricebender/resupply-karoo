@@ -36,6 +36,15 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
     private val _routeLengthMeters = MutableStateFlow(0.0)
     val routeLengthMeters: StateFlow<Double> = _routeLengthMeters.asStateFlow()
 
+    /**
+     * Whether nearby POIs are being kept fresh automatically as the rider moves (route-less
+     * background refresh). Drives the overview's steady "Live" badge. Set true by the
+     * refresher once it's tracking, false when a route loads or the roadbook is cleared. Not
+     * persisted — a fresh session starts not-live until the refresher begins.
+     */
+    private val _nearbyLive = MutableStateFlow(false)
+    val nearbyLive: StateFlow<Boolean> = _nearbyLive.asStateFlow()
+
     /** In-memory cache of fetched place descriptions, keyed by POI id. */
     private val descriptions = mutableMapOf<String, String>()
 
@@ -52,6 +61,10 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
 
     fun setRouteLength(meters: Double) {
         _routeLengthMeters.value = meters
+    }
+
+    fun setNearbyLive(live: Boolean) {
+        _nearbyLive.value = live
     }
 
     fun cachedDescription(poiId: String): String? = descriptions[poiId]
@@ -88,11 +101,24 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
     private val placeIdSerializer = MapSerializer(String.serializer(), String.serializer())
 
     init {
-        // Load any previously built POIs so they're on the map offline immediately.
+        // Restore previously built POIs so a route roadbook survives a mid-ride restart and is
+        // on the map offline immediately. But ONLY a route set — a route POI carries
+        // along-route positions ([Poi.distancesAlongRoute]); a nearby set has none. A nearby
+        // set is only meaningful near where/when it was fetched, so after a restart (likely
+        // elsewhere, later) it's stale — we drop it and let the background refresher repopulate
+        // from the current location, rather than showing a stale POI with no "Live" context.
         runCatching {
             if (cacheFile.exists()) {
-                _pois.value = json.decodeFromString(poiListSerializer, cacheFile.readText())
-                Timber.d("loaded ${_pois.value.size} cached POIs")
+                val restored = json.decodeFromString(poiListSerializer, cacheFile.readText())
+                val isRouteSet = restored.any { it.distancesAlongRoute.isNotEmpty() }
+                if (isRouteSet) {
+                    _pois.value = restored
+                    Timber.d("restored ${restored.size} cached route POIs")
+                } else {
+                    // Nearby (or empty) set → start clean; overwrite the stale cache file.
+                    Timber.d("skipping ${restored.size} stale nearby POIs on startup")
+                    if (restored.isNotEmpty()) persist()
+                }
             }
         }.onFailure { Timber.w(it, "failed to load POI cache") }
 
@@ -120,6 +146,7 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
     /** Clear POIs at the start of a new build. */
     fun clear() {
         _pois.value = emptyList()
+        _nearbyLive.value = false
         persist()
     }
 

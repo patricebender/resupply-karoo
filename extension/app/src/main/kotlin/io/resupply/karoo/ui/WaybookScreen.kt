@@ -2,6 +2,7 @@ package io.resupply.karoo.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -25,11 +26,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,26 +42,33 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.resupply.karoo.R
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.Poi
+import io.resupply.karoo.data.PoiSource
 import io.resupply.karoo.data.aheadMetersFor
 import io.resupply.karoo.data.behindMetersFor
 import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.formatKm
+import io.resupply.karoo.data.poiSourceFor
+import io.resupply.karoo.util.LatLng
+import io.resupply.karoo.util.haversine
 
 /**
  * The Waybook ROUTE view: a header with build + settings shortcuts and a live build
@@ -76,8 +84,15 @@ fun WaybookScreen(
     // scroll to the first POI ahead.
     progressMeters: Double?,
     // Whether a route is loaded on the Karoo (and its name/distance). Drives the empty
-    // state: route hero + "Find places" when loaded, a "load a route" explainer when not.
+    // state: route hero + "Find places" when loaded, a "find places near you" prompt when not.
     routeState: RouteState,
+    // Rider location, for a nearby build's straight-line list distances. Null when unknown.
+    riderLocation: LatLng?,
+    // Nearby POIs are being auto-refreshed as the rider moves → the proximity band shows a
+    // "Live" indicator.
+    nearbyLive: Boolean,
+    // The detour radius (meters) — sets the nearby proximity band's right-edge scale.
+    nearbyRadiusMeters: Int,
     buildState: BuildState,
     onBuild: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -105,21 +120,54 @@ fun WaybookScreen(
             // the big body logo is the sole icon; when the list takes over, the squircle
             // glides into the header from the left. So there's never two icons at once.
             showIcon = pois.isNotEmpty(),
-            // No build affordance until there's something to build along: hide the header
-            // refresh action while empty and no route is loaded. Once pois exist, or a route
-            // is loaded, the action is meaningful again.
-            showBuild = pois.isNotEmpty() || routeState is RouteState.Loaded,
-            onBuild = onBuild,
+            // Nearby auto-refresh active → header shows a "Live" chip (and no rebuild button,
+            // which would be redundant when the set refreshes itself).
+            nearbyLive = nearbyLive,
             onOpenSettings = onOpenSettings,
         )
         HorizontalDivider()
 
         if (pois.isEmpty()) {
-            // No places yet: either a route is loaded (show its hero + "Find places") or
-            // nothing is (a calm "load a route" explainer, no build affordance). Both keep
-            // the mark in the same slot so a build animates in place without a jump.
+            // No places yet: a route is loaded (its hero + "Find places"), or nothing is (a
+            // "find places near you" prompt with a nearby build button). Both keep the mark in
+            // the same slot so a build animates in place without a jump.
             EmptyState(routeState, buildState, onBuild)
             return@Column
+        }
+
+        // Route vs nearby, derived from the built route length (same signal the fields use).
+        // A nearby set has no along-route positions, so the strip/scroll/detour cues don't
+        // apply; distance is straight-line from the rider instead.
+        val source = poiSourceFor(routeLengthMeters)
+
+        // For a nearby build, keep only POIs still within the detour radius of the rider (the
+        // cached set was filtered at fetch time, but the rider has since moved — drop the ones
+        // now out of range so the list agrees with the data field and the radar band), and
+        // order nearest-first. Route sets arrive pre-sorted along-route from PoiQuery.
+        val sortedPois = if (source == PoiSource.NEARBY && riderLocation != null) {
+            pois.map { it to haversine(riderLocation, LatLng(it.lat, it.lng)) }
+                .filter { (_, d) -> d <= nearbyRadiusMeters.toDouble() }
+                .sortedBy { (_, d) -> d }
+                .map { (poi, _) -> poi }
+        } else {
+            pois
+        }
+
+        // Defer live churn to the LIST while the rider is interacting with it. A background
+        // nearby refresh (or the continuous re-sort as they move) would otherwise shuffle rows
+        // under their finger — jarring when they've scrolled down. So for a nearby set we
+        // render a *snapshot* and only refresh it when they're back at the top and not
+        // scrolling. (Opening a POI detail unmounts this screen entirely, so returning always
+        // re-snapshots fresh — no separate guard needed for that.) Route sets don't
+        // auto-refresh, so they render live as before. Map pins + data fields are NOT deferred
+        // — only this list holds the rider's scroll focus.
+        val interacting = listState.isScrollInProgress || listState.firstVisibleItemIndex > 0
+        val displayPois = if (source == PoiSource.NEARBY) {
+            val snapshot = remember { mutableStateOf(sortedPois) }
+            if (!interacting) snapshot.value = sortedPois
+            snapshot.value
+        } else {
+            sortedPois
         }
 
         // The along-route km of the row at the top of the list — drives the floating
@@ -133,13 +181,34 @@ fun WaybookScreen(
             }
         }
 
-        RouteStrip(
-            pois = pois,
-            routeLengthMeters = routeLengthMeters,
-            progressMeters = progressMeters,
-            listPositionMeters = topVisibleMeters,
-        )
-        HorizontalDivider()
+        // The band above the list: a route timeline for a route build, or a proximity "radar"
+        // for a nearby build (rider at the left edge, POIs by straight-line distance). Both
+        // reuse RouteStrip; the nearby mode also carries the "Live" indicator, which has room
+        // here that the header lacks.
+        when (source) {
+            PoiSource.ROUTE -> {
+                RouteStrip(
+                    pois = pois,
+                    routeLengthMeters = routeLengthMeters,
+                    progressMeters = progressMeters,
+                    listPositionMeters = topVisibleMeters,
+                )
+                HorizontalDivider()
+            }
+            PoiSource.NEARBY -> {
+                // Only show the radar once we can place dots (need a rider fix); otherwise the
+                // list alone carries the screen until the first location arrives.
+                if (riderLocation != null) {
+                    RouteStrip(
+                        pois = displayPois,
+                        routeLengthMeters = 0.0,
+                        riderLocation = riderLocation,
+                        nearbyRadiusMeters = nearbyRadiusMeters,
+                    )
+                    HorizontalDivider()
+                }
+            }
+        }
 
         // On entry mid-ride, jump to the first POI still ahead so "what's next" is the
         // first thing the rider sees. Fires once per screen entry (guarded by a saved
@@ -157,10 +226,19 @@ fun WaybookScreen(
         }
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-            items(pois, key = { it.id }) { poi ->
-                val ahead = progressMeters?.let { aheadMetersFor(poi, it) }
-                // Known progress but no ahead-crossing ⇒ behind the rider; how far back.
-                val behind = progressMeters?.takeIf { ahead == null }?.let { behindMetersFor(poi, it) }
+            items(displayPois, key = { it.id }) { poi ->
+                // Route: distance ahead/behind along the route. Nearby: straight-line from the
+                // rider (shown in the "ahead" slot; a nearby POI is never "behind").
+                val ahead: Double?
+                val behind: Double?
+                if (source == PoiSource.NEARBY) {
+                    ahead = riderLocation?.let { haversine(it, LatLng(poi.lat, poi.lng)) }
+                    behind = null
+                } else {
+                    ahead = progressMeters?.let { aheadMetersFor(poi, it) }
+                    // Known progress but no ahead-crossing ⇒ behind the rider; how far back.
+                    behind = progressMeters?.takeIf { ahead == null }?.let { behindMetersFor(poi, it) }
+                }
                 PoiRow(
                     poi = poi,
                     hours = hoursOf(poi),
@@ -180,11 +258,9 @@ private fun Header(
     buildState: BuildState,
     showStatusLine: Boolean,
     showIcon: Boolean,
-    showBuild: Boolean,
-    onBuild: () -> Unit,
+    nearbyLive: Boolean,
     onOpenSettings: () -> Unit,
 ) {
-    val building = buildState is BuildState.Building
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -237,25 +313,14 @@ private fun Header(
         )
         Spacer(Modifier.size(10.dp))
         Box(modifier = Modifier.weight(1f)) {
-            if (showStatusLine) BuildStatusLine(buildState)
+            // Transient build feedback only (the spinner).
+            if (showStatusLine && buildState is BuildState.Building) BuildStatusLine(buildState)
         }
-        // Build/rebuild: primary tint when there's work, muted after a build. While
-        // building the icon just goes disabled — the single spinner lives in the
-        // status line, so we never show two spinners at once. Hidden entirely when there's
-        // nothing to build (empty + no route loaded), so we never offer an impossible build.
-        if (showBuild) {
-            IconButton(onClick = onBuild, enabled = !building) {
-                Icon(
-                    Icons.Filled.Refresh,
-                    contentDescription = "Build",
-                    tint = when {
-                        building -> MaterialTheme.colorScheme.onSurfaceVariant
-                        buildState is BuildState.Success -> MaterialTheme.colorScheme.onSurfaceVariant
-                        else -> MaterialTheme.colorScheme.primary
-                    },
-                )
-            }
-        }
+        // Live chip: nearby POIs auto-refresh as the rider moves, so there's no manual rebuild
+        // to offer — the chip replaces the old rebuild button, signalling "tracking you". A
+        // pulsing dot carries the motion; the header (unlike the band) has room for it beside
+        // the settings gear. Manual rebuild lives in Settings for the route case.
+        if (nearbyLive) LiveChip()
         IconButton(onClick = onOpenSettings) {
             Icon(Icons.Filled.Settings, contentDescription = "Settings")
         }
@@ -263,10 +328,60 @@ private fun Header(
 }
 
 /**
+ * A slow-breathing green dot — the shared "live" motif. Used in the header [LiveChip] and the
+ * enable-live invitation, so both read as the same feature. Confined to the dot so motion
+ * stays subtle on a bike computer glanced at speed.
+ */
+@Composable
+private fun PulsingDot(size: Dp, color: Color = OpenGreen) {
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "livePulse")
+    val alpha by pulse.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "livePulseAlpha",
+    )
+    Box(
+        modifier = Modifier
+            .size(size)
+            .alpha(alpha)
+            .clip(CircleShape)
+            .background(color),
+    )
+}
+
+/**
+ * The header "Live" chip: a slow-pulsing green dot + "Live", shown while nearby POIs
+ * auto-refresh. Sits where the rebuild button used to — that action is redundant in live mode.
+ */
+@Composable
+private fun LiveChip() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(end = 4.dp),
+    ) {
+        PulsingDot(size = 8.dp)
+        Spacer(Modifier.size(5.dp))
+        Text(
+            "Live",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = OpenGreen,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
  * The header's primary line, only used for transient build feedback: the current build
- * phase (with a spinner) and errors. The steady-state place count lives in the timeline
- * strip below, so idle/success leave this line blank — the logo and action icons carry
- * the header on their own.
+ * phase, with a spinner. The steady-state place count lives in the timeline strip below, so
+ * idle/success leave this line blank — the logo and action icons carry the header on their
+ * own. Errors are NOT shown here: the header is too narrow to render a message legibly (it'd
+ * ellipsize to an unreadable "No…"), and build errors already surface as a system
+ * notification, while the no-places/no-fix cases land on the overview's own prompt state.
  */
 @Composable
 private fun BuildStatusLine(state: BuildState) {
@@ -282,15 +397,7 @@ private fun BuildStatusLine(state: BuildState) {
             )
         }
 
-        is BuildState.Error -> Text(
-            state.message,
-            style = MaterialTheme.typography.titleMedium,
-            color = ClosedRed,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-
-        is BuildState.Success, is BuildState.Idle -> Unit
+        is BuildState.Error, is BuildState.Success, is BuildState.Idle -> Unit
     }
 }
 
@@ -462,27 +569,30 @@ private fun TypeAndOpensLine(hours: OpeningHours.Hours?, typeLabel: String) {
  * never jumps:
  *  - a route is loaded → [RouteReadyState]: the route's name + distance and a single
  *    "Find places" action (which animates the mark in place while building).
- *  - nothing loaded → [NoRouteState]: a calm explainer, no build affordance — you can't
- *    build a roadbook without a route, so we don't pretend you can.
+ *  - nothing loaded → [NearbyReadyState]: a "find places near you" prompt with a "Find
+ *    places nearby" action — a build with no route falls back to POIs around the rider.
  * While a build is running we always show the route-ready face (the mark is mid-animation),
  * regardless of the latest route signal, so the animation isn't yanked away.
  */
 @Composable
 private fun EmptyState(routeState: RouteState, buildState: BuildState, onBuild: () -> Unit) {
-    val building = buildState is BuildState.Building
     val loaded = routeState as? RouteState.Loaded
-    if (loaded != null || building) {
+    // Pick the face by whether a ROUTE is loaded, not by whether a build is running: a nearby
+    // build (no route) must stay on the nearby face and morph in place, or the button would
+    // vanish and be replaced by the route-oriented "Tracing your route…" copy — an abrupt swap
+    // between two different layouts. Each face animates its own mark while building.
+    if (loaded != null) {
         RouteReadyState(loaded, buildState, onBuild)
     } else {
-        NoRouteState()
+        NearbyReadyState(buildState, onBuild)
     }
 }
 
 /**
- * Route loaded, nothing built yet: the route's name as the hero, its distance below, and a
- * single primary "Find places" action. While building, the same mark animates in place
- * (route traced, waypoints lighting up) and the copy switches to the live build phase — the
- * button stays in the layout (hidden + inert) so nothing shifts. [route] may be null only
+ * Route loaded, nothing built yet: the route's name as the hero, its distance below, and the
+ * [FindPlacesButton] dark-pill CTA — same style as the nearby face. While building, the mark
+ * animates in place (route traced, waypoints lighting up), the title swaps to the live build
+ * phase, the distance line stays put, and the button dims + goes inert. [route] may be null only
  * transiently while a build runs before the signal has settled.
  */
 @Composable
@@ -519,28 +629,19 @@ private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, o
             overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(8.dp))
+        // Distance line stays put while building — only the title above swaps to the phase, so
+        // the block barely changes between idle and building (matching the nearby face's calm).
         Text(
-            if (building) {
-                "Tracing your route for cafés, water, shops and more…"
-            } else {
-                routeSubtitle(route)
-            },
+            routeSubtitle(route),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(16.dp))
-        // The primary action: find places along the loaded route. Kept in the layout while
-        // building (hidden + non-clickable) so the block's height stays constant.
-        Button(
-            onClick = onBuild,
-            enabled = !building,
-            modifier = Modifier.alpha(if (building) 0f else 1f),
-        ) {
-            Icon(Icons.Filled.Refresh, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text("Find places")
-        }
+        // The primary action: find places along the loaded route. Same dark pill as the nearby
+        // CTA; while building it dims + goes inert (the title above carries the phase), matching
+        // the nearby face.
+        FindPlacesButton(onClick = onBuild, enabled = !building)
     }
 }
 
@@ -555,13 +656,15 @@ private fun routeSubtitle(route: RouteState.Loaded?): String {
 }
 
 /**
- * No route loaded: a calm explainer with the static mark and no build button. Building a
- * roadbook needs a route to trace, so we guide the rider to load one rather than offering an
- * action that can't do what they'd expect. Same mark slot/size as [RouteReadyState] so the
- * two states cross-fade in place if the route signal flips.
+ * No route loaded: a "find places near you" prompt with the [FindLiveResupplyButton] hero. A
+ * build with no route falls back to POIs around the rider, so we offer (and run) that build
+ * right here — the same face morphs into a building state rather than being replaced: the mark
+ * animates in its slot, the title becomes the live build phase, and the button crossfades to a
+ * spinner + phase line so nothing hard-disappears. Same 72.dp mark slot as [RouteReadyState].
  */
 @Composable
-private fun NoRouteState() {
+private fun NearbyReadyState(buildState: BuildState, onBuild: () -> Unit) {
+    val building = buildState as? BuildState.Building
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -569,23 +672,97 @@ private fun NoRouteState() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Image(
-            painter = painterResource(R.drawable.ic_resupply),
-            contentDescription = null,
-            modifier = Modifier.size(72.dp),
-        )
+        // Same slot/size as the idle mark — only the renderer changes when a build starts, so the
+        // static squircle springs to life in place rather than being swapped out.
+        if (building != null) {
+            ResupplyLoadingLogo(size = 72.dp)
+        } else {
+            Image(
+                painter = painterResource(R.drawable.ic_resupply),
+                contentDescription = null,
+                modifier = Modifier.size(72.dp),
+            )
+        }
         Spacer(Modifier.height(16.dp))
+        // While building, the title carries the live phase ("Searching…", "Waiting for GPS…").
         Text(
-            "Ready when you are",
+            building?.phase ?: "No route loaded",
             style = MaterialTheme.typography.titleMedium,
             textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(20.dp))
+        // The CTA IS the "enable live" affordance and the hero of the screen: a near-black pill
+        // echoing the logo tile above, with the pulsing green "live" motif carried inline so the
+        // button previews the header chip it lights up. While building it stays put but dims and
+        // goes inert — the title above carries the progress.
+        FindLiveResupplyButton(onClick = onBuild, enabled = building == null)
+    }
+}
+
+// The logo tile is a near-black deep teal-green; reusing it ties the CTA to the mark above.
+private val ButtonTop = Color(0xFF16221F)
+private val ButtonBottom = Color(0xFF0B1412)
+private val ButtonCream = Color(0xFFF2EDE3)   // the logo's "R" cream — button label + icon
+private val LiveGreen = Color(0xFF66BB6A)      // brighter than OpenGreen so it pops on near-black
+
+/**
+ * The shared hero CTA shell for the empty states: a dark, pill-shaped button matching the logo
+ * tile, with a subtle top-to-bottom gradient for depth and a cream location pin. While a build
+ * runs it dims and goes inert (the title above carries the phase). Callers supply the label via
+ * [label] so the wording fits the mode — "Find places" along a route, the live variant nearby.
+ */
+@Composable
+private fun DarkPillButton(
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    label: @Composable () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .alpha(if (enabled) 1f else 0.5f) // dim + inert while a build runs
+            .clip(RoundedCornerShape(50))
+            .background(Brush.verticalGradient(listOf(ButtonTop, ButtonBottom)))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 13.dp),
+    ) {
+        Icon(
+            Icons.Filled.Place,
+            contentDescription = null,
+            tint = ButtonCream,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.size(9.dp))
+        label()
+    }
+}
+
+/**
+ * The no-route CTA: [DarkPillButton] reading "Find live resupply", where "live" keeps its pulsing
+ * green dot + bold-green [PulsingDot] motif, so pressing it visibly continues into the header chip.
+ */
+@Composable
+private fun FindLiveResupplyButton(onClick: () -> Unit, enabled: Boolean = true) {
+    DarkPillButton(onClick = onClick, enabled = enabled) {
+        Text("Find ", style = MaterialTheme.typography.titleSmall, color = ButtonCream)
+        PulsingDot(size = 8.dp, color = LiveGreen)
+        Spacer(Modifier.size(5.dp))
         Text(
-            "Load a route on your Karoo and Resupply will find places along it.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
+            "live",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = LiveGreen,
         )
+        Text(" resupply", style = MaterialTheme.typography.titleSmall, color = ButtonCream)
+    }
+}
+
+/** The route CTA: the same dark pill, plain "Find places" — a one-shot search along the route. */
+@Composable
+private fun FindPlacesButton(onClick: () -> Unit, enabled: Boolean = true) {
+    DarkPillButton(onClick = onClick, enabled = enabled) {
+        Text("Find places", style = MaterialTheme.typography.titleSmall, color = ButtonCream)
     }
 }

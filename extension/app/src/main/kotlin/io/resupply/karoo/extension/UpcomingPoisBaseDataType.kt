@@ -9,26 +9,33 @@ import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.DataTypeImpl
 import io.hammerhead.karooext.internal.ViewEmitter
 import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.StreamState
 import io.hammerhead.karooext.models.UpdateGraphicConfig
 import io.hammerhead.karooext.models.ViewConfig
 import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.ConfigStore
 import io.resupply.karoo.data.Poi
+import io.resupply.karoo.data.PoiSource
 import io.resupply.karoo.data.ResupplyRepository
 import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.UpcomingPoi
+import io.resupply.karoo.data.aheadMetersFor
 import io.resupply.karoo.data.formatDetour
 import io.resupply.karoo.data.formatKm
 import io.resupply.karoo.data.elideName
+import io.resupply.karoo.data.poiSourceFor
 import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.data.upcomingByCategory
 import io.resupply.karoo.ui.field.BuildPromptField
 import io.resupply.karoo.ui.field.CategoryRow
 import io.resupply.karoo.ui.field.FieldMessage
-import io.resupply.karoo.ui.field.LoadRoutePromptField
+import io.resupply.karoo.ui.field.NearbyPromptField
 import io.resupply.karoo.ui.field.OffRouteMessage
 import io.resupply.karoo.ui.field.PoiCell
+import io.resupply.karoo.util.LatLng
+import io.resupply.karoo.util.haversine
+import io.resupply.karoo.util.locationFlow
 import io.resupply.karoo.util.navStateFlow
 import io.resupply.karoo.util.streamDataFlow
 import kotlinx.coroutines.CoroutineScope
@@ -97,7 +104,15 @@ abstract class UpcomingPoisBaseDataType(
         // Unknown so the field renders before the first nav event arrives.
         val routeFlow = karooSystem.navStateFlow().map { it.toRouteState() }
             .onStart { emit(RouteState.Unknown) }
-        val liveFlow = combine(progressFlow, routeFlow) { stream, route -> stream to route }
+        // Rider location for the nearby fields (straight-line distance to each POI). Null
+        // until the first fix; folded into `liveFlow` so the top-level combine stays within
+        // its 5-arg typed overload. Seeded null so the field renders before a fix arrives.
+        val locationFlow = karooSystem.locationFlow()
+            .map { LatLng(it.lat, it.lng) as LatLng? }
+            .onStart { emit(null) }
+        val liveFlow = combine(progressFlow, routeFlow, locationFlow) { stream, route, loc ->
+            Live(stream, route, loc)
+        }
 
         // MainActivity, launched when the rider taps the field (open app / "Tap to build").
         val mainActivity = ComponentName(context.packageName, MAIN_ACTIVITY_CLASS)
@@ -106,11 +121,12 @@ abstract class UpcomingPoisBaseDataType(
             combine(
                 repository.pois,
                 repository.routeLengthMeters,
-                configStore.config.map { it.enabledCategories },
+                configStore.config,
                 liveFlow,
                 rotation,
-            ) { pois, routeLen, enabled, live, tick ->
-                Frame(pois, routeLen, enabled, live.first, live.second, tick)
+            ) { pois, routeLen, cfg, live, tick ->
+                Frame(pois, routeLen, cfg.enabledCategories, cfg.detourMeters,
+                    live.stream, live.routeState, live.location, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
                     render(f, config, mainActivity, interactive)
@@ -126,24 +142,35 @@ abstract class UpcomingPoisBaseDataType(
         }
     }
 
+    /** The live signals folded into one combine arg (keeps the top-level combine at 5 args). */
+    private data class Live(
+        val stream: StreamState.Streaming?,
+        val routeState: RouteState,
+        val location: LatLng?,
+    )
+
     private data class Frame(
         val pois: List<Poi>,
         val routeLenMeters: Double,
         val enabled: Set<Category>,
+        val detourMeters: Int,
         val stream: StreamState.Streaming?,
         val routeState: RouteState,
+        val location: LatLng?,
         val rotationTick: Long,
     )
 
     /**
-     * POIs resolved against the rider's live route progress, ready for a subclass to render.
+     * POIs resolved for a subclass to render, plus which kind of build they came from.
      * The shared message states (no categories / no roadbook / off route) are handled in
      * [render] before this is built, so a subclass only sees the "we have POIs to show" case.
+     * [source] lets a subclass tailor copy (e.g. "No places nearby" vs "No POIs ahead").
      */
     protected data class ResolvedPois(
         val enabled: Set<Category>,
         val upcoming: Map<Category, List<UpcomingPoi>>,
         val progressMeters: Double,
+        val source: PoiSource,
     )
 
     /**
@@ -173,16 +200,39 @@ abstract class UpcomingPoisBaseDataType(
     @androidx.compose.runtime.Composable
     private fun render(f: Frame, config: ViewConfig, mainActivity: ComponentName, interactive: Boolean) {
         if (f.enabled.isEmpty()) return renderNoCategories(mainActivity, interactive)
-        // No roadbook yet: offer "Tap to build" only when a route is actually loaded to build
-        // along; otherwise a "load a route" prompt that just opens the app (never a surprise
-        // nearby search from a stray field tap). Once POIs exist we always show them — even
-        // without a live route stream (we just measure from km 0).
+        // No roadbook yet: "Tap to build" when a route is loaded to build along; otherwise a
+        // "Tap for nearby" prompt that builds around the rider's location (explicit, so a
+        // field tap is never a *surprise* nearby search). Once POIs exist we always show them.
         if (f.pois.isEmpty()) {
             return if (f.routeState is RouteState.Loaded) {
                 BuildPromptField(mainActivity, interactive)
             } else {
-                LoadRoutePromptField(mainActivity, interactive)
+                NearbyPromptField(mainActivity, interactive)
             }
+        }
+
+        // Route vs nearby is derived from the built route length (see poiSourceFor): a route
+        // build carries a positive length, a /nearby build zeroes it. This is the same signal
+        // the Waybook strip and overview key off — one source of truth, can't desync.
+        val source = poiSourceFor(f.routeLenMeters)
+
+        if (source == PoiSource.NEARBY) {
+            // No route to measure along: distance is straight-line from the rider to each POI,
+            // recomputed as they move. Drop POIs now beyond the detour radius (the cached set
+            // was filtered at fetch time, but the rider has since moved) so the field and the
+            // overview list agree on what's "nearby". No progress/off-route concept applies.
+            val rider = f.location
+            val radius = f.detourMeters.toDouble()
+            val upcoming = upcomingByCategory(f.pois, f.enabled) { poi ->
+                rider?.let { haversine(it, LatLng(poi.lat, poi.lng)) }?.takeIf { it <= radius }
+            }
+            return renderResolved(
+                ResolvedPois(f.enabled, upcoming, progressMeters = 0.0, source = source),
+                config,
+                f.rotationTick,
+                mainActivity,
+                interactive,
+            )
         }
 
         // Live route progress, when available: route length − distance-to-destination.
@@ -201,9 +251,9 @@ abstract class UpcomingPoisBaseDataType(
         val onRoute = values?.get(DataType.Field.ON_ROUTE)?.let { it >= 0.5 } ?: true
         if (!onRoute && progress > START_GRACE_METERS) return OffRouteMessage(mainActivity, interactive)
 
-        val upcoming = upcomingByCategory(f.pois, f.enabled, progress)
+        val upcoming = upcomingByCategory(f.pois, f.enabled) { aheadMetersFor(it, progress) }
         renderResolved(
-            ResolvedPois(f.enabled, upcoming, progress),
+            ResolvedPois(f.enabled, upcoming, progress, source = source),
             config,
             f.rotationTick,
             mainActivity,

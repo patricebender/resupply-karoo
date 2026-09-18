@@ -20,20 +20,22 @@ data class UpcomingPoi(
 )
 
 /**
- * Group the next [perCat] POIs per enabled category, ordered by how far ahead they
- * are on the route. A POI can touch the route more than once
- * ([Poi.distancesAlongRoute]); we take its nearest crossing that is still ahead.
+ * Group the next [perCat] POIs per enabled category, ordered by how far away they are.
+ * The distance metric is pluggable via [distanceOf]: the route fields pass distance *ahead
+ * on the route* ([aheadMetersFor] against the rider's progress); the nearby fields pass
+ * straight-line distance from the rider. A POI whose [distanceOf] is null is dropped (behind
+ * the rider on a route, or no location fix yet for nearby).
  *
- * @param progressMeters how far the rider has ridden along the route.
- * @param toleranceMeters how far behind [progressMeters] a POI may still count as
- *   "ahead" — absorbs GPS jitter so a POI right at the rider doesn't flicker away.
+ * One function, two metrics — so the field and the overview can't disagree on which POIs
+ * count or how far they are (the reason [aheadMetersFor] is shared, below).
+ *
+ * @param distanceOf meters to reach a POI, or null to drop it.
  */
 fun upcomingByCategory(
     pois: List<Poi>,
     enabledCategories: Set<Category>,
-    progressMeters: Double,
     perCat: Int = 3,
-    toleranceMeters: Double = DEFAULT_TOLERANCE_METERS,
+    distanceOf: (Poi) -> Double?,
 ): Map<Category, List<UpcomingPoi>> {
     if (enabledCategories.isEmpty()) return emptyMap()
 
@@ -43,8 +45,8 @@ fun upcomingByCategory(
     for (poi in pois) {
         val cat = Category.ofType(poi.type) ?: continue
         val bucket = byCat[cat] ?: continue
-        val ahead = aheadMetersFor(poi, progressMeters, toleranceMeters) ?: continue
-        bucket.add(UpcomingPoi(poi.name, cat, ahead, poi.detourMeters))
+        val dist = distanceOf(poi) ?: continue
+        bucket.add(UpcomingPoi(poi.name, cat, dist, poi.detourMeters))
     }
 
     return byCat.mapValues { (_, list) ->

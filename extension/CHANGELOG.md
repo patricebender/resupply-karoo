@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0](https://github.com/patricebender/resupply-karoo/compare/v1.0.0...v1.1.0) (2026-09-18)
+
+
+### Features
+
+* filter water POIs to safe sources ([#48](https://github.com/patricebender/resupply-karoo/issues/48)) ([41fcc09](https://github.com/patricebender/resupply-karoo/commit/41fcc09bbce018b13b591fc7bce3f930f6bada27))
+* live places around you when no route is loaded ([#45](https://github.com/patricebender/resupply-karoo/issues/45)) ([f1d74ed](https://github.com/patricebender/resupply-karoo/commit/f1d74ed630f30c359f57ebf23e20421b7b71a6c1))
+* switch POI categories live without rebuilding ([#47](https://github.com/patricebender/resupply-karoo/issues/47)) ([b25b489](https://github.com/patricebender/resupply-karoo/commit/b25b48904fe2fc1b04a58a674c02bff87c568b82))
+
 ## [1.0.0](https://github.com/patricebender/resupply-karoo/compare/v0.10.0...v1.0.0) (2026-09-15)
 
 

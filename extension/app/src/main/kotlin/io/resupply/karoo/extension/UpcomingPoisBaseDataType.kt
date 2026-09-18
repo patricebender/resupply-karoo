@@ -125,7 +125,7 @@ abstract class UpcomingPoisBaseDataType(
                 liveFlow,
                 rotation,
             ) { pois, routeLen, cfg, live, tick ->
-                Frame(pois, routeLen, cfg.enabledCategories, cfg.detourMeters,
+                Frame(pois, routeLen, cfg.enabledCategories, cfg.safeWaterOnly, cfg.detourMeters,
                     live.stream, live.routeState, live.location, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
@@ -153,6 +153,7 @@ abstract class UpcomingPoisBaseDataType(
         val pois: List<Poi>,
         val routeLenMeters: Double,
         val enabled: Set<Category>,
+        val safeWaterOnly: Boolean,
         val detourMeters: Int,
         val stream: StreamState.Streaming?,
         val routeState: RouteState,
@@ -223,7 +224,7 @@ abstract class UpcomingPoisBaseDataType(
             // overview list agree on what's "nearby". No progress/off-route concept applies.
             val rider = f.location
             val radius = f.detourMeters.toDouble()
-            val upcoming = upcomingByCategory(f.pois, f.enabled) { poi ->
+            val upcoming = upcomingByCategory(f.pois, f.enabled, safeWaterOnly = f.safeWaterOnly) { poi ->
                 rider?.let { haversine(it, LatLng(poi.lat, poi.lng)) }?.takeIf { it <= radius }
             }
             return renderResolved(
@@ -251,7 +252,7 @@ abstract class UpcomingPoisBaseDataType(
         val onRoute = values?.get(DataType.Field.ON_ROUTE)?.let { it >= 0.5 } ?: true
         if (!onRoute && progress > START_GRACE_METERS) return OffRouteMessage(mainActivity, interactive)
 
-        val upcoming = upcomingByCategory(f.pois, f.enabled) { aheadMetersFor(it, progress) }
+        val upcoming = upcomingByCategory(f.pois, f.enabled, safeWaterOnly = f.safeWaterOnly) { aheadMetersFor(it, progress) }
         renderResolved(
             ResolvedPois(f.enabled, upcoming, progress, source = source),
             config,

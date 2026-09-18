@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import io.resupply.karoo.R
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
+import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.PoiSource
@@ -84,6 +85,9 @@ fun WaybookScreen(
     // memory; this filters `pois` to the enabled subset at render time, so toggling a
     // category updates the overview instantly with no rebuild.
     enabledCategories: Set<Category>,
+    // Narrow water to safe sources (taps, graveyards, explicitly-potable) at render time.
+    // Only bites when the water category is enabled; the build keeps every water POI.
+    safeWaterOnly: Boolean,
     routeLengthMeters: Double,
     // Live along-route position of the rider, or null when there's no route/live
     // stream. Drives the timeline marker, per-row distance-ahead, and the initial
@@ -121,8 +125,12 @@ fun WaybookScreen(
     // All downstream logic (source derivation, strip, radar, list, auto-scroll) operates on this
     // filtered set. We keep the raw [pois] to tell "nothing built" apart from "built, but every
     // category is toggled off" (below) — the two want different empty faces.
-    val visiblePois = remember(pois, enabledCategories) {
-        pois.filter { Category.ofType(it.type) in enabledCategories }
+    val visiblePois = remember(pois, enabledCategories, safeWaterOnly) {
+        pois.filter { poi ->
+            val cat = Category.ofType(poi.type) ?: return@filter false
+            cat in enabledCategories &&
+                !(cat == Category.WATER && safeWaterOnly && !ResupplyConfig.isSafeWaterSource(poi.tags))
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

@@ -207,7 +207,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
             // against the *whole* built set, not just what this session drew, so a category
             // toggled off — or pins left over from a previous map session (shownIds resets when
             // the map layer is re-subscribed) — are always cleared.
-            val visible = pois.filter { Category.ofType(it.type) in cfg.enabledCategories }
+            val visible = pois.filter { cfg.showsPoi(it) }
             pois.map { it.id } to visible
         }
             .onEach { (allIds, visible) ->

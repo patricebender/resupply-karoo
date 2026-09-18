@@ -201,6 +201,7 @@ class MainActivity : ComponentActivity() {
             is Screen.Waybook -> WaybookScreen(
                 pois = pois,
                 enabledCategories = config.enabledCategories,
+                safeWaterOnly = config.safeWaterOnly,
                 routeLengthMeters = routeLength,
                 progressMeters = progressMeters,
                 routeState = route,
@@ -224,11 +225,14 @@ class MainActivity : ComponentActivity() {
                 SettingsScreen(
                     config = config,
                     buildState = buildState,
-                    hasPins = pois.isNotEmpty(),
+                    pois = pois,
                     installedSummary = installedSummary(installed),
                     onDetourChange = { m -> lifecycleScope.launch { configStore.setDetour(m) } },
                     onCategoryToggle = { c, on ->
                         lifecycleScope.launch { configStore.setCategoryEnabled(c, on) }
+                    },
+                    onSafeWaterToggle = { on ->
+                        lifecycleScope.launch { configStore.setSafeWaterOnly(on) }
                     },
                     onBuild = ::runBuild,
                     onClear = {

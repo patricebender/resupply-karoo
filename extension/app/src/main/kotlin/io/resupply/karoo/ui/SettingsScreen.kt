@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -23,37 +24,54 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
+import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.ResupplyConfig
 import kotlin.math.roundToInt
 
 /**
  * Settings, reached from the Waybook header gear. One scrollable screen in sections —
- * Categories (color chip grid, showing the last build's per-category counts), Detour
- * radius, then Data (the region picker entry). The top bar carries a trashcan that clears
- * the current places; Build itself lives on the overview, not here.
+ * Categories (color chip grid, showing the per-category counts of what's currently *shown*),
+ * Detour radius, then Data (the region picker entry). The top bar carries a trashcan that
+ * clears the current places; Build itself lives on the overview, not here.
  */
 @Composable
 fun SettingsScreen(
     config: ResupplyConfig,
     buildState: BuildState,
-    hasPins: Boolean,
+    // The whole built set (every category). The chip badges count the *visible* subset of
+    // this through [ResupplyConfig.showsPoi], so a category toggle or the safe-water switch
+    // updates the counts live, in step with the map/overview and with no rebuild.
+    pois: List<Poi>,
     installedSummary: String,
     onDetourChange: (Int) -> Unit,
     onCategoryToggle: (Category, Boolean) -> Unit,
+    onSafeWaterToggle: (Boolean) -> Unit,
     onBuild: () -> Unit,
     onClear: () -> Unit,
     onOpenRegions: () -> Unit,
     onBack: () -> Unit,
 ) {
     val building = buildState is BuildState.Building
+    val hasPins = pois.isNotEmpty()
+    // Per-category badge counts of the *visible* POIs (same gate as the map/overview), so the
+    // water badge reflects the safe subset and every badge tracks its toggle without a rebuild.
+    val visibleCounts = remember(pois, config) {
+        pois.asSequence()
+            .filter { config.showsPoi(it) }
+            .mapNotNull { Category.ofType(it.type) }
+            .groupingBy { it }
+            .eachCount()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Top bar: back + title + rebuild + trashcan. Build feedback lives on the rebuild
@@ -111,9 +129,15 @@ fun SettingsScreen(
             SectionHeader("Categories")
             CategoryChipGrid(
                 enabled = config.enabledCategories,
-                counts = (buildState as? BuildState.Success)?.byCategory ?: emptyMap(),
+                counts = visibleCounts,
                 canToggle = !building,
                 onToggle = onCategoryToggle,
+            )
+            SafeWaterRow(
+                checked = config.safeWaterOnly,
+                // Inactive while water is off (nothing to narrow) or a build is running.
+                enabled = Category.WATER in config.enabledCategories && !building,
+                onToggle = onSafeWaterToggle,
             )
 
             Spacer(Modifier.height(20.dp))
@@ -138,6 +162,47 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
             SectionHeader("Data")
             RegionsRow(summary = installedSummary, enabled = !building, onClick = onOpenRegions)
+        }
+    }
+}
+
+/**
+ * The "safe water sources" toggle, sitting just under the category grid since it narrows the
+ * water category. The label + switch fit one row; the explanation of what counts as safe sits
+ * permanently on the line below, led by an info icon. Greys out when water is disabled —
+ * there's nothing to narrow, so the control has no effect.
+ */
+@Composable
+private fun SafeWaterRow(checked: Boolean, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val labelColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Safe water sources",
+                style = MaterialTheme.typography.bodyLarge,
+                color = labelColor,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled)
+        }
+        Row(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
+            Icon(
+                Icons.Filled.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp).padding(top = 1.dp),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                "Taps, water tagged as drinkable, and graveyards (which usually have a tap). " +
+                    "Sources of unconfirmed quality are hidden.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

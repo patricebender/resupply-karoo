@@ -3,6 +3,7 @@ package io.resupply.karoo.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -26,11 +27,22 @@ class ConfigStore(private val context: Context) {
         } else {
             enabledIds.mapNotNull { id -> Category.entries.find { it.id == id } }.toSet()
         }
-        ResupplyConfig(detourMeters = detour, enabledCategories = categories)
+        // Absent key reads as on, so existing installs get the safe-water default without a
+        // first-run write and without a surprise flip.
+        val safeWaterOnly = prefs[SAFE_WATER_KEY] ?: true
+        ResupplyConfig(
+            detourMeters = detour,
+            enabledCategories = categories,
+            safeWaterOnly = safeWaterOnly,
+        )
     }
 
     suspend fun setDetour(meters: Int) {
         context.dataStore.edit { it[DETOUR_KEY] = meters }
+    }
+
+    suspend fun setSafeWaterOnly(enabled: Boolean) {
+        context.dataStore.edit { it[SAFE_WATER_KEY] = enabled }
     }
 
     suspend fun setCategoryEnabled(category: Category, enabled: Boolean) {
@@ -66,6 +78,7 @@ class ConfigStore(private val context: Context) {
     private companion object {
         val DETOUR_KEY = intPreferencesKey("detour_meters")
         val CATEGORIES_KEY = stringSetPreferencesKey("enabled_categories")
+        val SAFE_WATER_KEY = booleanPreferencesKey("safe_water_only")
         val REGIONS_KEY = stringSetPreferencesKey("installed_regions")
     }
 }

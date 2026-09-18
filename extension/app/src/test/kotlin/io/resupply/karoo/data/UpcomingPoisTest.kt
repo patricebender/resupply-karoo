@@ -15,6 +15,7 @@ class UpcomingPoisTest {
         along: Double,
         detour: Int = 0,
         name: String? = null,
+        tags: Map<String, String> = emptyMap(),
     ) = Poi(
         id = id,
         lat = 0.0,
@@ -23,6 +24,10 @@ class UpcomingPoisTest {
         name = name,
         distancesAlongRoute = listOf(along),
         detourMeters = detour,
+        // Water POIs default to a safe subtype so the ordering/distance tests below aren't
+        // silently emptied by the safe-water filter (default on). Safe-water behaviour has
+        // its own tests.
+        tags = if (type == "REST_STOP" && tags.isEmpty()) mapOf("water_subtype" to "tap") else tags,
     )
 
     // The route-distance metric the fields/overview pass for a route build.
@@ -82,8 +87,9 @@ class UpcomingPoisTest {
     @Test
     fun `nearby metric orders by straight-line distance from the rider`() {
         // Same category, different locations; rider at origin. Distance grows with longitude.
-        val near = Poi(id = "near", lat = 0.0, lng = 0.001, type = "REST_STOP", name = "near")
-        val far = Poi(id = "far", lat = 0.0, lng = 0.01, type = "REST_STOP", name = "far")
+        val safe = mapOf("water_subtype" to "tap")
+        val near = Poi(id = "near", lat = 0.0, lng = 0.001, type = "REST_STOP", name = "near", tags = safe)
+        val far = Poi(id = "far", lat = 0.0, lng = 0.01, type = "REST_STOP", name = "far", tags = safe)
         val rider = LatLng(0.0, 0.0)
         val out = upcomingByCategory(listOf(far, near), setOf(Category.WATER)) { p ->
             haversine(rider, LatLng(p.lat, p.lng))
@@ -103,6 +109,42 @@ class UpcomingPoisTest {
         }
         // No location → null for every POI → empty category list.
         assertTrue(out.getValue(Category.WATER).isEmpty())
+    }
+
+    @Test
+    fun `safe-water filter hides unknown sources but keeps taps, graveyards and potable`() {
+        val pois = listOf(
+            poi("tap", "REST_STOP", along = 1_000.0, tags = mapOf("water_subtype" to "tap")),
+            poi("grave", "REST_STOP", along = 2_000.0, tags = mapOf("water_subtype" to "graveyard")),
+            poi("potable", "REST_STOP", along = 3_000.0,
+                tags = mapOf("water_subtype" to "spring", "drinking_water" to "yes")),
+            poi("unknown", "REST_STOP", along = 4_000.0,
+                tags = mapOf("water_subtype" to "fountain", "drinking_water" to "unknown")),
+        )
+        val out = upcomingByCategory(pois, setOf(Category.WATER), distanceOf = aheadOf(0.0))
+        // The unknown fountain is dropped; the three safe sources remain, in route order.
+        assertEquals(listOf(1_000.0, 2_000.0, 3_000.0), out.getValue(Category.WATER).map { it.aheadMeters })
+    }
+
+    @Test
+    fun `safe-water off keeps every water source`() {
+        val pois = listOf(
+            poi("tap", "REST_STOP", along = 1_000.0, tags = mapOf("water_subtype" to "tap")),
+            poi("unknown", "REST_STOP", along = 2_000.0,
+                tags = mapOf("water_subtype" to "fountain", "drinking_water" to "unknown")),
+        )
+        val out = upcomingByCategory(
+            pois, setOf(Category.WATER), safeWaterOnly = false, distanceOf = aheadOf(0.0),
+        )
+        assertEquals(2, out.getValue(Category.WATER).size)
+    }
+
+    @Test
+    fun `safe-water filter never touches non-water categories`() {
+        // A fuel POI has no water tags; it must not be filtered by the water gate.
+        val pois = listOf(poi("f", "GAS_STATION", along = 1_000.0))
+        val out = upcomingByCategory(pois, setOf(Category.FUEL), distanceOf = aheadOf(0.0))
+        assertEquals(1, out.getValue(Category.FUEL).size)
     }
 
     @Test

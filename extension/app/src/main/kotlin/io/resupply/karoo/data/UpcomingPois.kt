@@ -35,6 +35,9 @@ fun upcomingByCategory(
     pois: List<Poi>,
     enabledCategories: Set<Category>,
     perCat: Int = 3,
+    // Narrow water to safe sources (see [ResupplyConfig.isSafeWaterSource]); only bites for
+    // the water category. Kept parallel to the map/overview so the field agrees with them.
+    safeWaterOnly: Boolean = true,
     distanceOf: (Poi) -> Double?,
 ): Map<Category, List<UpcomingPoi>> {
     if (enabledCategories.isEmpty()) return emptyMap()
@@ -45,6 +48,7 @@ fun upcomingByCategory(
     for (poi in pois) {
         val cat = Category.ofType(poi.type) ?: continue
         val bucket = byCat[cat] ?: continue
+        if (cat == Category.WATER && safeWaterOnly && !ResupplyConfig.isSafeWaterSource(poi.tags)) continue
         val dist = distanceOf(poi) ?: continue
         bucket.add(UpcomingPoi(poi.name, cat, dist, poi.detourMeters))
     }

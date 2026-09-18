@@ -28,9 +28,8 @@ class PoiQuery(private val database: PoiDatabase) {
     fun queryCorridor(
         route: List<LatLng>,
         radiusMeters: Int,
-        categories: Set<Category>,
     ): List<Poi> {
-        if (route.size < 2 || categories.isEmpty()) return emptyList()
+        if (route.size < 2) return emptyList()
 
         // Query with the extended bbox so sparse segments can reach further.
         val maxRadius = minOf(
@@ -49,7 +48,7 @@ class PoiQuery(private val database: PoiDatabase) {
         val dLng = maxRadius / (METERS_PER_DEG_LAT * cos(Math.toRadians(midLat)))
 
         val rows = candidatesInBox(
-            minLat - dLat, maxLat + dLat, minLng - dLng, maxLng + dLng, categories,
+            minLat - dLat, maxLat + dLat, minLng - dLng, maxLng + dLng,
         )
 
         // Carry each Row through selection so we can emit its parsed tags at the end.
@@ -78,12 +77,11 @@ class PoiQuery(private val database: PoiDatabase) {
     }
 
     /** POIs within [radiusMeters] of a point (fallback when no route is loaded). */
-    fun queryNearby(center: LatLng, radiusMeters: Int, categories: Set<Category>): List<Poi> {
-        if (categories.isEmpty()) return emptyList()
+    fun queryNearby(center: LatLng, radiusMeters: Int): List<Poi> {
         val dLat = radiusMeters / METERS_PER_DEG_LAT
         val dLng = radiusMeters / (METERS_PER_DEG_LAT * cos(Math.toRadians(center.lat)))
         return candidatesInBox(
-            center.lat - dLat, center.lat + dLat, center.lng - dLng, center.lng + dLng, categories,
+            center.lat - dLat, center.lat + dLat, center.lng - dLng, center.lng + dLng,
         )
             .filter { haversine(center, LatLng(it.lat, it.lng)) <= radiusMeters }
             .map { it.toPoi(emptyList(), detourMeters = 0) }
@@ -113,26 +111,23 @@ class PoiQuery(private val database: PoiDatabase) {
         )
     }
 
-    /** R*Tree range-scan within a bbox, filtered by category. */
+    /** R*Tree range-scan within a bbox, across all categories. */
     private fun candidatesInBox(
         minLat: Double, maxLat: Double, minLng: Double, maxLng: Double,
-        categories: Set<Category>,
     ): List<Row> {
         // R*Tree constraints need numeric literals; the bbox values are our own
-        // computed doubles (no user input → no injection). Category values are
-        // bound as parameters.
-        val placeholders = categories.joinToString(",") { "?" }
+        // computed doubles (no user input → no injection). All categories are fetched;
+        // the enabled-category filter is applied downstream at render time, so a rider
+        // can toggle a category on/off without rebuilding.
         val sql = """
             SELECT p.osm_id, p.lat, p.lng, p.type, p.name, p.tags
             FROM poi_rtree r
             JOIN poi p ON p.id = r.id
             WHERE r.maxLat >= $minLat AND r.minLat <= $maxLat
               AND r.maxLng >= $minLng AND r.minLng <= $maxLng
-              AND p.category IN ($placeholders)
         """.trimIndent()
-        val args = categories.map { it.id }.toTypedArray()
         val rows = ArrayList<Row>()
-        database.writableDatabase().rawQuery(sql, args).use { c ->
+        database.writableDatabase().rawQuery(sql, null).use { c ->
             while (c.moveToNext()) {
                 rows.add(
                     Row(

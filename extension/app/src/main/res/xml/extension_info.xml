@@ -12,6 +12,12 @@
         description="@string/field_upcoming_pois_desc"
         graphical="true"
         icon="@drawable/ic_resupply" />
+    <DataType
+        typeId="favorite-pois"
+        displayName="@string/field_favorite_pois"
+        description="@string/field_favorite_pois_desc"
+        graphical="true"
+        icon="@drawable/ic_resupply" />
     <!-- Single-category fields. typeId must match CategoryPoiDataType.typeIdFor (category.id).
          description is REQUIRED — omitting it NPEs the Karoo AppStoreService in a restart
          loop (see memory upcoming-pois-datafield). -->

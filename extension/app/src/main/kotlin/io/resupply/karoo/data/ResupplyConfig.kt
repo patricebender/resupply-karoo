@@ -44,19 +44,34 @@ data class ResupplyConfig(
      * Only bites while [Category.WATER] is enabled.
      */
     val safeWaterOnly: Boolean = true,
+    /**
+     * The rider's starred POIs on the current roadbook, by id. Persisted for one build (see
+     * [ConfigStore.clearFavorites]); route-mode only. Drives the timeline stars and the
+     * favorites data field; combined with [favoritesOnly] it also narrows [showsPoi].
+     */
+    val favoritePoiIds: Set<String> = emptySet(),
+    /**
+     * The "show favorites only" filter (the header star). When on, [showsPoi] hides every POI
+     * that isn't a favorite — so the list, map pins and fields all narrow together.
+     */
+    val favoritesOnly: Boolean = false,
 ) {
     /**
      * Whether [poi] should be shown under this config: its category must be enabled, and —
-     * for water, when [safeWaterOnly] — it must be a safe source. The single render-time gate
-     * shared by the map pins, the overview list and the Upcoming POIs field, so they can't
-     * disagree on what's visible.
+     * for water, when [safeWaterOnly] — it must be a safe source, and — when [favoritesOnly] —
+     * it must be a favorite. The single render-time gate shared by the map pins, the overview
+     * list and the Upcoming POIs field, so they can't disagree on what's visible.
      */
     fun showsPoi(poi: Poi): Boolean {
         val cat = Category.ofType(poi.type) ?: return false
         if (cat !in enabledCategories) return false
         if (cat == Category.WATER && safeWaterOnly && !isSafeWaterSource(poi.tags)) return false
+        if (favoritesOnly && poi.id !in favoritePoiIds) return false
         return true
     }
+
+    /** Whether [poi] is starred — for the list/detail/timeline star state. */
+    fun isFavorite(poi: Poi): Boolean = poi.id in favoritePoiIds
 
     companion object {
         /**

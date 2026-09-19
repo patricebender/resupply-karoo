@@ -59,6 +59,31 @@ fun upcomingByCategory(
 }
 
 /**
+ * Like [upcomingByCategory], but narrowed to the rider's favorites ([favoriteIds]). Favorites
+ * span categories, so the result is still grouped per category (the favorites field lays each
+ * out as its own card, nearest-first) — it's the same shape [upcomingByCategory] returns, just
+ * pre-filtered to starred POIs. Category enable + safe-water gates still apply, so the field
+ * agrees with the overview list under the same [distanceOf] metric.
+ */
+fun favoritesUpcoming(
+    pois: List<Poi>,
+    enabledCategories: Set<Category>,
+    favoriteIds: Set<String>,
+    perCat: Int = 3,
+    safeWaterOnly: Boolean = true,
+    distanceOf: (Poi) -> Double?,
+): Map<Category, List<UpcomingPoi>> {
+    if (favoriteIds.isEmpty()) return emptyMap()
+    return upcomingByCategory(
+        pois.filter { it.id in favoriteIds },
+        enabledCategories,
+        perCat,
+        safeWaterOnly,
+        distanceOf,
+    )
+}
+
+/**
  * How far ahead a POI is for a rider at [progressMeters], or null if it's behind (more
  * than [toleranceMeters] past). A POI can touch the route more than once
  * ([Poi.distancesAlongRoute]); we take its nearest crossing that is still ahead. Shared

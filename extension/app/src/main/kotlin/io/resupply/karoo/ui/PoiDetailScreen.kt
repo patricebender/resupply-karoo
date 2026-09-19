@@ -2,6 +2,10 @@ package io.resupply.karoo.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +28,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TravelExplore
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.DoNotDisturbOn
@@ -51,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -83,16 +90,33 @@ fun PoiDetailScreen(
     // unavailable (no API key, or category not eligible) → the button is hidden.
     cachedGoogleHours: PlacesClient.Result?,
     loadGoogleHours: (suspend () -> PlacesClient.Result?)?,
+    // Favorites are route-mode only: the star is shown only when [canFavorite]. [isFavorite]
+    // drives its fill; [onToggleFavorite] persists the change (round-trips to the list/header).
+    canFavorite: Boolean,
+    isFavorite: Boolean,
+    onToggleFavorite: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     val style = styleForType(poi.type)
     val context = LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Back arrow gets its own row so the hero below can center cleanly.
-        Row(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+        // Back arrow gets its own row so the hero below can center cleanly; the favorite star
+        // rides at the trailing end of the same row (route mode only), mirroring the overview
+        // header so the control reads as the same feature.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            Spacer(Modifier.weight(1f))
+            if (canFavorite) {
+                DetailStarToggle(
+                    filled = isFavorite,
+                    onClick = { onToggleFavorite(!isFavorite) },
+                )
             }
         }
 
@@ -217,6 +241,35 @@ fun PoiDetailScreen(
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+/**
+ * The detail view's favorite star: an outlined star that crossfades to filled yellow with a
+ * small scale bump, matching the overview's [WaybookScreen] star toggle so favorites read as one
+ * control across screens.
+ */
+@Composable
+private fun DetailStarToggle(filled: Boolean, onClick: () -> Unit) {
+    val tint by animateColorAsState(
+        targetValue = if (filled) FavoriteYellow else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+        label = "detailStarTint",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (filled) 1.15f else 1f,
+        animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+        label = "detailStarScale",
+    )
+    IconButton(onClick = onClick) {
+        Icon(
+            imageVector = if (filled) Icons.Filled.Star else Icons.Outlined.StarBorder,
+            contentDescription = if (filled) "Remove from favorites" else "Add to favorites",
+            tint = tint,
+            modifier = Modifier
+                .size(26.dp)
+                .graphicsLayer(scaleX = scale, scaleY = scale),
+        )
     }
 }
 

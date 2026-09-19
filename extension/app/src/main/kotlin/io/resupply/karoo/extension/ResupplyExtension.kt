@@ -101,20 +101,40 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
             val state = event.state
             routeLoaded.set(state is OnNavigationState.NavigationState.NavigatingRoute)
 
-            // A route's identity: name + distance. A route-less state (idle, nearby) has a null
-            // key, so nearby→route is a key change too and clears the same way.
-            val key = (state as? OnNavigationState.NavigationState.NavigatingRoute)
-                ?.let { "${it.name}|${it.routeDistance}" }
+            // A detour to a tapped POI (NavigatingToDestination) drops the route context from the
+            // event, but the original route is still loaded underneath and resumes when the detour
+            // ends. Clearing the roadbook here would cost the rider their whole roadbook +
+            // favorites for a quick side-trip, then force a rebuild on rejoin. So we leave the
+            // roadbook — and lastRouteKey — untouched during the detour; the fields show an "on a
+            // detour" note and recover automatically on resume.
+            when (state) {
+                is OnNavigationState.NavigationState.NavigatingToDestination -> return@addConsumer
 
-            // Clear when the context changes and there are POIs to drop: route removed, a
-            // different route loaded, or a route loaded over a nearby set (null → key). A
-            // route reloaded identical to the current one (same key) keeps its roadbook.
-            if (key != lastRouteKey && repository.pois.value.isNotEmpty()) {
-                Timber.d("route context changed ($lastRouteKey → $key) → clearing roadbook")
-                repository.clear() // also flips nearbyLive off
-                repository.setBuildState(BuildState.Idle)
+                is OnNavigationState.NavigationState.NavigatingRoute -> {
+                    // Clear only on a genuinely DIFFERENT route (name/distance change), or a route
+                    // loaded over a route-less/nearby set (null → key). Same route reloaded keeps
+                    // its roadbook.
+                    val key = "${state.name}|${state.routeDistance}"
+                    if (key != lastRouteKey && repository.pois.value.isNotEmpty()) {
+                        Timber.d("route context changed ($lastRouteKey → $key) → clearing roadbook")
+                        repository.clear() // also flips nearbyLive off
+                        repository.setBuildState(BuildState.Idle)
+                    }
+                    lastRouteKey = key
+                }
+
+                is OnNavigationState.NavigationState.Idle -> {
+                    // Navigation truly ended (not a detour). Drop a stale route roadbook so the
+                    // overview returns to its build prompt for the next context. A route-less
+                    // (nearby) set stays — it's location-scoped, not route-scoped.
+                    if (lastRouteKey != null && repository.pois.value.isNotEmpty()) {
+                        Timber.d("navigation ended → clearing route roadbook")
+                        repository.clear()
+                        repository.setBuildState(BuildState.Idle)
+                    }
+                    lastRouteKey = null
+                }
             }
-            lastRouteKey = key
         }
     }
 
@@ -177,7 +197,10 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
         // The all-categories rotating field, plus one single-category field per category so a
         // rider can pin just the amenity they care about. Generated from the enum so adding a
         // category needs no wiring here (only an extension_info.xml <DataType> + strings).
-        listOf(UpcomingPoisDataType(karooSystem, repository, configStore, extension)) +
+        listOf(
+            UpcomingPoisDataType(karooSystem, repository, configStore, extension),
+            FavoritePoisDataType(karooSystem, repository, configStore, extension),
+        ) +
             Category.entries.map { CategoryPoiDataType(it, karooSystem, repository, configStore, extension) }
     }
 

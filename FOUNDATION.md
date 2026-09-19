@@ -1,11 +1,15 @@
 # Resupply for Karoo 3 — Foundation
 
-A Karoo 3 extension that turns a loaded route into an offline guide of POIs along the way
-(coffee, food, water, bike shops, fuel), so a rider can plan refuels and stops without
-cellular signal. Two things set it apart:
+A Karoo 3 extension that turns a loaded route into an offline roadbook of resupply stops
+along the way (food, water, coffee, bike shops, fuel), so a rider can plan refuels without
+cellular signal. With no route loaded it finds resupply around the rider's current location
+instead. What sets it apart:
 
 - **Configurable detour distance** — how far off the route to search for POIs.
-- **Category toggles** — switch POI categories on/off before building.
+- **Category toggles** — nine POI categories, switched on/off live without rebuilding.
+- **Favorites** — star the stops you're planning for; refine the roadbook down to just those.
+- **Safe-water filter** — drinkable water only by default.
+- **Ride-view data fields** — upcoming resupply, favorites, or a single category on a data page.
 
 This document describes the architecture and design as they stand. Some earlier design
 rationale (rejected data sources, an abandoned backend) is kept at the end for context.
@@ -31,7 +35,7 @@ no backend and no live third-party query dependency at build time.
 │  Karoo 3 extension (Kotlin, io.resupply.karoo)               │
 │                                                              │
 │  MainActivity (Compose)          ResupplyExtension           │
-│   Waybook / Filter / Detail       (map-layer service)        │
+│   Waybook / Settings / Detail     (map layer + data fields)  │
 │        │                            │                        │
 │        │  onBuild()                 │  onBonusAction("build") │
 │        ▼                            ▼                        │
@@ -68,11 +72,13 @@ POIs live in a spatial SQLite database:
   plus a `poi_rtree` R*Tree virtual table for the spatial index. Uses requery's bundled
   SQLite, which guarantees the R*Tree module (Android's built-in SQLite may omit it).
 - The database is built offline (see Data) and shipped as an app asset
-  (`pois-baden-wuerttemberg.sqlite`). On first run the app copies the asset into its files
-  dir. When the bundled asset's version (`BUNDLED_DB_VERSION` in `data/PoiDatabase.kt`,
-  matched to the DB's `PRAGMA user_version`) is newer than the installed copy, the app
-  re-seeds — so schema/tag changes reach existing installs. A stale copy is a rebuildable
-  read-only cache, safe to overwrite.
+  (`pois-germany.sqlite`, with a `regions.json` catalog of downloadable regions). On first
+  run the app copies the asset into its files dir. When the bundled asset's version
+  (`BUNDLED_DB_VERSION` in `data/PoiDatabase.kt`, matched to the DB's `PRAGMA user_version`)
+  is newer than the installed copy, the app re-seeds — so schema/tag changes reach existing
+  installs. A stale copy is a rebuildable read-only cache, safe to overwrite.
+- **Multiple regions:** rows carry a `region_id`, and the rider can download and install
+  additional per-region files in-app (`ui/RegionsScreen.kt`) beyond the bundled Germany seed.
 
 ### Spatial query (`data/PoiQuery.kt`)
 
@@ -88,14 +94,38 @@ POIs live in a spatial SQLite database:
   map; sparse segments (fewer than 6 within the base radius) may reach up to 2× the radius
   (capped at 5 km) to surface isolated rural POIs. Tunables are in the `PoiQuery` companion.
 
-### Detour radius and categories
+### Detour radius, categories, favorites
 
-- **Detour radius:** 500 m to 5000 m in 500 m steps, default 500 m (`data/ResupplyConfig.kt`).
+- **Detour radius:** tight 100 m and 250 m options for on-route resupply, then 500 m steps to
+  5000 m; default **250 m** (`DETOUR_OPTIONS_METERS` in `data/ResupplyConfig.kt`).
 - **Categories:** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops, Fuel
-  stations, Ice Cream. Default enabled: **Water + Bike**. Each category maps to a set of OSM
-  tags and to a `Symbol.POI` type for the map pin (table below).
+  stations, Ice Cream, Hotels. Default enabled: **Water + Bike**. Each maps to a set of OSM
+  tags and to a `Symbol.POI` type for the map pin (table below). Toggling a category is a
+  **render-time filter over the already-built set** — no rebuild.
+- **Safe-water filter (`safeWaterOnly`, default on):** water POIs are narrowed to drinkable
+  sources; unnamed/untagged fountains, springs and wells of unknown potability are hidden
+  until the rider opts in. Also a render-time filter, and only bites while Water is enabled.
+- **Favorites:** the rider stars POIs on the current roadbook (`favoritePoiIds`, a route
+  concept cleared on every build). A header "favorites only" toggle (`favoritesOnly`) narrows
+  the list, map pins and fields to just those. `ResupplyConfig.showsPoi` is the single
+  render-time gate all surfaces share, so they can't disagree on what's visible.
 
 Config is persisted with Jetpack DataStore (`data/ConfigStore.kt`).
+
+### Ride-view data fields
+
+The extension registers karoo-ext data types (`extension/*DataType.kt`) so a rider can put
+resupply on a data page, updated live as the ride progresses:
+
+- **Upcoming POIs** (`UpcomingPoisDataType`) — the next stops ahead across all enabled
+  categories, rotating through them in a small slot.
+- **Favorites** (`FavoritePoisDataType`) — the same layout narrowed to starred POIs; with no
+  route loaded it falls back to nearby POIs, so it stays useful in live mode.
+- **Per-category** (`CategoryPoiDataType`, one per `Category`) — pinned to a single amenity;
+  shows an "Enable <Category>" prompt when that category is off.
+
+All three share `UpcomingPoisBaseDataType` for streaming, route-progress and the
+no-roadbook/off-route states.
 
 ## UX Principles
 
@@ -125,13 +155,16 @@ This is a glanceable device, often used mid-ride with gloves. The UI must always
 No navigation framework — a small `sealed interface Screen` the host switches on, so list
 scroll state is preserved across navigation.
 
-- **Waybook** (`ui/WaybookScreen.kt`) — the route view: a header with build/clear/filter
-  shortcuts and a live build-status line, a route distance strip with POI dots
-  (`ui/RouteStrip.kt`), and a scrollable list of POIs along the route ordered by
-  distance-along-route. Rows show an open/closed badge when hours are known.
-- **Filter** (`ui/FilterScreen.kt`) — build settings: the Build action in the top bar
-  (always visible) with build status below it, the detour-radius slider, category toggles,
-  and Clear at the bottom.
+- **Waybook** (`ui/WaybookScreen.kt`) — the route view: a header with build/clear/settings
+  shortcuts, a "favorites only" star, and a live build-status line; a route distance strip
+  with POI dots (`ui/RouteStrip.kt`), and a scrollable list of POIs along the route ordered
+  by distance-along-route. Rows show an open/closed badge when hours are known and a star to
+  favorite the stop.
+- **Settings** (`ui/SettingsScreen.kt`) — build settings: the Build action in the top bar
+  (always visible) with build status below it, the detour-radius slider, category toggles
+  (`ui/CategoryChipGrid.kt`), the safe-water switch, and Clear at the bottom.
+- **Regions** (`ui/RegionsScreen.kt`) — the region picker: installed vs downloadable regions,
+  with an in-app download that fetches and installs a per-region POI file.
 - **Detail** (`ui/PoiDetailScreen.kt`) — a centered hero (category disc, name, type) then
   grouped cards: open/closed status pill + route context (distance-along / detour), the
   weekday opening-hours table, contact (address + phone), a scannable website QR, and an
@@ -147,8 +180,9 @@ through the **Karoo HTTP bridge** (so they work over the paired phone, not just 
   `wikipedia`/`wikidata` tag, cached in memory for the session. Falls back to the OSM
   `description` tag when there's no Wikipedia link.
 - **Google Places opening hours** (`data/PlacesClient.kt`) — offered only when OSM has no
-  `opening_hours`, the category is one where hours matter (Supermarkets, Café & Bar,
-  Restaurants, Fuel, Ice Cream), and a `PLACES_API_KEY` is configured at build time. The
+  `opening_hours`, the category is one where hours matter (`GOOGLE_HOURS_CATEGORIES`:
+  Supermarkets, Café & Bar, Restaurants, Fuel, Ice Cream, Hotels, Bike shops), and a
+  `PLACES_API_KEY` is configured at build time. The
   resolved **Place ID** is persisted (Maps ToS permits caching Place IDs indefinitely); the
   **hours themselves are never persisted** — kept in memory with a short TTL and re-fetched,
   per Maps ToS. Opening-hours parsing of the OSM `opening_hours` string lives in
@@ -167,26 +201,30 @@ service (no Overpass, no Places at build time).
 The database is built by **`extension/tools/poi-db/`** (TypeScript + `osmium`): download a
 regional Geofabrik extract → `osmium tags-filter` to just our POI tags → export GeoJSONSeq
 → load the `poi` table + R*Tree with an allowlisted set of tags (`opening_hours`, `website`,
-`phone`, `addr:*`, `wikipedia`, …). Coverage currently ships **Baden-Württemberg**; widening
-is an `OSM_REGION` change (see `extension/tools/poi-db/README.md`).
+`phone`, `addr:*`, `wikipedia`, …). The **bundled seed ships all of Germany**
+(`pois-germany.sqlite`); riders can download other regions in-app from the region picker
+(`ui/RegionsScreen.kt`) — a per-region file fetched and installed on-device, keyed by
+`region_id`. Coverage and the region list are an `OSM_REGION` / `regions.ts` change (see
+`extension/tools/poi-db/README.md`).
 
 ### Categories → OSM tags → Symbol.POI type
 
-| Category         | OSM tags                                     | Symbol.POI type            |
-|------------------|----------------------------------------------|----------------------------|
-| Restaurants      | `amenity=restaurant/fast_food`               | FOOD                       |
-| Supermarkets     | `shop=supermarket/convenience`               | CONVENIENCE_STORE          |
-| Café & Bar       | `amenity=cafe` / `amenity=bar/pub`           | COFFEE / BAR               |
-| Water            | `amenity=drinking_water`                     | REST_STOP → WATER icon     |
-| Toilets          | `amenity=toilets`                            | RESTROOM                   |
-| Bike shops       | `shop=bicycle`                               | BIKE_SHOP                  |
-| Fuel stations    | `amenity=fuel` (car/repair/automat excluded) | GAS_STATION                |
-| Ice Cream        | (declared; not yet in the DB pipeline)       | —                          |
+| Category         | OSM tags                                       | Symbol.POI type            |
+|------------------|------------------------------------------------|----------------------------|
+| Restaurants      | `amenity=restaurant/fast_food`                 | FOOD                       |
+| Supermarkets     | `shop=supermarket/convenience`                 | CONVENIENCE_STORE          |
+| Café & Bar       | `amenity=cafe` / `amenity=bar/pub`             | COFFEE / BAR               |
+| Water            | `amenity=drinking_water`                       | REST_STOP → WATER icon     |
+| Toilets          | `amenity=toilets`                              | RESTROOM                   |
+| Bike shops       | `shop=bicycle`                                 | BIKE_SHOP                  |
+| Fuel stations    | `amenity=fuel` (car/repair/automat excluded)   | GAS_STATION                |
+| Ice Cream        | `amenity=ice_cream` / `shop=ice_cream`         | ICE_CREAM                  |
+| Hotels           | `tourism=hotel/guest_house/hostel/motel`       | LODGING                    |
 
 Fuel is included for its on-site shop (drinks/snacks), not the fuel; car dealerships,
-repair shops, and unattended automats are filtered out. `Ice Cream` exists in the app's
-`Category` enum but has no tag rule in the pipeline yet, so it produces no POIs until the DB
-is rebuilt with an `amenity=ice_cream` rule.
+repair shops, and unattended automats are filtered out. Water sources all share the
+`REST_STOP` type; the `safeWaterOnly` render filter (above) separates drinkable from
+unknown-potability at display time, not in the pipeline.
 
 The category set must stay in sync across three places: the Kotlin `Category` enum
 (`data/ResupplyConfig.kt`), the pipeline `categories.ts`/`contract.ts`, and the karoo-ext
@@ -201,6 +239,8 @@ The category set must stay in sync across three places: the Kotlin `Category` en
   doesn't match a `Symbol.POI.Types` constant renders the generic pin.
 - `BonusAction` (declared in `extension_info.xml`) + `onBonusAction(actionId)` — in-ride
   trigger.
+- `DataTypeImpl` + `startView(ViewConfig)` + `GlanceRemoteViews` — custom data fields
+  (upcoming, favorites, per-category) registered by `ResupplyExtension`, rendered with Glance.
 - **`startMap` fires only while navigating a route** — it is not a settings toggle. Pins
   appear once a route is being navigated; leaving the route clears them.
 
@@ -231,23 +271,21 @@ resupply-karoo/
   docs/releasing.md
   extension/               # Kotlin Android app (karoo-ext)
     app/src/main/kotlin/io/resupply/karoo/
-      data/                # config, repository, POI DB + spatial query, hours, clients
+      data/                # config, repository, POI DB + spatial query, hours, clients, regions
       build/               # BuildController + BuildState
-      extension/           # ResupplyExtension (map layer + BonusAction)
-      ui/                  # Compose screens (Waybook, Filter, Detail, RouteStrip)
+      extension/           # ResupplyExtension (map layer + BonusAction) + data-field types
+      ui/                  # Compose screens (Waybook, Settings, Regions, Detail, RouteStrip)
+      ui/field/            # ride-view data-field rendering
       util/                # polyline decode + geometry
-    app/src/main/assets/   # bundled pois-*.sqlite
+    app/src/main/assets/   # bundled pois-germany.sqlite + regions.json
     tools/poi-db/          # OSM → SQLite pipeline (TypeScript + osmium)
   .github/workflows/       # release-please + APK build
 ```
 
 ## Open items (deferred)
 
-- Distance-to-next-POI data field; category-colored pin styling.
-- Multiple-region install/merge (the `PoiDatabase` KDoc references a `RegionInstaller` that
-  isn't built yet — coverage is single-region seeding for now).
-- Widen coverage beyond Baden-Württemberg; automate the extract refresh.
-- Ice Cream category: add the `amenity=ice_cream` rule and rebuild the DB.
+- Category-colored pin styling.
+- Automate the extract refresh across regions.
 
 ---
 

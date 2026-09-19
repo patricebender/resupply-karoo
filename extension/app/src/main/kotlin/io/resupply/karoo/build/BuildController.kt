@@ -37,6 +37,8 @@ class BuildController(
         val config = configStore.config.first()
 
         repository.clear()
+        // A new roadbook drops the last one's favorites — they're scoped to one build.
+        configStore.clearFavorites()
         publish(BuildState.Building())
 
         return try {

@@ -209,6 +209,14 @@ class MainActivity : ComponentActivity() {
                 nearbyLive = nearbyLive,
                 nearbyRadiusMeters = config.detourMeters,
                 buildState = buildState,
+                favoritePoiIds = config.favoritePoiIds,
+                favoritesOnly = config.favoritesOnly,
+                onToggleFavorite = { poi, fav ->
+                    lifecycleScope.launch { configStore.setFavorite(poi.id, fav) }
+                },
+                onToggleFavoritesFilter = {
+                    lifecycleScope.launch { configStore.setFavoritesOnly(!config.favoritesOnly) }
+                },
                 onBuild = ::runBuild,
                 onOpenSettings = { screen = Screen.Settings },
                 onOpenPoi = { screen = Screen.Detail(it.id) },
@@ -238,6 +246,7 @@ class MainActivity : ComponentActivity() {
                     onClear = {
                         repository.clear()
                         repository.setBuildState(BuildState.Idle)
+                        lifecycleScope.launch { configStore.clearFavorites() }
                     },
                     onOpenRegions = { screen = Screen.Regions },
                     onBack = { screen = Screen.Waybook },
@@ -289,6 +298,11 @@ class MainActivity : ComponentActivity() {
                             { fetchGoogleHours(poi) }
                         } else {
                             null
+                        },
+                        canFavorite = routeLength > 0,
+                        isFavorite = poi.id in config.favoritePoiIds,
+                        onToggleFavorite = { fav ->
+                            lifecycleScope.launch { configStore.setFavorite(poi.id, fav) }
                         },
                         onBack = { screen = Screen.Waybook },
                     )

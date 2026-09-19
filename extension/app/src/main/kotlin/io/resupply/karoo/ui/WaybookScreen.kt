@@ -31,6 +31,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -50,6 +52,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -104,6 +107,12 @@ fun WaybookScreen(
     // The detour radius (meters) — sets the nearby proximity band's right-edge scale.
     nearbyRadiusMeters: Int,
     buildState: BuildState,
+    // The rider's starred POIs (ids) on the current roadbook, and whether the "favorites only"
+    // filter is on. Route-mode only — both are ignored/hidden when there's no route.
+    favoritePoiIds: Set<String>,
+    favoritesOnly: Boolean,
+    onToggleFavorite: (Poi, Boolean) -> Unit,
+    onToggleFavoritesFilter: () -> Unit,
     onBuild: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenPoi: (Poi) -> Unit,
@@ -120,17 +129,29 @@ fun WaybookScreen(
     // changed (the guard is reset alongside this, so it fires exactly once per entry).
     reentryKey: Int,
 ) {
+    // Favorites are a route-mode feature: a nearby set is ephemeral, so the star toggles, the
+    // filter, and the timeline stars are all hidden without a route.
+    val routeMode = routeLengthMeters > 0.0
+
     // Show only the enabled categories. The build keeps every category in memory, so this is
     // the sole gate on what the overview renders — re-enabling a category surfaces it instantly.
-    // All downstream logic (source derivation, strip, radar, list, auto-scroll) operates on this
-    // filtered set. We keep the raw [pois] to tell "nothing built" apart from "built, but every
-    // category is toggled off" (below) — the two want different empty faces.
-    val visiblePois = remember(pois, enabledCategories, safeWaterOnly) {
+    // We keep the raw [pois] to tell "nothing built" apart from "built, but every category is
+    // toggled off", and keep this category-filtered set separate from the favorites-filtered one
+    // so "no favorites yet" is distinguishable from "no categories" (each wants its own face).
+    val categoryVisible = remember(pois, enabledCategories, safeWaterOnly) {
         pois.filter { poi ->
             val cat = Category.ofType(poi.type) ?: return@filter false
             cat in enabledCategories &&
                 !(cat == Category.WATER && safeWaterOnly && !ResupplyConfig.isSafeWaterSource(poi.tags))
         }
+    }
+
+    // The final rendered set: category-filtered, then narrowed to favorites when the filter is
+    // on (route mode only). This mirrors [ResupplyConfig.showsPoi] so the list agrees with the
+    // map pins and the fields under the same filter.
+    val visiblePois = remember(categoryVisible, routeMode, favoritesOnly, favoritePoiIds) {
+        if (routeMode && favoritesOnly) categoryVisible.filter { it.id in favoritePoiIds }
+        else categoryVisible
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -150,6 +171,11 @@ fun WaybookScreen(
             // Nearby auto-refresh active → header shows a "Live" chip (and no rebuild button,
             // which would be redundant when the set refreshes itself).
             nearbyLive = nearbyLive,
+            // The favorites filter star, shown only in route mode. Hidden until there's a built
+            // set with an enabled category to filter (nothing to narrow before then).
+            showFavoritesFilter = routeMode && categoryVisible.isNotEmpty(),
+            favoritesOnly = favoritesOnly,
+            onToggleFavoritesFilter = onToggleFavoritesFilter,
             onOpenSettings = onOpenSettings,
         )
         HorizontalDivider()
@@ -157,8 +183,16 @@ fun WaybookScreen(
         // A roadbook exists but every category is toggled off → don't dangle the "Find places"
         // build prompt (a rebuild would change nothing — the POIs are already in memory, just
         // filtered out). Show a distinct "no categories selected" face that points at Settings.
-        if (pois.isNotEmpty() && visiblePois.isEmpty()) {
+        if (pois.isNotEmpty() && categoryVisible.isEmpty()) {
             NoCategoriesState(onOpenSettings)
+            return@Column
+        }
+
+        // Categories resolve to POIs, but the favorites filter is on and nothing's starred yet →
+        // a dedicated "no favorites" face with a one-tap "show all" escape, rather than a blank
+        // list. Only reachable in route mode (the filter is route-only).
+        if (categoryVisible.isNotEmpty() && visiblePois.isEmpty()) {
+            NoFavoritesState(onShowAll = onToggleFavoritesFilter)
             return@Column
         }
 
@@ -232,6 +266,8 @@ fun WaybookScreen(
                     routeLengthMeters = routeLengthMeters,
                     progressMeters = progressMeters,
                     listPositionMeters = topVisibleMeters,
+                    // Little yellow stars above favorite dots (route timeline only).
+                    favoritePoiIds = favoritePoiIds,
                 )
                 HorizontalDivider()
             }
@@ -286,6 +322,11 @@ fun WaybookScreen(
                     aheadMeters = ahead,
                     behindMeters = behind,
                     onClick = { onOpenPoi(poi) },
+                    // Route mode: a per-row star (trailing) to favorite straight from the list.
+                    // Live mode: no star (favorites are route-only) — the chevron stays instead.
+                    favoritable = routeMode,
+                    isFavorite = poi.id in favoritePoiIds,
+                    onToggleFavorite = { fav -> onToggleFavorite(poi, fav) },
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
             }
@@ -299,6 +340,9 @@ private fun Header(
     showStatusLine: Boolean,
     showIcon: Boolean,
     nearbyLive: Boolean,
+    showFavoritesFilter: Boolean,
+    favoritesOnly: Boolean,
+    onToggleFavoritesFilter: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     Row(
@@ -361,9 +405,52 @@ private fun Header(
         // pulsing dot carries the motion; the header (unlike the band) has room for it beside
         // the settings gear. Manual rebuild lives in Settings for the route case.
         if (nearbyLive) LiveChip()
+        // The favorites filter (route mode only): an outlined star that fills yellow when the
+        // list is narrowed to favorites. Sits just left of Settings so both live in the header.
+        if (showFavoritesFilter) {
+            StarToggle(
+                filled = favoritesOnly,
+                contentDescription = if (favoritesOnly) "Show all places" else "Show favorites only",
+                onClick = onToggleFavoritesFilter,
+            )
+        }
         IconButton(onClick = onOpenSettings) {
             Icon(Icons.Filled.Settings, contentDescription = "Settings")
         }
+    }
+}
+
+/**
+ * The shared favorites star toggle: an outlined star that crossfades to a filled yellow star
+ * when [filled], with a small scale bump on change so the tap reads without being cute. Used by
+ * the header filter and the per-row favorite control so both animate identically.
+ */
+@Composable
+private fun StarToggle(
+    filled: Boolean,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tint by androidx.compose.animation.animateColorAsState(
+        targetValue = if (filled) FavoriteYellow else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+        label = "starTint",
+    )
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (filled) 1.15f else 1f,
+        animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+        label = "starScale",
+    )
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = if (filled) Icons.Filled.Star else Icons.Outlined.StarBorder,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier
+                .size(24.dp)
+                .graphicsLayer(scaleX = scale, scaleY = scale),
+        )
     }
 }
 
@@ -451,6 +538,11 @@ private fun PoiRow(
     // Meters behind the rider once passed (≥0); null when still ahead / no position.
     behindMeters: Double?,
     onClick: () -> Unit,
+    // Route mode: show the trailing star to favorite from the list. Live mode: false → the
+    // chevron shows instead (favorites are route-only).
+    favoritable: Boolean,
+    isFavorite: Boolean,
+    onToggleFavorite: (Boolean) -> Unit,
 ) {
     val style = styleForType(poi.type)
     val passed = behindMeters != null
@@ -492,11 +584,21 @@ private fun PoiRow(
                 )
             }
         }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // Route mode: a star to favorite this POI straight from the list (the row itself still
+        // opens the detail). Live mode: the plain chevron, since favorites don't apply there.
+        if (favoritable) {
+            StarToggle(
+                filled = isFavorite,
+                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                onClick = { onToggleFavorite(!isFavorite) },
+            )
+        } else {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -637,6 +739,51 @@ private fun NoCategoriesState(onOpenSettings: () -> Unit) {
         // category chips are) rather than triggering a build; nothing to rebuild, only re-enable.
         DarkPillButton(onClick = onOpenSettings, icon = Icons.Filled.Settings) {
             Text("Choose categories", style = MaterialTheme.typography.titleSmall, color = ButtonCream)
+        }
+    }
+}
+
+/**
+ * Shown when the favorites filter is on but nothing is starred yet. Mirrors [NoCategoriesState]:
+ * same 72dp mark slot + centered layout so switching to/from it doesn't jump. The CTA turns the
+ * filter back off (there's nothing to rebuild — the POIs are in memory, just filtered to an empty
+ * favorites set), so one tap returns to the full list where the rider can star places.
+ */
+@Composable
+private fun NoFavoritesState(onShowAll: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // Same Resupply mark + 72dp slot as the other placeholder faces (not a big star — three
+        // stars on one screen read as broken). The favorites cue is the copy and the row/header
+        // stars, not a hero star here.
+        Image(
+            painter = painterResource(R.drawable.ic_resupply),
+            contentDescription = null,
+            modifier = Modifier.size(72.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "No favorites yet",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Tap the star on a place to build your shortlist",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(20.dp))
+        DarkPillButton(onClick = onShowAll, icon = Icons.Filled.Place) {
+            Text("Show all places", style = MaterialTheme.typography.titleSmall, color = ButtonCream)
         }
     }
 }

@@ -5,6 +5,8 @@
     <string name="action_build">Build Resupply</string>
     <string name="field_upcoming_pois">POIs (all, rotating)</string>
     <string name="field_upcoming_pois_desc">Next POIs ahead, or nearby when no route is loaded — cycling through categories</string>
+    <string name="field_favorite_pois">Favorites</string>
+    <string name="field_favorite_pois_desc">Your starred places ahead on the route — or nearby POIs when no route is loaded</string>
 
     <!-- Single-category fields: one amenity per field, same card as the rotating field. -->
     <string name="field_pois_restaurants">Restaurants ahead</string>

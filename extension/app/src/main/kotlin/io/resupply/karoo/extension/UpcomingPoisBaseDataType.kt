@@ -21,6 +21,7 @@ import io.resupply.karoo.data.ResupplyRepository
 import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.UpcomingPoi
 import io.resupply.karoo.data.aheadMetersFor
+import io.resupply.karoo.data.favoritesUpcoming
 import io.resupply.karoo.data.formatDetour
 import io.resupply.karoo.data.formatKm
 import io.resupply.karoo.data.elideName
@@ -29,6 +30,7 @@ import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.data.upcomingByCategory
 import io.resupply.karoo.ui.field.BuildPromptField
 import io.resupply.karoo.ui.field.CategoryRow
+import io.resupply.karoo.ui.field.DetourMessage
 import io.resupply.karoo.ui.field.FieldMessage
 import io.resupply.karoo.ui.field.NearbyPromptField
 import io.resupply.karoo.ui.field.OffRouteMessage
@@ -126,7 +128,7 @@ abstract class UpcomingPoisBaseDataType(
                 rotation,
             ) { pois, routeLen, cfg, live, tick ->
                 Frame(pois, routeLen, cfg.enabledCategories, cfg.safeWaterOnly, cfg.detourMeters,
-                    live.stream, live.routeState, live.location, tick)
+                    cfg.favoritePoiIds, live.stream, live.routeState, live.location, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
                     render(f, config, mainActivity, interactive)
@@ -155,11 +157,20 @@ abstract class UpcomingPoisBaseDataType(
         val enabled: Set<Category>,
         val safeWaterOnly: Boolean,
         val detourMeters: Int,
+        val favoriteIds: Set<String>,
         val stream: StreamState.Streaming?,
         val routeState: RouteState,
         val location: LatLng?,
         val rotationTick: Long,
     )
+
+    /**
+     * When true, this field shows the rider's favorites on a route (see [FavoritePoisDataType]):
+     * the shared [render] selects via [favoritesUpcoming] instead of [upcomingByCategory] in the
+     * route branch. With no route it falls back to the same nearby set as the all-POIs field, so
+     * only the route path differs.
+     */
+    protected open val favoritesField: Boolean = false
 
     /**
      * POIs resolved for a subclass to render, plus which kind of build they came from.
@@ -212,6 +223,14 @@ abstract class UpcomingPoisBaseDataType(
             }
         }
 
+        // On a detour to a tapped POI: the route roadbook is kept (see watchNavState), but live
+        // progress is measuring the side-trip, not the route — so "next ahead" would be wrong.
+        // Show a friendly detour note; it recovers to the normal view the moment the Karoo
+        // resumes the route. Only for route roadbooks (a nearby set has no route to detour from).
+        if (f.routeState is RouteState.Detour && f.routeLenMeters > 0.0) {
+            return DetourMessage(mainActivity, interactive)
+        }
+
         // Route vs nearby is derived from the built route length (see poiSourceFor): a route
         // build carries a positive length, a /nearby build zeroes it. This is the same signal
         // the Waybook strip and overview key off — one source of truth, can't desync.
@@ -224,6 +243,10 @@ abstract class UpcomingPoisBaseDataType(
             // overview list agree on what's "nearby". No progress/off-route concept applies.
             val rider = f.location
             val radius = f.detourMeters.toDouble()
+            // Favorites are a route concept, but with no route the favorites field falls back to
+            // the same nearby set as the all-POIs field (announced in its profile description),
+            // so the field stays useful in live mode instead of sitting on a dead "need a route"
+            // note. So we compute the nearby set for every field here — favorites included.
             val upcoming = upcomingByCategory(f.pois, f.enabled, safeWaterOnly = f.safeWaterOnly) { poi ->
                 rider?.let { haversine(it, LatLng(poi.lat, poi.lng)) }?.takeIf { it <= radius }
             }
@@ -252,7 +275,13 @@ abstract class UpcomingPoisBaseDataType(
         val onRoute = values?.get(DataType.Field.ON_ROUTE)?.let { it >= 0.5 } ?: true
         if (!onRoute && progress > START_GRACE_METERS) return OffRouteMessage(mainActivity, interactive)
 
-        val upcoming = upcomingByCategory(f.pois, f.enabled, safeWaterOnly = f.safeWaterOnly) { aheadMetersFor(it, progress) }
+        val upcoming = if (favoritesField) {
+            favoritesUpcoming(f.pois, f.enabled, f.favoriteIds, safeWaterOnly = f.safeWaterOnly) {
+                aheadMetersFor(it, progress)
+            }
+        } else {
+            upcomingByCategory(f.pois, f.enabled, safeWaterOnly = f.safeWaterOnly) { aheadMetersFor(it, progress) }
+        }
         renderResolved(
             ResolvedPois(f.enabled, upcoming, progress, source = source),
             config,
@@ -293,6 +322,18 @@ abstract class UpcomingPoisBaseDataType(
         )
     }
 
+    /**
+     * Max category cards that fit a slot [px] tall: a 2-column grid with as many rows as the
+     * height allows (each row needs [CARD_MIN_HEIGHT_PX]), capped at [GRID_MAX_ROWS]. Returns 1
+     * when the slot is too short for a grid → the single rotating card is used. Shared by the
+     * all-categories and favorites fields so both size the grid identically.
+     */
+    protected fun capacityFor(px: Int): Int {
+        if (px < GRID_MIN_HEIGHT_PX) return 1
+        val rows = (px / CARD_MIN_HEIGHT_PX).coerceIn(1, GRID_MAX_ROWS)
+        return rows * GRID_COLS
+    }
+
     companion object {
         private const val MAIN_ACTIVITY_CLASS = "io.resupply.karoo.MainActivity"
 
@@ -302,5 +343,13 @@ abstract class UpcomingPoisBaseDataType(
         // Below this progress, treat ON_ROUTE=false as "not started yet" (rider is
         // approaching the route start) rather than a mid-ride deviation.
         private const val START_GRACE_METERS = 500.0
+
+        // Grid geometry (see UpcomingPoisDataType history for the on-device measurements): a
+        // 3-line card needs ~175px per row to render without clipping; below 200px a 2-wide grid
+        // is too cramped, so fall back to one rotating card; cap at 3 rows (→ 6 cards).
+        private const val GRID_COLS = 2
+        private const val CARD_MIN_HEIGHT_PX = 175
+        private const val GRID_MIN_HEIGHT_PX = 200
+        private const val GRID_MAX_ROWS = 3
     }
 }

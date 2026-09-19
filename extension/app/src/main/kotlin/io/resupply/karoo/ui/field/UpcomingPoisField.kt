@@ -381,6 +381,78 @@ fun NearbyPromptField(activity: ComponentName, interactive: Boolean) {
     }
 }
 
+// The favorites amber, reused for the detour note so a side-trip to a starred POI reads warmly
+// (a chosen stop) rather than as an error.
+private val DetourAmber = ColorProvider(Color(0xFFFFB300))
+// The favorites gold — mirrors the app's FavoriteYellow so the field's star reads as the same
+// feature as the list/timeline stars.
+private val FavoriteGold = ColorProvider(Color(0xFFFFB300))
+
+/**
+ * The favorites field's "route loaded, nothing starred yet" state: a gold star glyph over "No
+ * favorites yet" and a hint to tap the star on a place. Prettier than a bare grey line, and it
+ * mirrors the app's own NoFavoritesState so the feature reads consistently. Tap opens the app,
+ * where the rider stars places. (Only the route case reaches this — the no-route case falls back
+ * to nearby POIs.)
+ */
+@androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+@androidx.compose.runtime.Composable
+fun FavoritesEmptyField(activity: ComponentName, interactive: Boolean) {
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .tapToOpen(interactive, openAppIntent(activity)),
+        verticalAlignment = Alignment.Vertical.CenterVertically,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text("⭐", style = TextStyle(fontSize = 22.sp))
+        Spacer(GlanceModifier.height(2.dp))
+        Text(
+            "No favorites yet",
+            style = TextStyle(color = FavoriteGold, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+        )
+        Text(
+            "tap a place's star",
+            style = TextStyle(color = Dim, fontSize = 11.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * "On a detour" state: the rider tapped a POI and is navigating to it, so the route roadbook is
+ * paused (kept, not lost). A calm note — a pin glyph + "On a detour" + a reassuring sub-line —
+ * rather than the alarm-toned [OffRouteMessage], because this is a deliberate side-trip. Recovers
+ * to the normal POI view automatically when the Karoo resumes the route. Still tap-to-open.
+ */
+@androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+@androidx.compose.runtime.Composable
+fun DetourMessage(activity: ComponentName, interactive: Boolean) {
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .tapToOpen(interactive, openAppIntent(activity)),
+        verticalAlignment = Alignment.Vertical.CenterVertically,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text("📍", style = TextStyle(fontSize = 20.sp))
+        Spacer(GlanceModifier.height(2.dp))
+        Text(
+            "On a detour",
+            style = TextStyle(color = DetourAmber, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+        )
+        Text(
+            "roadbook resumes on route",
+            style = TextStyle(color = Dim, fontSize = 11.sp),
+            maxLines = 1,
+        )
+    }
+}
+
 private val Amber = ColorProvider(Color(0xFFFFB300))
 
 /**

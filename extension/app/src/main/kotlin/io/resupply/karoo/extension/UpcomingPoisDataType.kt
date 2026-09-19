@@ -83,30 +83,5 @@ class UpcomingPoisDataType(
 
     companion object {
         const val TYPE_ID = "upcoming-pois"
-
-        // Grid geometry. A 3-line card (label / big distance / follow-ups) needs ~175px per
-        // grid ROW to render all three lines WITHOUT clipping — measured on-device: at 152px/row
-        // (456px ÷ 3) the follow-up line was chopped. A grid cell needs more than a standalone
-        // 1/8 slot (which fits 3 lines in ~148px) because it also carries the grid's outer
-        // padding and the profile card's border. Fewer, taller rows beat clipped ones. 2-wide.
-        private const val GRID_COLS = 2
-        private const val CARD_MIN_HEIGHT_PX = 175
-        // Below this height a 2-wide grid is too cramped, so fall back to one rotating card.
-        private const val GRID_MIN_HEIGHT_PX = 200
-        // Cap grid rows at 3 (→ 6 cards): more rows shrink cards toward clutter, and 6 already
-        // covers most of the 8-category set. At 175px/row: 8/8 ≈ 456px → 2 rows; a taller
-        // full-screen profile (~525px+) → 3 rows.
-        private const val GRID_MAX_ROWS = 3
-
-        /**
-         * Max category cards that fit a slot [px] tall: a 2-column grid with as many rows as
-         * the height allows (each row needs [CARD_MIN_HEIGHT_PX]), capped at [GRID_MAX_ROWS].
-         * Returns 1 when the slot is too short for a grid → the single rotating card is used.
-         */
-        private fun capacityFor(px: Int): Int {
-            if (px < GRID_MIN_HEIGHT_PX) return 1
-            val rows = (px / CARD_MIN_HEIGHT_PX).coerceIn(1, GRID_MAX_ROWS)
-            return rows * GRID_COLS
-        }
     }
 }

@@ -73,6 +73,8 @@ fun RouteStrip(
     riderLocation: LatLng? = null,
     // Nearby mode: the detour radius, i.e. the radar's right-edge distance.
     nearbyRadiusMeters: Int = 0,
+    // Favorited POI ids: their dots get a small yellow star above them. Route timeline only.
+    favoritePoiIds: Set<String> = emptySet(),
 ) {
     // Nearby proximity radar takes over when there's no route but we have a rider fix.
     if (routeLengthMeters <= 0.0 && riderLocation != null) {
@@ -85,6 +87,7 @@ fun RouteStrip(
     // THROUGH the dot lane, so a cluster of POIs at the rider's position can't occlude it.
     val riderColor = Color(0xFFE53935)
     val riderHalo = Color(0xFFFFFFFF)
+    val favoriteColor = FavoriteYellow
     // Read theme colors here (composable scope) so the Canvas lambda can use them.
     val listMarkColor = MaterialTheme.colorScheme.primary
     val trackColor = MaterialTheme.colorScheme.outlineVariant
@@ -152,6 +155,10 @@ fun RouteStrip(
                 val minSplay = 3.dp.toPx()                 // even a near POI clears the track
                 val maxSplay = dotZoneH.toPx() / 2f - dotRadius  // farthest sits at the lane edge
                 val detourScale = maxOf(500, pois.maxOfOrNull { it.detourMeters } ?: 0).toFloat()
+                // Favorite markers are collected here and drawn in a fixed lane at the very top
+                // AFTER all dots — so a starred POI reads as "there's a favorite around here"
+                // above the dot clutter, not lost inside a splayed cluster. (x, passed).
+                val favoriteMarks = mutableListOf<Pair<Float, Boolean>>()
                 for (poi in pois) {
                     val along = poi.distancesAlongRoute.firstOrNull() ?: continue
                     val frac = (along / routeLengthMeters).coerceIn(0.0, 1.0).toFloat()
@@ -161,11 +168,28 @@ fun RouteStrip(
                         else minSplay + (maxSplay - minSplay) *
                             (poi.detourMeters / detourScale).coerceIn(0f, 1f)
                     val dotY = dotLaneY - poi.detourSide * splay
+                    val dotX = xAt(frac)
                     drawCircle(
                         color = styleForType(poi.type).color.let { if (passed) it.copy(alpha = 0.3f) else it },
                         radius = dotRadius,
-                        center = Offset(xAt(frac), dotY),
+                        center = Offset(dotX, dotY),
                     )
+                    if (poi.id in favoritePoiIds) favoriteMarks.add(dotX to passed)
+                }
+
+                // Favorite stars, in a fixed lane pinned to the top of the strip (well above every
+                // dot), a touch bigger than a dot so they're legible in a dense timeline. They
+                // mark WHERE along the route a favorite sits, not which dot — one row at the top.
+                if (favoriteMarks.isNotEmpty()) {
+                    val starRadius = 5.5.dp.toPx()
+                    val starY = starRadius + 0.5.dp.toPx()   // hug the very top edge
+                    for ((x, passed) in favoriteMarks) {
+                        drawStar(
+                            center = Offset(x, starY),
+                            radius = starRadius,
+                            color = favoriteColor.let { if (passed) it.copy(alpha = 0.3f) else it },
+                        )
+                    }
                 }
 
                 // The list-position bracket: a thin vertical dropping from the pill lane
@@ -271,6 +295,26 @@ private fun DrawScope.drawRiderMarker(x: Float, topY: Float, bottomY: Float, col
 
     // The bright red playhead.
     drawLine(color, Offset(x, topY), Offset(x, bottomY), strokeWidth = stem)
+}
+
+/**
+ * A filled 5-point star centered at [center] with outer [radius], marking a favorited POI above
+ * its timeline dot. Built as a 10-vertex path alternating outer/inner points (inner radius at
+ * ~0.42 of outer for the classic star waist). First point aimed straight up so it reads upright.
+ */
+private fun DrawScope.drawStar(center: Offset, radius: Float, color: Color) {
+    val innerRadius = radius * 0.42f
+    val path = Path()
+    for (i in 0 until 10) {
+        val r = if (i % 2 == 0) radius else innerRadius
+        // Start at -90° (straight up) and step 36° per vertex.
+        val angle = Math.toRadians((-90 + i * 36).toDouble())
+        val px = center.x + (r * Math.cos(angle)).toFloat()
+        val py = center.y + (r * Math.sin(angle)).toFloat()
+        if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
+    }
+    path.close()
+    drawPath(path, color)
 }
 
 /**

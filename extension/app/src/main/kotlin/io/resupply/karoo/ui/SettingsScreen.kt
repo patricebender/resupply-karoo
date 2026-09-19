@@ -65,12 +65,22 @@ fun SettingsScreen(
     val hasPins = pois.isNotEmpty()
     // Per-category badge counts of the *visible* POIs (same gate as the map/overview), so the
     // water badge reflects the safe subset and every badge tracks its toggle without a rebuild.
+    // Once a build exists, seed every enabled category to 0 so one that resolves to nothing under
+    // the current filter (e.g. water hidden by safe-water, or a category simply absent along the
+    // route) shows an explicit "0" rather than a blank badge — the count would otherwise be absent
+    // (→ no badge), reading as "not built" when it's really "built, none here". Before any build
+    // there's nothing to count, so no seeding (no badges at all).
     val visibleCounts = remember(pois, config) {
-        pois.asSequence()
+        val counted = pois.asSequence()
             .filter { config.showsPoi(it) }
             .mapNotNull { Category.ofType(it.type) }
             .groupingBy { it }
             .eachCount()
+        if (pois.isNotEmpty()) {
+            config.enabledCategories.associateWith { counted[it] ?: 0 }
+        } else {
+            counted
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

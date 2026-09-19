@@ -148,6 +148,46 @@ class UpcomingPoisTest {
     }
 
     @Test
+    fun `favoritesUpcoming keeps only starred POIs, still grouped and ordered`() {
+        val pois = listOf(
+            poi("w1", "REST_STOP", along = 1_000.0),
+            poi("w2", "REST_STOP", along = 3_000.0),
+            poi("f1", "GAS_STATION", along = 2_000.0),
+        )
+        val out = favoritesUpcoming(
+            pois,
+            setOf(Category.WATER, Category.FUEL),
+            favoriteIds = setOf("w2", "f1"),
+            distanceOf = aheadOf(0.0),
+        )
+        // Only the starred water POI survives in its category…
+        assertEquals(listOf(3_000.0), out.getValue(Category.WATER).map { it.aheadMeters })
+        // …and the starred fuel POI in its own.
+        assertEquals(listOf(2_000.0), out.getValue(Category.FUEL).map { it.aheadMeters })
+    }
+
+    @Test
+    fun `favoritesUpcoming with no favorites yields empty map`() {
+        val pois = listOf(poi("w", "REST_STOP", along = 1_000.0))
+        val out = favoritesUpcoming(pois, setOf(Category.WATER), favoriteIds = emptySet(), distanceOf = aheadOf(0.0))
+        assertTrue(out.isEmpty())
+    }
+
+    @Test
+    fun `favoritesUpcoming still honors category and safe-water gates`() {
+        val pois = listOf(
+            poi("tap", "REST_STOP", along = 1_000.0, tags = mapOf("water_subtype" to "tap")),
+            poi("unknown", "REST_STOP", along = 2_000.0,
+                tags = mapOf("water_subtype" to "fountain", "drinking_water" to "unknown")),
+        )
+        // Both starred, but the unknown source is still dropped by the safe-water filter.
+        val out = favoritesUpcoming(
+            pois, setOf(Category.WATER), favoriteIds = setOf("tap", "unknown"), distanceOf = aheadOf(0.0),
+        )
+        assertEquals(listOf(1_000.0), out.getValue(Category.WATER).map { it.aheadMeters })
+    }
+
+    @Test
     fun `poiSourceFor maps route length to source`() {
         assertEquals(PoiSource.ROUTE, poiSourceFor(1_234.0))
         assertEquals(PoiSource.NEARBY, poiSourceFor(0.0))

@@ -26,6 +26,10 @@ val ClosedRed = Color(0xFFB00020)
 // Neutral tint for the "hours exist but are seasonal/complex" badge/chip.
 val SeasonalGrey = Color(0xFF757575)
 
+// The favorites star fill — a warm amber-gold, used by the list/detail/header star toggles
+// and the timeline stars so favorites read as one feature.
+val FavoriteYellow = Color(0xFFFFB300)
+
 /** Current weekday as an OpeningHours day index (0=Mon … 6=Sun). */
 fun todayIndex(now: Calendar = Calendar.getInstance()): Int =
     when (now.get(Calendar.DAY_OF_WEEK)) {

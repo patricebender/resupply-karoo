@@ -56,4 +56,29 @@ class ResupplyConfigTest {
         val fuel = Poi(id = "f", lat = 0.0, lng = 0.0, type = "GAS_STATION")
         assertTrue(cfg.showsPoi(fuel))
     }
+
+    @Test
+    fun `showsPoi narrows to favorites only when favoritesOnly is on`() {
+        val fuelA = Poi(id = "a", lat = 0.0, lng = 0.0, type = "GAS_STATION")
+        val fuelB = Poi(id = "b", lat = 0.0, lng = 0.0, type = "GAS_STATION")
+        val cfg = ResupplyConfig(
+            enabledCategories = setOf(Category.FUEL),
+            favoritePoiIds = setOf("a"),
+            favoritesOnly = true,
+        )
+        assertTrue(cfg.showsPoi(fuelA))   // starred → shown
+        assertFalse(cfg.showsPoi(fuelB))  // not starred → hidden
+
+        // Filter off → both show regardless of the favorites set.
+        val off = cfg.copy(favoritesOnly = false)
+        assertTrue(off.showsPoi(fuelA))
+        assertTrue(off.showsPoi(fuelB))
+    }
+
+    @Test
+    fun `isFavorite reflects membership in the favorites set`() {
+        val cfg = ResupplyConfig(favoritePoiIds = setOf("a"))
+        assertTrue(cfg.isFavorite(Poi(id = "a", lat = 0.0, lng = 0.0, type = "GAS_STATION")))
+        assertFalse(cfg.isFavorite(Poi(id = "b", lat = 0.0, lng = 0.0, type = "GAS_STATION")))
+    }
 }

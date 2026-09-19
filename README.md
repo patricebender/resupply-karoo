@@ -10,53 +10,51 @@
 </div>
 
 A [Hammerhead Karoo](https://www.hammerhead.io/) extension that turns a loaded route into an
-offline guide of POIs along the way — coffee, food, water, bike shops, fuel — so you can plan
-refuels and stops without cellular signal.
-
-Two things set it apart: a **configurable detour distance** and **category toggles**.
+offline roadbook of resupply stops along the way — food, water, coffee, bike shops, fuel — so
+you can plan refuels without cellular signal. No route loaded? It finds resupply around you,
+live.
 
 ## Features
 
-- **Offline by default.** POIs ship with the app in a spatial SQLite database. Building the
-  roadbook and riding with it need no network — no query server, no rate limits.
-- **Route corridor search.** Loads the route you're navigating and finds POIs within your
-  chosen detour distance of it, each shown with its distance along the route and how far off
-  the route it is. With no route loaded, it falls back to POIs near your current location.
-- **Configurable detour distance.** 500 m to 5 km, in 500 m steps.
-- **Category toggles.** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops,
-  Fuel. Water and Bike are on by default.
-- **Adaptive density.** Keeps rural POIs visible while capping dense areas, so a city doesn't
-  flood the map and a quiet stretch still shows what's there.
-- **Two ways to build.** An in-app Build button and an in-ride `BonusAction`, so you can
-  rebuild without leaving the ride view. Both show a live status (searching → count, or a
-  clear error) and a per-category breakdown on success.
-- **Typed map pins + a Waybook list.** POIs draw as typed pins on the native map and appear
-  in a scrollable list ordered by distance along the route.
-- **Place detail.** Per-POI screen with opening hours (a weekday table with open/closed
-  status), address and phone, a scannable website QR, and a short description.
-- **Opening hours from OSM,** parsed from the `opening_hours` tag (weekday table, 24/7,
-  "opens at", seasonal). For food/fuel POIs where OSM has none, an optional on-demand Google
-  Places lookup fills the gap (requires an API key at build time).
-- **Optional descriptions** from Wikipedia, fetched on demand for POIs that link to it.
-
-The only network calls are the optional, on-demand opening-hours and description lookups.
-They route device→provider through the Karoo HTTP bridge, so they work over a paired phone,
-not just WiFi.
+- **Offline resupply along a route.** Finds resupply stops along the route you're riding, no
+  signal needed — the whole POI database rides along inside the app.
+- **Favorites to plan ahead.** Star the stops you're aiming for to plan the ride, then refine
+  your roadbook down to just those.
+- **Live resupply around you.** No route loaded? Resupply finds places around you and keeps
+  them fresh as you move.
+- **9 categories.** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops, Fuel,
+  Ice Cream, and Hotels — toggle any of them on or off, on the fly.
+- **Safe water sources.** Shows drinkable water by default, hiding fountains and springs of
+  unknown quality unless you want them.
+- **Google Maps for live data.** Fills in opening hours and contact details on demand when
+  OpenStreetMap doesn't have them.
+- **Data fields for the ride view.** Put upcoming resupply, your favorites, or any single
+  category straight on your data pages.
+- **Place detail at a glance.** Opening hours, address and phone, a scannable website QR, and
+  a short description for each stop.
 
 ## How it works
 
 The **`extension/`** directory is the whole app — an on-device Karoo app (Kotlin,
-[karoo-ext](https://github.com/hammerheadnav/karoo-ext) SDK). It reads the loaded route,
-lets you set a detour radius and category toggles, and queries the **spatial SQLite database
+[karoo-ext](https://github.com/hammerheadnav/karoo-ext) SDK). It reads the loaded route, lets
+you set a detour radius and category toggles, and queries the **spatial SQLite database
 bundled with the app** (an R*Tree corridor search refined against the route line) to find
-POIs — no server, fully offline. Results render as typed map pins and in the Waybook list.
+POIs — no server, fully offline. With no route loaded, the same search runs around your
+current location instead. Results render as typed map pins and in the Waybook list, ordered by
+distance along the route.
+
+A rider can pick a detour distance from tight 100/250 m up to 5 km, and rebuild either from an
+in-app Build button or an in-ride `BonusAction`. Density is capped adaptively so a city doesn't
+flood the map while a quiet stretch still shows what's there. The only network calls are the
+optional, on-demand Google Places and Wikipedia lookups; they route device→provider through the
+Karoo HTTP bridge, so they work over a paired phone, not just WiFi.
 
 POI data comes from [OpenStreetMap](https://www.openstreetmap.org/). The bundled database is
 generated offline by **`extension/tools/poi-db/`** (downloads a regional extract, filters to
 our POI tags, loads a spatial SQLite) and baked into the app as an asset the extension seeds
-on first run. The bundled seed ships Baden-Württemberg + Hessen; riders can download other
-regions in-app (Germany Complete or a single Bundesland, plus other countries) from the
-region picker — the app fetches a compact per-region file and installs it on-device.
+on first run. The bundled seed ships **all of Germany**; riders can download other regions
+in-app (a single Bundesland, or other countries) from the region picker — the app fetches a
+compact per-region file and installs it on-device.
 
 See [FOUNDATION.md](FOUNDATION.md) for the full architecture and design.
 
@@ -94,12 +92,14 @@ The bundled POI database is built offline (needs
 ```sh
 cd extension/tools/poi-db
 npm install
-# Downloads a regional extract, filters to our POI tags, writes the bundled asset.
+# Rebuilds the bundled Germany seed → app/src/main/assets/pois-germany.sqlite
+npm run build:seed
+# Or build a single region for a quick test:
 OSM_REGION=europe/germany/baden-wuerttemberg npm run build:poi-db
 ```
 
 See [`extension/tools/poi-db/README.md`](extension/tools/poi-db/README.md) for options
-(coverage, forced re-download, bumping the DB version).
+(coverage, per-region files, forced re-download, bumping the DB version).
 
 ## Releases
 

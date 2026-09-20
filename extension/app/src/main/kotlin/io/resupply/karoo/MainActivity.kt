@@ -242,6 +242,9 @@ class MainActivity : ComponentActivity() {
                     onSafeWaterToggle = { on ->
                         lifecycleScope.launch { configStore.setSafeWaterOnly(on) }
                     },
+                    onSmartDistanceToggle = { on ->
+                        lifecycleScope.launch { configStore.setSmartDistance(on) }
+                    },
                     onBuild = ::runBuild,
                     onClear = {
                         repository.clear()

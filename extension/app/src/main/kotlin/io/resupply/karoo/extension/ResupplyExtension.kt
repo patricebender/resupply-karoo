@@ -165,13 +165,13 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 // until a route loads or the roadbook is cleared.
                 repository.setNearbyLive(true)
 
-                val threshold = refetchThresholdMeters(config.detourMeters)
+                val threshold = refetchThresholdMeters(config.detourMeters, config.smartDistance)
                 val moved = lastFetchCenter?.let { haversine(it, here) } ?: Double.MAX_VALUE
                 if (moved < threshold) return@collect
 
                 val pois = try {
                     withContext(Dispatchers.IO) {
-                        query.await().queryNearby(here, config.detourMeters)
+                        query.await().queryNearby(here, config.detourMeters, config.smartDistance)
                     }
                 } catch (e: Exception) {
                     Timber.w(e, "nearby refresh query failed")

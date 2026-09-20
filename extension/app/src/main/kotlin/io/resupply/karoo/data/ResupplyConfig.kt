@@ -34,8 +34,15 @@ enum class Category(val id: String, val label: String) {
 
 /** Rider-configurable build settings. */
 data class ResupplyConfig(
-    /** Detour search radius around the route, in meters. */
+    /** Detour search radius around the route, in meters. Ignored while [smartDistance] is on. */
     val detourMeters: Int = DEFAULT_DETOUR_METERS,
+    /**
+     * When true, the search distance is derived per area from local POI density instead of the
+     * fixed [detourMeters] — tight where places are abundant, wider where they're sparse, and
+     * per-category (see [selectAlongRoute]/[queryNearby]). [detourMeters] stays persisted so
+     * turning this off restores the rider's last manual radius.
+     */
+    val smartDistance: Boolean = true,
     val enabledCategories: Set<Category> = setOf(Category.WATER, Category.BIKE),
     /**
      * When true, water POIs are narrowed to *safe* sources ([isSafeWaterSource]) —

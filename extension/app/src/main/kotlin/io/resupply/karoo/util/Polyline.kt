@@ -50,11 +50,24 @@ data class RouteProjection(val distance: Double, val along: Double, val side: In
  * Project point [p] onto the route polyline against the nearest *segment*, using a
  * local equirectangular projection around [p]. Mirrors backend distanceToRoute (which
  * only needs distance+along); [RouteProjection.side] is the on-device addition.
+ *
+ * Linear in route length — fine for a one-off, but O(candidates × segments) when called per
+ * candidate. For that, build a [RouteIndex] once and use the indexed overload below, which
+ * gives the *same* result over far fewer segments.
  */
 fun distanceToRoute(
     route: List<LatLng>,
     cumulative: DoubleArray,
     p: LatLng,
+): RouteProjection = projectOntoSegments(route, cumulative, p, segments = 1 until route.size)
+
+/** Shared projection kernel: exact nearest-segment projection of [p] over the given segment
+ *  indices (each `i` is the segment from vertex `i-1` to `i`). */
+private fun projectOntoSegments(
+    route: List<LatLng>,
+    cumulative: DoubleArray,
+    p: LatLng,
+    segments: Iterable<Int>,
 ): RouteProjection {
     val mPerDegLat = METERS_PER_DEG_LAT
     val mPerDegLng = METERS_PER_DEG_LAT * cos(Math.toRadians(p.lat))
@@ -64,7 +77,7 @@ fun distanceToRoute(
     var best = Double.POSITIVE_INFINITY
     var bestAlong = 0.0
     var bestSide = 0
-    for (i in 1 until route.size) {
+    for (i in segments) {
         val a = route[i - 1]
         val b = route[i]
         val ax = a.lng * mPerDegLng; val ay = a.lat * mPerDegLat
@@ -84,6 +97,75 @@ fun distanceToRoute(
         }
     }
     return RouteProjection(best, bestAlong, bestSide)
+}
+
+/**
+ * A coarse spatial grid over a route's segments so [distanceToRoute] can test only the segments
+ * near a query point instead of all of them — turning per-candidate projection from
+ * O(segments) into O(few). Exact, not approximate: with a cell size ≥ [reachMeters] (the max
+ * cross-track distance the caller cares about), every segment that could be the true nearest of
+ * any point is within the ±[SEARCH_CELLS] window searched by [project], so the indexed
+ * projection returns the identical [RouteProjection] to the linear scan.
+ *
+ * Cells are in raw lat/lng, sized in degrees from [reachMeters] at a reference latitude (the
+ * route mid-lat) for the longitude scale. Each segment is registered in *every* cell its bbox
+ * overlaps, so a segment longer than a cell is still found from all its cells.
+ */
+class RouteIndex(
+    private val route: List<LatLng>,
+    private val cumulative: DoubleArray,
+    reachMeters: Double,
+) {
+    private val cellLat: Double
+    private val cellLng: Double
+    private val cells: HashMap<Long, MutableList<Int>> = HashMap()
+
+    init {
+        val midLat = if (route.isEmpty()) 0.0 else (route.first().lat + route.last().lat) / 2
+        val mPerDegLng = METERS_PER_DEG_LAT * cos(Math.toRadians(midLat))
+        // Guard tiny/degenerate scales so a cell is always a positive span.
+        cellLat = max(reachMeters / METERS_PER_DEG_LAT, 1e-6)
+        cellLng = max(reachMeters / max(mPerDegLng, 1.0), 1e-6)
+        for (i in 1 until route.size) {
+            val a = route[i - 1]; val b = route[i]
+            val minLatI = floorCell(min(a.lat, b.lat), cellLat)
+            val maxLatI = floorCell(max(a.lat, b.lat), cellLat)
+            val minLngI = floorCell(min(a.lng, b.lng), cellLng)
+            val maxLngI = floorCell(max(a.lng, b.lng), cellLng)
+            for (li in minLatI..maxLatI) for (gi in minLngI..maxLngI) {
+                cells.getOrPut(key(li, gi)) { ArrayList() }.add(i)
+            }
+        }
+    }
+
+    /** Same result as the linear [distanceToRoute], over only the segments near [p]. */
+    fun project(p: LatLng): RouteProjection {
+        val li = floorCell(p.lat, cellLat)
+        val gi = floorCell(p.lng, cellLng)
+        // Gather the point's neighbourhood; dedup segment indices (a segment spanning several
+        // cells appears in more than one). The window is ±SEARCH_CELLS: with a cell of one reach,
+        // a point anywhere in its cell is still guaranteed ≥ reach of clearance in every
+        // direction, so the true nearest segment (≤ reach away) is always inside the window.
+        val segs = sortedSetOf<Int>()
+        for (dl in -SEARCH_CELLS..SEARCH_CELLS) for (dg in -SEARCH_CELLS..SEARCH_CELLS) {
+            cells[key(li + dl, gi + dg)]?.let { segs.addAll(it) }
+        }
+        if (segs.isEmpty()) return RouteProjection(Double.POSITIVE_INFINITY, 0.0, 0)
+        // Ascending segment order so ties (a point equidistant from two segments) break to the
+        // same winner as the linear scan — otherwise `along`/`side` could differ on near-ties.
+        return projectOntoSegments(route, cumulative, p, segs)
+    }
+
+    private fun key(latIdx: Int, lngIdx: Int): Long =
+        (latIdx.toLong() shl 32) xor (lngIdx.toLong() and 0xffffffffL)
+
+    private companion object {
+        // Cell size = reach, so a point can sit up to one cell from its own cell's far edge; ±2
+        // cells then guarantees ≥ reach of clearance from the point in every direction (incl.
+        // diagonals), making the indexed nearest identical to the full scan for any in-reach point.
+        const val SEARCH_CELLS = 2
+        fun floorCell(v: Double, size: Double): Int = Math.floor(v / size).toInt()
+    }
 }
 
 /**

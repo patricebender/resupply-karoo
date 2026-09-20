@@ -31,7 +31,9 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
     /**
      * Total length of the route the current POIs were built against, in meters.
      * 0 when the last build was /nearby (no route) — the strip hides itself then.
-     * Positions POI dots on the route strip; not persisted (rebuilt each session).
+     * Positions POI dots on the route strip. Not persisted directly, but restored on
+     * startup from the cached route POIs' along-route positions (see init) so a restored
+     * roadbook reads as ROUTE, not NEARBY, before the ride re-emits nav state.
      */
     private val _routeLengthMeters = MutableStateFlow(0.0)
     val routeLengthMeters: StateFlow<Double> = _routeLengthMeters.asStateFlow()
@@ -113,6 +115,14 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
                 val isRouteSet = restored.any { it.distancesAlongRoute.isNotEmpty() }
                 if (isRouteSet) {
                     _pois.value = restored
+                    // Restore a positive route length too, so the set reads as ROUTE (not NEARBY)
+                    // before the ride re-emits nav state. Without this, a restart with no GPS fix
+                    // yet flips poiSourceFor to NEARBY, and the nearby path drops every POI for
+                    // lack of a rider location — surfacing a bogus "No favorites yet" / empty
+                    // field on a route that's loaded but not started. The POIs' furthest
+                    // along-route position is a safe lower bound; the next build/nav refines it.
+                    _routeLengthMeters.value =
+                        restored.flatMap { it.distancesAlongRoute }.maxOrNull() ?: 0.0
                     Timber.d("restored ${restored.size} cached route POIs")
                 } else {
                     // Nearby (or empty) set → start clean; overwrite the stale cache file.

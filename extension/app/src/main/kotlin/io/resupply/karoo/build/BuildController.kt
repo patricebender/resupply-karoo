@@ -50,11 +50,11 @@ class BuildController(
             val pois = when (nav) {
                 is OnNavigationState.NavigationState.NavigatingRoute -> {
                     val route = decodeLatLng(nav.routePolyline)
-                    Timber.d("build along route: ${route.size} pts, detour=${config.detourMeters}")
+                    Timber.d("build along route: ${route.size} pts, detour=${config.detourMeters}, smart=${config.smartDistance}")
                     // Cache the route length so the Waybook strip can place POI dots.
                     repository.setRouteLength(cumulativeDistances(route).lastOrNull() ?: 0.0)
                     withContext(Dispatchers.IO) {
-                        query.queryCorridor(route, config.detourMeters)
+                        query.queryCorridor(route, config.detourMeters, config.smartDistance)
                     }
                 }
                 else -> {
@@ -69,7 +69,7 @@ class BuildController(
                     repository.setRouteLength(0.0) // nearby: no route → strip hidden
                     publish(BuildState.Building()) // fix acquired → back to "Searching…"
                     withContext(Dispatchers.IO) {
-                        query.queryNearby(LatLng(loc.lat, loc.lng), config.detourMeters)
+                        query.queryNearby(LatLng(loc.lat, loc.lng), config.detourMeters, config.smartDistance)
                     }
                 }
             }

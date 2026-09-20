@@ -1,6 +1,9 @@
 package io.resupply.karoo.data
 
 import io.resupply.karoo.util.LatLng
+import io.resupply.karoo.util.RouteIndex
+import io.resupply.karoo.util.cumulativeDistances
+import io.resupply.karoo.util.distanceToRoute
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -162,5 +165,134 @@ class PoiQueryTest {
         val keptIds = kept.map { it.osmId }.toSet()
         val expected = (0 until CorridorTuning.PER_SEGMENT_CAP).map { "c$it" }.toSet()
         assertEquals(expected, keptIds)
+    }
+
+    /**
+     * The route-grid speedup must be exact on real data: for every fixture POI within reach, the
+     * indexed projection equals the linear [distanceToRoute] field-for-field. This is the guard
+     * that [selectAlongRoute]'s output is unchanged by the optimisation (its only use of the
+     * index is this projection; candidates beyond reach are dropped identically by both paths).
+     */
+    @Test
+    fun `route index projection matches linear scan on the fixture route`() {
+        val cumulative = cumulativeDistances(route)
+        val reach = CorridorTuning.maxReachMeters(radius, smart = true).toDouble()
+        val index = RouteIndex(route, cumulative, reach)
+
+        var checkedWithinReach = 0
+        for (c in candidates) {
+            val p = LatLng(c.lat, c.lng)
+            val ref = distanceToRoute(route, cumulative, p)
+            if (ref.distance > reach) continue
+            val got = index.project(p)
+            assertEquals("distance for ${c.osmId}", ref.distance, got.distance, 1e-6)
+            assertEquals("along for ${c.osmId}", ref.along, got.along, 1e-6)
+            assertEquals("side for ${c.osmId}", ref.side, got.side)
+            checkedWithinReach++
+        }
+        assertTrue("checked a meaningful number of in-reach POIs", checkedWithinReach > 100)
+    }
+
+    // --- Smart distance -----------------------------------------------------------------
+
+    /** A straight ~2 km route running east; POIs are offset north (cross-track) by the meters
+     *  given, all bunched ~100 m along so they land in one segment. */
+    private fun straightRoute() = listOf(LatLng(49.0, 8.0), LatLng(49.0, 8.02))
+    private fun offsetNorth(id: String, meters: Double, type: String) =
+        CandidateInput(id, 49.0 + meters / 111_320.0, 8.001, type)
+
+    /**
+     * The core fix: a *full* near band must not drag in far POIs. With enough POIs inside the
+     * band, the far ones are dropped entirely — the band never widens. (This is the bug the
+     * screenshot showed: near and far both appearing.)
+     */
+    @Test
+    fun `smart keeps only the band when the band is full`() {
+        // SMART_MIN_IN_BAND cafés inside the band, plus far ones well beyond it.
+        val inBand = (0 until CorridorTuning.SMART_MIN_IN_BAND).map {
+            offsetNorth("in$it", 40.0 + it * 20, "COFFEE")
+        }
+        val far = (0 until 10).map { offsetNorth("far$it", 600.0 + it * 100, "COFFEE") }
+        val kept = selectAlongRoute(straightRoute(), inBand + far, radiusMeters = 250, smart = true)
+            .map { it.osmId }.toSet()
+
+        assertTrue("keeps the in-band cafés", inBand.all { it.osmId in kept })
+        assertTrue("drops every far café — band was full", far.none { it.osmId in kept })
+    }
+
+    /** Every kept POI in a full band is within the band distance — never beyond it. */
+    @Test
+    fun `smart full band admits nothing beyond the band distance`() {
+        val cafes = (0 until 8).map { offsetNorth("c$it", 30.0 + it * 15, "COFFEE") } +
+            (0 until 8).map { offsetNorth("d$it", 500.0 + it * 60, "COFFEE") }
+        val kept = selectAlongRoute(straightRoute(), cafes, radiusMeters = 250, smart = true)
+        assertTrue("full band caps distance at the band", kept.isNotEmpty())
+        assertTrue(
+            "nothing beyond the band distance when the band is full",
+            kept.all { it.distanceToRoute <= CorridorTuning.SMART_BAND_METERS },
+        )
+    }
+
+    /**
+     * Sparse band: when the band holds fewer than the minimum, widen for the nearest few out to
+     * the reach — so a lone rural POI still surfaces.
+     */
+    @Test
+    fun `smart widens for a lone distant POI when the band is empty`() {
+        val lone = offsetNorth("bike0", 800.0, "BIKE_SHOP") // beyond the 150 m band
+        val kept = selectAlongRoute(straightRoute(), listOf(lone), radiusMeters = 250, smart = true)
+        assertEquals(setOf("bike0"), kept.map { it.osmId }.toSet())
+    }
+
+    /** Widening admits at most SMART_MIN_IN_BAND, not an unbounded reach — a single far POI
+     *  next to a below-minimum band shouldn't pull in a whole distant cluster. */
+    @Test
+    fun `smart widening is bounded to the minimum count`() {
+        // One café in band (below the min of 2) + a distant cluster of five.
+        val one = offsetNorth("near0", 50.0, "COFFEE")
+        val cluster = (0 until 5).map { offsetNorth("far$it", 700.0 + it * 30, "COFFEE") }
+        val kept = selectAlongRoute(straightRoute(), listOf(one) + cluster, radiusMeters = 250, smart = true)
+            .map { it.osmId }.toSet()
+
+        assertTrue("in-band one kept", "near0" in kept)
+        // Widened to exactly SMART_MIN_IN_BAND total → only the single nearest far one joins.
+        assertEquals("widen keeps only up to the minimum", CorridorTuning.SMART_MIN_IN_BAND, kept.size)
+        assertTrue("nearest far one is the one added", "far0" in kept)
+    }
+
+    /**
+     * The headline behaviour: in one segment, an abundant category stays tight (its band is
+     * full) while a scarce category reaches out (its band is empty).
+     */
+    @Test
+    fun `smart diverges per category within one segment`() {
+        val cafes = (0 until 10).map { offsetNorth("cafe$it", 30.0 + it * 8, "COFFEE") }
+        val loneBike = offsetNorth("bike0", 800.0, "BIKE_SHOP")
+        val kept = selectAlongRoute(straightRoute(), cafes + loneBike, radiusMeters = 250, smart = true)
+            .map { it.osmId }.toSet()
+
+        assertTrue("lone far bike shop reached", "bike0" in kept)
+        // Cafés capped and band-limited: nothing far, and no more than the cap.
+        assertTrue("no far café", cafes.filter { it.osmId in kept }.size <= CorridorTuning.SMART_PER_SEGMENT_CAP)
+    }
+
+    /**
+     * Smart caps a dense category at SMART_PER_SEGMENT_CAP — a cluster of many nearby restaurants
+     * is thinned to the ceiling, keeping a long dense route light.
+     */
+    @Test
+    fun `smart caps a dense segment at the smart cap`() {
+        val dense = (0 until 20).map { offsetNorth("r$it", 10.0 + it * 2, "FOOD") }
+        val kept = selectAlongRoute(straightRoute(), dense, radiusMeters = 250, smart = true)
+        assertEquals(CorridorTuning.SMART_PER_SEGMENT_CAP, kept.size)
+    }
+
+    /** The max reach is a hard ceiling in smart mode: nothing beyond it. */
+    @Test
+    fun `smart respects the max reach`() {
+        val out = selectAlongRoute(route, candidates, radius, smart = true)
+        val maxRadius = CorridorTuning.maxReachMeters(radius, smart = true).toDouble()
+        assertTrue("selects some POIs", out.isNotEmpty())
+        assertTrue("all within max reach", out.all { it.distanceToRoute <= maxRadius })
     }
 }

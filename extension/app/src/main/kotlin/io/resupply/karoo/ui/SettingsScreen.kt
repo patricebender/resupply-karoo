@@ -39,10 +39,11 @@ import io.resupply.karoo.data.ResupplyConfig
 import kotlin.math.roundToInt
 
 /**
- * Settings, reached from the Waybook header gear. One scrollable screen in sections —
+ * Settings, reached from the Waybook header gear. One scrollable screen in sections:
  * Categories (color chip grid, showing the per-category counts of what's currently *shown*),
- * Detour radius, then Data (the region picker entry). The top bar carries a trashcan that
- * clears the current places; Build itself lives on the overview, not here.
+ * the smart search radius toggle (with a manual detour radius when it's off), then Data (the
+ * region picker entry). The top bar carries a trashcan that clears the current places; Build
+ * itself lives on the overview, not here.
  */
 @Composable
 fun SettingsScreen(
@@ -56,6 +57,7 @@ fun SettingsScreen(
     onDetourChange: (Int) -> Unit,
     onCategoryToggle: (Category, Boolean) -> Unit,
     onSafeWaterToggle: (Boolean) -> Unit,
+    onSmartDistanceToggle: (Boolean) -> Unit,
     onBuild: () -> Unit,
     onClear: () -> Unit,
     onOpenRegions: () -> Unit,
@@ -151,23 +153,32 @@ fun SettingsScreen(
             )
 
             Spacer(Modifier.height(20.dp))
-            SectionHeader("Detour radius")
-            Text(
-                formatDistance(config.detourMeters),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            val options = ResupplyConfig.DETOUR_OPTIONS_METERS
-            val currentIndex = options.indexOfFirst { it >= config.detourMeters }
-                .let { if (it < 0) options.lastIndex else it }
-            Slider(
-                value = currentIndex.toFloat(),
-                onValueChange = { raw ->
-                    onDetourChange(options[raw.roundToInt().coerceIn(0, options.lastIndex)])
-                },
-                valueRange = 0f..options.lastIndex.toFloat(),
-                steps = options.size - 2,
+            SmartDistanceRow(
+                checked = config.smartDistance,
                 enabled = !building,
+                onToggle = onSmartDistanceToggle,
             )
+            // Manual radius only when smart is off, otherwise the distance is derived per area.
+            if (!config.smartDistance) {
+                Spacer(Modifier.height(12.dp))
+                SectionHeader("Detour radius")
+                Text(
+                    formatDistance(config.detourMeters),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                val options = ResupplyConfig.DETOUR_OPTIONS_METERS
+                val currentIndex = options.indexOfFirst { it >= config.detourMeters }
+                    .let { if (it < 0) options.lastIndex else it }
+                Slider(
+                    value = currentIndex.toFloat(),
+                    onValueChange = { raw ->
+                        onDetourChange(options[raw.roundToInt().coerceIn(0, options.lastIndex)])
+                    },
+                    valueRange = 0f..options.lastIndex.toFloat(),
+                    steps = options.size - 2,
+                    enabled = !building,
+                )
+            }
 
             Spacer(Modifier.height(20.dp))
             SectionHeader("Data")
@@ -210,6 +221,46 @@ private fun SafeWaterRow(checked: Boolean, enabled: Boolean, onToggle: (Boolean)
             Text(
                 "Taps, water tagged as drinkable, and graveyards (which usually have a tap). " +
                     "Sources of unconfirmed quality are hidden.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * The "Smart search radius" toggle. Same layout as [SafeWaterRow]: label + switch on one line,
+ * an info-led explanation below. When on, the caller hides the manual radius slider and the
+ * distance is derived per area from local POI density (see selectAlongRoute's band model).
+ */
+@Composable
+private fun SmartDistanceRow(checked: Boolean, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val labelColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Smart search radius",
+                style = MaterialTheme.typography.bodyLarge,
+                color = labelColor,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled)
+        }
+        Row(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
+            Icon(
+                Icons.Filled.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp).padding(top = 1.dp),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                "Searches close to your route in busy areas and extends further where places are " +
+                    "few. Turn off to set a fixed radius yourself.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

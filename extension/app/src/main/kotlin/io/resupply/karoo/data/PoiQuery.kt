@@ -2,8 +2,8 @@ package io.resupply.karoo.data
 
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.METERS_PER_DEG_LAT
+import io.resupply.karoo.util.RouteIndex
 import io.resupply.karoo.util.cumulativeDistances
-import io.resupply.karoo.util.distanceToRoute
 import io.resupply.karoo.util.haversine
 import kotlinx.serialization.json.Json
 import kotlin.math.cos
@@ -28,14 +28,13 @@ class PoiQuery(private val database: PoiDatabase) {
     fun queryCorridor(
         route: List<LatLng>,
         radiusMeters: Int,
+        smart: Boolean = false,
     ): List<Poi> {
         if (route.size < 2) return emptyList()
 
-        // Query with the extended bbox so sparse segments can reach further.
-        val maxRadius = minOf(
-            (radiusMeters * CorridorTuning.EXTEND_FACTOR).toInt(),
-            CorridorTuning.EXTEND_CAP_METERS,
-        )
+        // Query with the extended bbox so sparse segments (and smart mode's scarce categories)
+        // can reach further; the exact per-candidate cutoff is applied in selectAlongRoute.
+        val maxRadius = CorridorTuning.maxReachMeters(radiusMeters, smart)
 
         var minLat = Double.MAX_VALUE; var maxLat = -Double.MAX_VALUE
         var minLng = Double.MAX_VALUE; var maxLng = -Double.MAX_VALUE
@@ -59,7 +58,7 @@ class PoiQuery(private val database: PoiDatabase) {
             candidates.add(CandidateInput(r.osmId, r.lat, r.lng, r.type))
         }
 
-        val selected = selectAlongRoute(route, candidates, radiusMeters)
+        val selected = selectAlongRoute(route, candidates, radiusMeters, smart)
 
         val out = ArrayList<Poi>(selected.size)
         for (s in selected) {
@@ -76,15 +75,46 @@ class PoiQuery(private val database: PoiDatabase) {
         return out
     }
 
-    /** POIs within [radiusMeters] of a point (fallback when no route is loaded). */
-    fun queryNearby(center: LatLng, radiusMeters: Int): List<Poi> {
-        val dLat = radiusMeters / METERS_PER_DEG_LAT
-        val dLng = radiusMeters / (METERS_PER_DEG_LAT * cos(Math.toRadians(center.lat)))
-        return candidatesInBox(
+    /**
+     * POIs within [radiusMeters] of a point (fallback when no route is loaded). When [smart],
+     * the fixed radius is ignored: per category, keep the narrow band and only widen to the
+     * nearest few when the band is nearly empty (the same band-expansion model as the corridor,
+     * see [CorridorTuning]), so a dense area stays tight and a sparse one reaches out.
+     */
+    fun queryNearby(center: LatLng, radiusMeters: Int, smart: Boolean = false): List<Poi> {
+        // Smart mode reaches out (up to the absolute cap) so the density-derived budget has
+        // candidates to rank; fixed mode fetches just the base radius.
+        val boxRadius = if (smart) CorridorTuning.maxReachMeters(radiusMeters, smart = true) else radiusMeters
+        val dLat = boxRadius / METERS_PER_DEG_LAT
+        val dLng = boxRadius / (METERS_PER_DEG_LAT * cos(Math.toRadians(center.lat)))
+        val rows = candidatesInBox(
             center.lat - dLat, center.lat + dLat, center.lng - dLng, center.lng + dLng,
         )
-            .filter { haversine(center, LatLng(it.lat, it.lng)) <= radiusMeters }
-            .map { it.toPoi(emptyList(), detourMeters = 0) }
+        if (!smart) {
+            return rows
+                .filter { haversine(center, LatLng(it.lat, it.lng)) <= radiusMeters }
+                .map { it.toPoi(emptyList(), detourMeters = 0) }
+        }
+
+        // Band expansion per category, around the rider (no route, so straight-line distance):
+        // keep the narrow band; only widen to the nearest few when the band is nearly empty.
+        // Then cap so a dense area stays light. Rows with no category are never shown; drop them.
+        val withDist = rows.mapNotNull { row ->
+            Category.ofType(row.type)?.let { Triple(row, it, haversine(center, LatLng(row.lat, row.lng))) }
+        }
+        val out = ArrayList<Poi>(withDist.size)
+        for ((_, catRows) in withDist.groupBy { it.second }) {
+            val byDist = catRows.sortedBy { it.third }
+            val inBand = byDist.filter { it.third <= CorridorTuning.SMART_BAND_METERS }
+            val eligible = if (inBand.size >= CorridorTuning.SMART_MIN_IN_BAND) {
+                inBand
+            } else {
+                byDist.take(CorridorTuning.SMART_MIN_IN_BAND)
+            }
+            eligible.take(CorridorTuning.SMART_PER_SEGMENT_CAP)
+                .forEach { out.add(it.first.toPoi(emptyList(), detourMeters = 0)) }
+        }
+        return out
     }
 
     private inner class Row(
@@ -176,6 +206,29 @@ object CorridorTuning {
     // the segment in sub-slices instead of keeping the N nearest-to-line (which in a town
     // all cluster in one short stretch, leaving the rest of the segment blank).
     const val SUBSLICE_METERS = 500.0
+
+    // Smart distance is a band-expansion model, per category per segment:
+    //  1. Keep everything within the narrow base band (SMART_BAND_METERS) — in a dense city this
+    //     is full, so smart mode behaves like a tight fixed radius.
+    //  2. Only if the band holds fewer than SMART_MIN_IN_BAND does the segment widen, admitting
+    //     the nearest few *by detour cost* out to SMART_REACH_METERS — so a rural POI surfaces
+    //     when the band is genuinely empty, but a far POI is never dragged in alongside a full
+    //     near band.
+    //  3. Either way, cap at SMART_PER_SEGMENT_CAP (spread along the segment) so a long dense
+    //     route stays light on the map.
+    const val SMART_BAND_METERS = 150.0
+    const val SMART_MIN_IN_BAND = 2
+    const val SMART_REACH_METERS = 2_000.0
+    const val SMART_PER_SEGMENT_CAP = 4
+
+    /**
+     * The farthest a candidate can be considered. Fixed mode reaches [EXTEND_FACTOR]× the base
+     * radius (sparse rural completeness); smart mode reaches to [SMART_REACH_METERS] (its own
+     * widen ceiling). Both are clamped to [EXTEND_CAP_METERS].
+     */
+    fun maxReachMeters(radiusMeters: Int, smart: Boolean): Int =
+        if (smart) minOf(SMART_REACH_METERS.toInt(), EXTEND_CAP_METERS)
+        else minOf((radiusMeters * EXTEND_FACTOR).toInt(), EXTEND_CAP_METERS)
 }
 
 /** A candidate POI fed into [selectAlongRoute] — just the geometry + category source. */
@@ -211,23 +264,28 @@ private fun detourCost(distanceToRoute: Double): Double = 2.0 * distanceToRoute
  *
  * Candidates farther than the extended max radius are dropped. Returned in no particular
  * order (the caller sorts by along-route position).
+ *
+ * When [smart], the base radius is ignored: each category's acceptance distance is derived from
+ * its own local density (the band-expansion model, see [CorridorTuning]) — so in one segment an
+ * abundant category stays within the narrow band while a scarce one reaches further.
  */
 fun selectAlongRoute(
     route: List<LatLng>,
     candidates: List<CandidateInput>,
     radiusMeters: Int,
+    smart: Boolean = false,
 ): List<SelectedPoi> {
     if (route.size < 2 || candidates.isEmpty()) return emptyList()
-    val maxRadius = minOf(
-        (radiusMeters * CorridorTuning.EXTEND_FACTOR).toInt(),
-        CorridorTuning.EXTEND_CAP_METERS,
-    )
+    val maxRadius = CorridorTuning.maxReachMeters(radiusMeters, smart)
 
-    // Compute geometry and bucket candidates by along-route segment.
+    // Compute geometry and bucket candidates by along-route segment. The route grid makes each
+    // candidate's projection test only the nearby segments (cell size = maxRadius, so the true
+    // nearest is always in the searched cells → same result as the linear scan).
     val cumulative = cumulativeDistances(route)
+    val index = RouteIndex(route, cumulative, maxRadius.toDouble())
     val bySegment = HashMap<Int, MutableList<SelectedPoi>>()
     for (c in candidates) {
-        val proj = distanceToRoute(route, cumulative, LatLng(c.lat, c.lng))
+        val proj = index.project(LatLng(c.lat, c.lng))
         if (proj.distance > maxRadius) continue
         val seg = (proj.along / CorridorTuning.SEGMENT_METERS).toInt()
         bySegment.getOrPut(seg) { ArrayList() }
@@ -241,30 +299,48 @@ fun selectAlongRoute(
         // Thin per category, not across the whole segment: an abundant category (e.g.
         // cafés in a town) must not crowd out a rare one (bike shops).
         for ((_, catList) in list.groupBy { catOf[it.osmId] }) {
-            // Within-radius POIs are always eligible.
-            val withinBase = catList.filter { it.distanceToRoute <= radiusMeters }
-            val eligible = if (withinBase.size < CorridorTuning.SPARSE_THRESHOLD) {
-                // Sparse: also admit the nearest few beyond base radius (rural reach).
-                catList.sortedBy { detourCost(it.distanceToRoute) }
-                    .take(CorridorTuning.SPARSE_THRESHOLD)
+            val eligible = if (smart) {
+                // Band expansion: keep the narrow band; only widen when it's nearly empty.
+                val inBand = catList.filter { it.distanceToRoute <= CorridorTuning.SMART_BAND_METERS }
+                if (inBand.size >= CorridorTuning.SMART_MIN_IN_BAND) {
+                    inBand
+                } else {
+                    // Sparse band → reach out (up to maxRadius) for the nearest few, enough to
+                    // meet the minimum. A far POI appears only in this branch — never beside a
+                    // full band.
+                    catList.sortedBy { detourCost(it.distanceToRoute) }
+                        .take(CorridorTuning.SMART_MIN_IN_BAND)
+                }
             } else {
-                withinBase
+                // Within-radius POIs are always eligible.
+                val withinBase = catList.filter { it.distanceToRoute <= radiusMeters }
+                if (withinBase.size < CorridorTuning.SPARSE_THRESHOLD) {
+                    // Sparse: also admit the nearest few beyond base radius (rural reach).
+                    catList.sortedBy { detourCost(it.distanceToRoute) }
+                        .take(CorridorTuning.SPARSE_THRESHOLD)
+                } else {
+                    withinBase
+                }
             }
-            out.addAll(capBySubslice(eligible))
+            val cap = if (smart) CorridorTuning.SMART_PER_SEGMENT_CAP else CorridorTuning.PER_SEGMENT_CAP
+            out.addAll(capBySubslice(eligible, cap))
         }
     }
     return out
 }
 
 /**
- * Cap a category's eligible POIs to [CorridorTuning.PER_SEGMENT_CAP], spreading the kept
- * set across the segment's sub-slices rather than keeping the N nearest-to-line. Buckets by
- * sub-slice (by along-route position), then round-robins over the buckets — each internally
- * sorted best-by-detour-cost — so every populated sub-slice contributes a pick before any
- * gets a second. Under the cap → all kept unchanged.
+ * Cap a category's eligible POIs to [cap], spreading the kept set across the segment's
+ * sub-slices rather than keeping the N nearest-to-line. Buckets by sub-slice (by along-route
+ * position), then round-robins over the buckets — each internally sorted best-by-detour-cost —
+ * so every populated sub-slice contributes a pick before any gets a second. Under the cap → all
+ * kept unchanged.
  */
-private fun capBySubslice(eligible: List<SelectedPoi>): List<SelectedPoi> {
-    if (eligible.size <= CorridorTuning.PER_SEGMENT_CAP) return eligible
+private fun capBySubslice(
+    eligible: List<SelectedPoi>,
+    cap: Int = CorridorTuning.PER_SEGMENT_CAP,
+): List<SelectedPoi> {
+    if (eligible.size <= cap) return eligible
 
     // Sub-slice buckets, each sorted by ascending detour cost. TreeMap keeps buckets in
     // along-route order so the round-robin walks the segment start→end deterministically.
@@ -274,14 +350,14 @@ private fun capBySubslice(eligible: List<SelectedPoi>): List<SelectedPoi> {
         buckets.getOrPut(slice) { ArrayDeque() }.addLast(p)
     }
 
-    val kept = ArrayList<SelectedPoi>(CorridorTuning.PER_SEGMENT_CAP)
-    while (kept.size < CorridorTuning.PER_SEGMENT_CAP) {
+    val kept = ArrayList<SelectedPoi>(cap)
+    while (kept.size < cap) {
         var tookAny = false
         for (q in buckets.values) {
             if (q.isNotEmpty()) {
                 kept.add(q.removeFirst())
                 tookAny = true
-                if (kept.size == CorridorTuning.PER_SEGMENT_CAP) break
+                if (kept.size == cap) break
             }
         }
         if (!tookAny) break // all buckets drained (shouldn't happen: size > cap)

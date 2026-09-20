@@ -30,8 +30,12 @@ class ConfigStore(private val context: Context) {
         // Absent key reads as on, so existing installs get the safe-water default without a
         // first-run write and without a surprise flip.
         val safeWaterOnly = prefs[SAFE_WATER_KEY] ?: true
+        // Absent key reads as on, so existing installs get smart distance without a first-run
+        // write; detourMeters stays persisted for when the rider turns it off.
+        val smartDistance = prefs[SMART_DISTANCE_KEY] ?: true
         ResupplyConfig(
             detourMeters = detour,
+            smartDistance = smartDistance,
             enabledCategories = categories,
             safeWaterOnly = safeWaterOnly,
             favoritePoiIds = prefs[FAVORITE_POIS_KEY] ?: emptySet(),
@@ -45,6 +49,10 @@ class ConfigStore(private val context: Context) {
 
     suspend fun setSafeWaterOnly(enabled: Boolean) {
         context.dataStore.edit { it[SAFE_WATER_KEY] = enabled }
+    }
+
+    suspend fun setSmartDistance(enabled: Boolean) {
+        context.dataStore.edit { it[SMART_DISTANCE_KEY] = enabled }
     }
 
     suspend fun setCategoryEnabled(category: Category, enabled: Boolean) {
@@ -109,6 +117,7 @@ class ConfigStore(private val context: Context) {
         val DETOUR_KEY = intPreferencesKey("detour_meters")
         val CATEGORIES_KEY = stringSetPreferencesKey("enabled_categories")
         val SAFE_WATER_KEY = booleanPreferencesKey("safe_water_only")
+        val SMART_DISTANCE_KEY = booleanPreferencesKey("smart_distance")
         val REGIONS_KEY = stringSetPreferencesKey("installed_regions")
         val FAVORITE_POIS_KEY = stringSetPreferencesKey("favorite_poi_ids")
         val FAVORITES_ONLY_KEY = booleanPreferencesKey("favorites_only")

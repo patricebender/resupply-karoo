@@ -5,7 +5,6 @@ import io.resupply.karoo.build.BuildState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -13,14 +12,17 @@ import java.io.File
 import timber.log.Timber
 
 /**
- * App-scoped holder for the currently built POIs. Exposes a [StateFlow] the map
- * layer observes, and persists to a JSON file so POIs survive a process restart
- * and are available offline mid-ride.
+ * App-scoped holder for the currently shown POIs — the live roadbook the map layer and data
+ * fields observe. In-memory only: durability lives in [RoadbookCache] (built sets, keyed by
+ * route) and is realized into here when a route loads, so this set starts empty each session and
+ * is filled only in response to a present route (or the nearby refresher). See [setPois].
+ *
+ * (Google Place IDs are the one thing persisted here — a small sibling file, unrelated to the
+ * roadbook — since Maps ToS permits keeping them indefinitely.)
  */
-class ResupplyRepository private constructor(private val cacheFile: File) {
+class ResupplyRepository private constructor(filesDir: File) {
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val poiListSerializer = ListSerializer(Poi.serializer())
 
     private val _pois = MutableStateFlow<List<Poi>>(emptyList())
     val pois: StateFlow<List<Poi>> = _pois.asStateFlow()
@@ -31,9 +33,8 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
     /**
      * Total length of the route the current POIs were built against, in meters.
      * 0 when the last build was /nearby (no route) — the strip hides itself then.
-     * Positions POI dots on the route strip. Not persisted directly, but restored on
-     * startup from the cached route POIs' along-route positions (see init) so a restored
-     * roadbook reads as ROUTE, not NEARBY, before the ride re-emits nav state.
+     * Positions POI dots on the route strip. Set alongside the POIs whenever a roadbook becomes
+     * current (build or cache realization); a nearby set zeroes it.
      */
     private val _routeLengthMeters = MutableStateFlow(0.0)
     val routeLengthMeters: StateFlow<Double> = _routeLengthMeters.asStateFlow()
@@ -98,40 +99,11 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
         persistPlaceIds()
     }
 
-    // Sibling file for the persisted POI id → Google Place ID map.
-    private val placeIdFile = File(cacheFile.parentFile, "resupply_place_ids.json")
+    // File for the persisted POI id → Google Place ID map.
+    private val placeIdFile = File(filesDir, "resupply_place_ids.json")
     private val placeIdSerializer = MapSerializer(String.serializer(), String.serializer())
 
     init {
-        // Restore previously built POIs so a route roadbook survives a mid-ride restart and is
-        // on the map offline immediately. But ONLY a route set — a route POI carries
-        // along-route positions ([Poi.distancesAlongRoute]); a nearby set has none. A nearby
-        // set is only meaningful near where/when it was fetched, so after a restart (likely
-        // elsewhere, later) it's stale — we drop it and let the background refresher repopulate
-        // from the current location, rather than showing a stale POI with no "Live" context.
-        runCatching {
-            if (cacheFile.exists()) {
-                val restored = json.decodeFromString(poiListSerializer, cacheFile.readText())
-                val isRouteSet = restored.any { it.distancesAlongRoute.isNotEmpty() }
-                if (isRouteSet) {
-                    _pois.value = restored
-                    // Restore a positive route length too, so the set reads as ROUTE (not NEARBY)
-                    // before the ride re-emits nav state. Without this, a restart with no GPS fix
-                    // yet flips poiSourceFor to NEARBY, and the nearby path drops every POI for
-                    // lack of a rider location — surfacing a bogus "No favorites yet" / empty
-                    // field on a route that's loaded but not started. The POIs' furthest
-                    // along-route position is a safe lower bound; the next build/nav refines it.
-                    _routeLengthMeters.value =
-                        restored.flatMap { it.distancesAlongRoute }.maxOrNull() ?: 0.0
-                    Timber.d("restored ${restored.size} cached route POIs")
-                } else {
-                    // Nearby (or empty) set → start clean; overwrite the stale cache file.
-                    Timber.d("skipping ${restored.size} stale nearby POIs on startup")
-                    if (restored.isNotEmpty()) persist()
-                }
-            }
-        }.onFailure { Timber.w(it, "failed to load POI cache") }
-
         // Load persisted Place IDs (allowed to keep indefinitely per Maps ToS).
         runCatching {
             if (placeIdFile.exists()) {
@@ -147,30 +119,15 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
             .onFailure { Timber.w(it, "failed to persist place-id cache") }
     }
 
-    /** Replace the current POIs and persist them for offline use. */
+    /** Show [pois] as the current roadbook. The durable copy lives in [RoadbookCache], not here. */
     fun setPois(pois: List<Poi>) {
         _pois.value = pois
-        persist()
     }
 
-    /** Clear POIs at the start of a new build. */
+    /** Clear the current roadbook (start of a new build, or route removed). */
     fun clear() {
         _pois.value = emptyList()
         _nearbyLive.value = false
-        persist()
-    }
-
-    /** Append a page of POIs (dedup by id) and persist. */
-    fun appendPois(page: List<Poi>) {
-        val existing = _pois.value.associateBy { it.id }.toMutableMap()
-        for (p in page) existing[p.id] = p
-        _pois.value = existing.values.toList()
-        persist()
-    }
-
-    private fun persist() {
-        runCatching { cacheFile.writeText(json.encodeToString(poiListSerializer, _pois.value)) }
-            .onFailure { Timber.w(it, "failed to persist POI cache") }
     }
 
     companion object {
@@ -182,9 +139,8 @@ class ResupplyRepository private constructor(private val cacheFile: File) {
 
         fun get(context: Context): ResupplyRepository =
             instance ?: synchronized(this) {
-                instance ?: ResupplyRepository(
-                    File(context.applicationContext.filesDir, "resupply_pois.json"),
-                ).also { instance = it }
+                instance ?: ResupplyRepository(context.applicationContext.filesDir)
+                    .also { instance = it }
             }
     }
 }

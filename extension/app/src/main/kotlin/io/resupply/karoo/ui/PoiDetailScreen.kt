@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.PinDrop
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
@@ -98,10 +99,14 @@ fun PoiDetailScreen(
     canFavorite: Boolean,
     isFavorite: Boolean,
     onToggleFavorite: (Boolean) -> Unit,
+    // Start navigation to this POI (LaunchPinDrop), the same as tapping its map pin.
+    onNavigate: () -> Unit,
     onBack: () -> Unit,
 ) {
     val style = styleForType(poi.type)
     val context = LocalContext.current
+    // Navigating reroutes the ride and backgrounds the app, so gate it behind a confirm.
+    var showNavConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Back arrow gets its own row so the hero below can center cleanly; the favorite star
@@ -115,12 +120,38 @@ fun PoiDetailScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Spacer(Modifier.weight(1f))
+            IconButton(onClick = { showNavConfirm = true }) {
+                Icon(
+                    Icons.Filled.PinDrop,
+                    contentDescription = "Navigate to this place",
+                )
+            }
             if (canFavorite) {
                 DetailStarToggle(
                     filled = isFavorite,
                     onClick = { onToggleFavorite(!isFavorite) },
                 )
             }
+        }
+
+        if (showNavConfirm) {
+            val name = poi.name ?: "this place"
+            ConfirmDialog(
+                icon = Icons.Filled.PinDrop,
+                accent = style.color,
+                title = "Navigate here?",
+                message = if (hasRoute) {
+                    "Ride to $name. Your route stays loaded and picks up again once you arrive."
+                } else {
+                    "Ride to $name."
+                },
+                confirmLabel = "Navigate",
+                onConfirm = {
+                    showNavConfirm = false
+                    onNavigate()
+                },
+                onDismiss = { showNavConfirm = false },
+            )
         }
 
         Column(

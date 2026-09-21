@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -27,7 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -194,28 +192,18 @@ fun SettingsScreen(
     }
 
     if (showClearDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            title = { Text("Clear this roadbook?") },
-            text = {
-                Text(
-                    "Removes the places found for the current route and the favorites you saved " +
-                        "for it. Building the same route again will start fresh.",
-                )
+        ConfirmDialog(
+            icon = Icons.Filled.Delete,
+            accent = ClosedRed,
+            title = "Clear this roadbook?",
+            message = "Removes the places found for the current route and the favorites you saved " +
+                "for it. Building the same route again will start fresh.",
+            confirmLabel = "Clear",
+            onConfirm = {
+                showClearDialog = false
+                onClear()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showClearDialog = false
-                        onClear()
-                    },
-                ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
-            },
+            onDismiss = { showClearDialog = false },
         )
     }
 }

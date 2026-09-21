@@ -25,8 +25,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -85,21 +83,17 @@ fun RegionsScreen(
     // confirmation dialog so a delete is never a single accidental tap.
     var confirmRemove by remember { mutableStateOf<Region?>(null) }
     confirmRemove?.let { region ->
-        AlertDialog(
-            onDismissRequest = { confirmRemove = null },
-            title = { Text("Remove ${region.label}?") },
-            text = { Text("This deletes its downloaded places from the device. You can download it again later.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onRemove(region)
-                    confirmRemove = null
-                }) {
-                    Text("Remove", color = MaterialTheme.colorScheme.error)
-                }
+        ConfirmDialog(
+            icon = Icons.Filled.Delete,
+            accent = ClosedRed,
+            title = "Remove ${region.label}?",
+            message = "This deletes its downloaded places from the device. You can download it again later.",
+            confirmLabel = "Remove",
+            onConfirm = {
+                onRemove(region)
+                confirmRemove = null
             },
-            dismissButton = {
-                TextButton(onClick = { confirmRemove = null }) { Text("Cancel") }
-            },
+            onDismiss = { confirmRemove = null },
         )
     }
 

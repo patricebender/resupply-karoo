@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.LaunchPinDrop
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.StreamState
@@ -40,6 +41,7 @@ import io.resupply.karoo.data.RoadbookCache
 import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.WikipediaClient
 import io.resupply.karoo.data.toRouteState
+import io.resupply.karoo.extension.toSymbol
 import io.resupply.karoo.ui.SettingsScreen
 import io.resupply.karoo.ui.PoiDetailScreen
 import io.resupply.karoo.ui.RegionDownloadState
@@ -338,11 +340,25 @@ class MainActivity : ComponentActivity() {
                         onToggleFavorite = { fav ->
                             lifecycleScope.launch { configStore.setFavorite(poi.id, fav) }
                         },
+                        onNavigate = { navigateToPoi(poi) },
                         onBack = { screen = Screen.Waybook },
                     )
                 }
             }
         }
+    }
+
+    /**
+     * Start navigation to [poi] the same way tapping its map pin does: dispatch a
+     * [LaunchPinDrop] with the POI's symbol. The Karoo drops a pin and routes to it as a
+     * detour; the loaded route stays underneath and resumes on arrival (the extension's
+     * nav watcher treats NavigatingToDestination as route-preserving). Then background the
+     * app so the map/navigation comes forward — moveTaskToBack (not finish) keeps this
+     * singleTop activity and its composition alive for the next field tap.
+     */
+    private fun navigateToPoi(poi: Poi) {
+        progressSystem.dispatch(LaunchPinDrop(poi.toSymbol()))
+        moveTaskToBack(true)
     }
 
     /**

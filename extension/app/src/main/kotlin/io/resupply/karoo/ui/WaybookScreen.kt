@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -41,7 +43,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +76,12 @@ import io.resupply.karoo.data.formatKm
 import io.resupply.karoo.data.poiSourceFor
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.haversine
+import kotlin.math.abs
+
+// Position-follow: advances within this many rows animate (smooth, normal progress); larger
+// jumps snap instantly, so a discontinuity re-syncs the list without the range bracket
+// visibly crawling toward the (instantly-moved) strip bike glyph.
+private const val SMOOTH_FOLLOW_ROWS = 3
 
 /**
  * The Waybook ROUTE view: a header with build + settings shortcuts and a live build
@@ -121,13 +128,12 @@ fun WaybookScreen(
     hoursOf: (Poi) -> OpeningHours.Hours?,
     // Hoisted so the scroll position survives opening/closing the detail view.
     listState: LazyListState,
-    // Hoisted guard (see MainActivity): true once the initial "scroll to first POI
-    // ahead" has run, so returning from a detail view doesn't yank the user back.
-    didInitialScroll: MutableState<Boolean>,
-    // Bumped by MainActivity on every fresh field-tap entry. Re-keys the auto-scroll so a
-    // re-entry snaps back to the current position even when [progressMeters] hasn't
-    // changed (the guard is reset alongside this, so it fires exactly once per entry).
-    reentryKey: Int,
+    // Whether the list should follow the live position (hoisted in MainActivity so it survives
+    // a POI-detail round-trip; re-armed only on a fresh field-tap). While true, the list keeps
+    // the first-POI-ahead at the top as the rider progresses.
+    following: Boolean,
+    // Called on the rider's first manual scroll, so the host can end following for this session.
+    onUserScrolled: () -> Unit,
 ) {
     // Favorites are a route-mode feature: a nearby set is ephemeral, so the star toggles, the
     // filter, and the timeline stars are all hidden without a route.
@@ -244,14 +250,22 @@ fun WaybookScreen(
             sortedPois
         }
 
-        // The along-route km of the row at the top of the list — drives the floating
-        // km pill on the strip so it tracks where the list is as you scroll.
+        // The along-route km span of the currently visible list window (first..last visible
+        // row) — drives the range bracket on the strip. Reading the LAST visible row (not just
+        // the first) is what lets the indicator reach the end of the route when scrolled to the
+        // bottom; a first-only read saturates several rows short of the final POIs.
         // derivedStateOf so it only recomputes when the visible window changes.
-        val topVisibleMeters by remember(pois, routeLengthMeters) {
+        val visibleSpanMeters by remember(pois, routeLengthMeters) {
             derivedStateOf {
                 if (routeLengthMeters <= 0.0) return@derivedStateOf null
-                val idx = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: return@derivedStateOf null
-                pois.getOrNull(idx)?.distancesAlongRoute?.firstOrNull()
+                val visible = listState.layoutInfo.visibleItemsInfo
+                val firstIdx = visible.firstOrNull()?.index ?: return@derivedStateOf null
+                val lastIdx = visible.last().index
+                val startM = pois.getOrNull(firstIdx)?.distancesAlongRoute?.firstOrNull()
+                val endM = pois.getOrNull(lastIdx)?.distancesAlongRoute?.firstOrNull()
+                if (startM == null || endM == null) return@derivedStateOf null
+                // POIs arrive pre-sorted along-route, but clamp defensively so start <= end.
+                minOf(startM, endM) to maxOf(startM, endM)
             }
         }
 
@@ -265,7 +279,8 @@ fun WaybookScreen(
                     pois = pois,
                     routeLengthMeters = routeLengthMeters,
                     progressMeters = progressMeters,
-                    listPositionMeters = topVisibleMeters,
+                    listStartMeters = visibleSpanMeters?.first,
+                    listEndMeters = visibleSpanMeters?.second,
                     // Little yellow stars above favorite dots (route timeline only).
                     favoritePoiIds = favoritePoiIds,
                 )
@@ -286,19 +301,45 @@ fun WaybookScreen(
             }
         }
 
-        // On entry mid-ride, jump to the first POI still ahead so "what's next" is the
-        // first thing the rider sees. Fires once per screen entry (guarded by a saved
-        // flag) so manual scrolling afterward is never yanked back. The live position
-        // usually arrives after the (cached) POIs, so we gate on progress being known —
-        // keying on that so the effect re-runs when the first stream value lands. pois
-        // is pre-sorted by along-route distance (PoiQuery), so first-ahead is monotonic.
-        val canScroll = progressMeters != null && pois.isNotEmpty() && routeLengthMeters > 0.0
-        LaunchedEffect(canScroll, reentryKey) {
-            if (didInitialScroll.value || !canScroll) return@LaunchedEffect
-            val p = progressMeters ?: return@LaunchedEffect
-            val firstAhead = pois.indexOfFirst { aheadMetersFor(it, p) != null }
-            if (firstAhead > 0) listState.scrollToItem(firstAhead)
-            didInitialScroll.value = true
+        // Mid-ride the list FOLLOWS the live position: the first POI still ahead is kept at the
+        // top so "what's next" is always in view as the rider progresses — the list moves with
+        // the bike glyph on the strip. The FIRST manual scroll ends following for good (the rider
+        // is now exploring ahead; don't yank them back), via [onUserScrolled] on the hoisted
+        // flag. It re-engages only on a fresh field-tap entry — NOT on returning from a POI
+        // detail, where [following] survives the round-trip because it's hoisted in MainActivity.
+        val canFollow = progressMeters != null && pois.isNotEmpty() && routeLengthMeters > 0.0
+
+        // The row to keep at the top: the first POI still ahead of the rider (fall back to the
+        // last row once all are passed). A PLAIN val, recomputed every recomposition — which is
+        // how it tracks [progressMeters], a plain param the parent re-hands us on each position
+        // tick. (derivedStateOf/snapshotFlow can't observe a plain param — only a snapshot State
+        // — so they'd freeze at the first value; that was the "stuck" bug.) The follow effect
+        // below is keyed on this, so it only *acts* when the index actually changes → one scroll
+        // per POI crossing, not per metre.
+        val followIndex = progressMeters?.let { p ->
+            pois.indexOfFirst { aheadMetersFor(it, p) != null }
+                .let { if (it < 0) pois.lastIndex else it }
+        } ?: -1
+
+        // A hand drag (not our programmatic scroll — that emits no DragInteraction) ends
+        // following via the host, which no-ops if already off — so this is safe to leave always
+        // subscribed (no need to re-key on `following`, which would open a teardown race).
+        LaunchedEffect(listState) {
+            listState.interactionSource.interactions.collect {
+                if (it is DragInteraction.Start) onUserScrolled()
+            }
+        }
+
+        // The follow itself: keyed on the target row + following, so it re-runs exactly when the
+        // rider crosses into a new POI (or following re-engages) — and moves there in THIS
+        // coroutine, so a re-key cancels an in-flight scroll instead of stacking animations.
+        // Near advances animate, large jumps snap (see [SMOOTH_FOLLOW_ROWS]).
+        LaunchedEffect(followIndex, following, canFollow) {
+            if (!canFollow || !following || followIndex < 0) return@LaunchedEffect
+            val current = listState.firstVisibleItemIndex
+            if (followIndex == current && listState.firstVisibleItemScrollOffset == 0) return@LaunchedEffect
+            if (abs(followIndex - current) <= SMOOTH_FOLLOW_ROWS) listState.animateScrollToItem(followIndex)
+            else listState.scrollToItem(followIndex)
         }
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {

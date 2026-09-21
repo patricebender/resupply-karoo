@@ -28,14 +28,27 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,14 +59,15 @@ import io.resupply.karoo.util.haversine
 /**
  * The route timeline: a thin horizontal track line for the route, with a colored dot per
  * POI at its position along the route. Each dot splays above or below the track by which
- * side of the route the POI is on and how far the detour is. Start/total labels sit in the
- * top lane.
+ * side of the route the POI is on and how far the detour is. The route's 0km/total endpoint
+ * labels sit at the far corners of the bottom lane.
  *
- * Mid-ride it becomes a live "you are here": [progressMeters] places a red rider
- * playhead at the current position and dims passed POI dots. [listPositionMeters] drives
- * a floating km pill (with a bracket line) that slides along the strip to show where the
- * scrolled list currently sits, so exploring the list and reading the timeline stay in
- * sync. Both are optional — without them the strip is the static build-time summary.
+ * Mid-ride it becomes a live "you are here": [progressMeters] places a bike glyph in the top
+ * lane at the current position (with a guide line to the track) and dims passed POI dots.
+ * [listStartMeters]/[listEndMeters] drive a range bracket in the bottom lane — an upward ⌈‾⌉
+ * embracing the POIs of the currently visible list window, with one centered "a–b km" pill
+ * reading the window's along-route span — so exploring the list and reading the timeline stay
+ * in sync. All optional — without them the strip is the static build-time summary.
  *
  * **Nearby mode:** when there's no route ([routeLengthMeters] == 0) but a [riderLocation] is
  * given, the same band becomes a proximity "radar": the rider sits at the left edge, the
@@ -67,8 +81,9 @@ fun RouteStrip(
     routeLengthMeters: Double,
     modifier: Modifier = Modifier,
     progressMeters: Double? = null,
-    // Along-route position of the top of the list; drives the floating km pill + bracket.
-    listPositionMeters: Double? = null,
+    // Along-route km of the first/last visible list rows; drives the range bracket below the dots.
+    listStartMeters: Double? = null,
+    listEndMeters: Double? = null,
     // Nearby mode (routeLengthMeters == 0): rider position for the proximity radar.
     riderLocation: LatLng? = null,
     // Nearby mode: the detour radius, i.e. the radar's right-edge distance.
@@ -83,11 +98,14 @@ fun RouteStrip(
     }
     // "You are here" must pop on both the light and dark ride themes and never blend
     // into a POI dot — a fixed high-chroma red, not the theme accent (which on some
-    // themes matches a category color). The marker is a vertical playhead that cuts
-    // THROUGH the dot lane, so a cluster of POIs at the rider's position can't occlude it.
+    // themes matches a category color). It's a bike glyph riding in the top lane above the
+    // dots, with a thin guide line dropping to the exact along-route position on the track.
     val riderColor = Color(0xFFE53935)
     val riderHalo = Color(0xFFFFFFFF)
     val favoriteColor = FavoriteYellow
+    // The rider bike glyph, rasterized so it can be drawn INSIDE the Canvas (before the stars,
+    // so a favorite star at the same x paints over the bike — both stay visible).
+    val bikePainter = rememberVectorPainter(Icons.AutoMirrored.Filled.DirectionsBike)
     // Read theme colors here (composable scope) so the Canvas lambda can use them.
     val listMarkColor = MaterialTheme.colorScheme.primary
     val trackColor = MaterialTheme.colorScheme.outlineVariant
@@ -96,8 +114,11 @@ fun RouteStrip(
         ?.takeIf { hasRoute }
         ?.let { (it / routeLengthMeters).coerceIn(0.0, 1.0).toFloat() }
 
-    // The list's current position along the route (top-of-list row), as a fraction.
-    val listFrac = listPositionMeters
+    // The visible list window's start/end along the route, as fractions (drive the range bracket).
+    val startFrac = listStartMeters
+        ?.takeIf { hasRoute }
+        ?.let { (it / routeLengthMeters).coerceIn(0.0, 1.0).toFloat() }
+    val endFrac = listEndMeters
         ?.takeIf { hasRoute }
         ?.let { (it / routeLengthMeters).coerceIn(0.0, 1.0).toFloat() }
 
@@ -111,24 +132,28 @@ fun RouteStrip(
         // overlaid on top (Canvas can't lay out text nicely).
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val fullWidth = maxWidth
-            // A floating rounded pill sits in a lane ABOVE the dot lane, showing the
-            // list's current km, with a bracket dropping onto the dot lane. A thin
-            // horizontal track line marks the route; POI dots splay off it by detour side.
-            val pillLaneH = 18.dp
-            // Tall enough that a max-detour dot splayed to the lane edge stays clear of the
-            // pill lane above and the km labels below (half-lane carries splay + dot radius).
+            // Three compact lanes stacked: a top lane for the rider bike glyph + favorite stars
+            // (so both ride above the dots and never touch them), the dot zone (route track +
+            // splayed POI dots), then the bottom lane carrying an UPWARD bracket (⌈‾⌉) embracing
+            // the visible window's dots, with the route's 0km/total endpoint labels at its far
+            // corners and the window range pill centered on it.
+            val starLaneH = 16.dp
             val dotZoneH = 34.dp
+            // Bottom lane: bracket underline (top) + endpoint labels + range pill below it.
+            val rangeLaneH = 22.dp
+            // Range pill half-width used only as a fallback before its real width is measured.
+            val pillWidth = 56.dp
 
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(pillLaneH + dotZoneH),
+                    .height(starLaneH + dotZoneH + rangeLaneH),
             ) {
                 val left = 0f
                 val right = size.width
-                val laneTop = pillLaneH.toPx()             // dot zone starts below the pill lane
+                val laneTop = starLaneH.toPx()             // dot zone starts below the star lane
                 val dotLaneY = laneTop + dotZoneH.toPx() / 2f
-                val laneBottom = size.height
+                val dotLaneBottom = laneTop + dotZoneH.toPx()  // dot zone / range lane boundary
                 fun xAt(frac: Float) = left + frac * (right - left)
 
                 if (!hasRoute) return@Canvas
@@ -177,12 +202,40 @@ fun RouteStrip(
                     if (poi.id in favoritePoiIds) favoriteMarks.add(dotX to passed)
                 }
 
-                // Favorite stars, in a fixed lane pinned to the top of the strip (well above every
-                // dot), a touch bigger than a dot so they're legible in a dense timeline. They
-                // mark WHERE along the route a favorite sits, not which dot — one row at the top.
+                // Rider "you are here": a bike glyph riding in the top lane at the current
+                // along-route position, with a thin guide line dropping to the track so the
+                // exact position reads against the dots. Drawn BEFORE the stars so a favorite
+                // star at the same x paints over the bike — both stay visible.
+                riderX?.let { rx ->
+                    val bikeSize = 14.dp.toPx()
+                    val bikeY = starLaneH.toPx() / 2f
+                    // Faint guide line from under the bike down to the track.
+                    drawLine(
+                        riderColor.copy(alpha = 0.45f),
+                        Offset(rx, starLaneH.toPx()),
+                        Offset(rx, dotLaneY),
+                        strokeWidth = 1.5.dp.toPx(),
+                    )
+                    // White halo disc behind the bike so it stays legible over dots/track.
+                    drawCircle(riderHalo, radius = bikeSize * 0.62f, center = Offset(rx, bikeY))
+                    // The bike glyph, tinted rider-red, centered on (rx, bikeY).
+                    translate(left = rx - bikeSize / 2f, top = bikeY - bikeSize / 2f) {
+                        with(bikePainter) {
+                            draw(
+                                size = Size(bikeSize, bikeSize),
+                                colorFilter = ColorFilter.tint(riderColor),
+                            )
+                        }
+                    }
+                }
+
+                // Favorite stars, in the dedicated top lane above the dots (so they never touch
+                // a top-splayed POI), a touch bigger than a dot so they're legible in a dense
+                // timeline. Drawn AFTER the bike so a star at the rider's x sits on top — both
+                // the "you are here" bike and the favorite marker stay visible.
                 if (favoriteMarks.isNotEmpty()) {
                     val starRadius = 5.5.dp.toPx()
-                    val starY = starRadius + 0.5.dp.toPx()   // hug the very top edge
+                    val starY = starLaneH.toPx() / 2f        // centered in the top lane
                     for ((x, passed) in favoriteMarks) {
                         drawStar(
                             center = Offset(x, starY),
@@ -192,109 +245,123 @@ fun RouteStrip(
                     }
                 }
 
-                // The list-position bracket: a thin vertical dropping from the pill lane
-                // through the dot lane, marking where the list currently sits.
-                listFrac?.let { f ->
-                    val cx = xAt(f)
-                    drawLine(
-                        listMarkColor,
-                        Offset(cx, laneTop),
-                        Offset(cx, laneBottom),
-                        strokeWidth = 1.5.dp.toPx(),
+                // The range bracket: a bold underline just below the dots, with end ticks that
+                // rise UP alongside the dots (a ⌈‾⌉ that embraces the visible window's POIs),
+                // over a soft tinted fill that spans the whole dot zone vertically so those POIs
+                // sit INSIDE the highlighted band. When the window is a single point (one POI,
+                // or every visible POI at the same km) there's no span to bracket, so we draw a
+                // single centered stem. The km readout is one centered range pill (an overlay).
+                if (startFrac != null && endFrac != null) {
+                    val barY = dotLaneBottom + 2.dp.toPx()   // underline just under the dots
+                    val rise = 6.dp.toPx()                   // how far end ticks rise above the bar
+                    val stroke = 2.5.dp.toPx()
+
+                    // Extend to the OUTER edges of the first/last dots (± dot radius), so the
+                    // bracket embraces the whole first and last POI rather than cutting through
+                    // their centers.
+                    val rawSx = xAt(startFrac) - dotRadius
+                    val rawEx = xAt(endFrac) + dotRadius
+                    // Enforce a minimum on-screen width so a tiny window — or a single POI,
+                    // where start == end — still draws a proper ⌈‾⌉ bracket, not a hairline.
+                    val minW = 18.dp.toPx()
+                    val mid = (rawSx + rawEx) / 2f
+                    val half = maxOf((rawEx - rawSx) / 2f, minW / 2f)
+                    val sx = (mid - half).coerceAtLeast(left)
+                    val ex = (mid + half).coerceAtMost(right)
+
+                    // Soft tinted fill spanning the full dot zone → POIs in the window sit
+                    // inside the highlight, not beside it. Rounded top corners so it tucks
+                    // under the bracket cleanly.
+                    val corner = CornerRadius(3.dp.toPx())
+                    drawPath(
+                        Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    left = sx, top = laneTop, right = ex, bottom = barY,
+                                    topLeftCornerRadius = corner, topRightCornerRadius = corner,
+                                    bottomLeftCornerRadius = CornerRadius.Zero,
+                                    bottomRightCornerRadius = CornerRadius.Zero,
+                                )
+                            )
+                        },
+                        color = listMarkColor.copy(alpha = 0.14f),
+                    )
+                    // The ⌈‾⌉ clamp as ONE continuous path (rise → across → rise) with round
+                    // joins/caps, so the corners are smooth instead of three lines butting
+                    // together at ragged right angles.
+                    val bracket = Path().apply {
+                        moveTo(sx, barY - rise)
+                        lineTo(sx, barY)
+                        lineTo(ex, barY)
+                        lineTo(ex, barY - rise)
+                    }
+                    drawPath(
+                        bracket,
+                        color = listMarkColor,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
                 }
-
-                // Rider playhead: a red vertical line through the dot lane, capped with a
-                // triangle pointer. Cuts through any dot cluster at the same x.
-                riderX?.let { drawRiderMarker(it, laneTop, laneBottom, riderColor, riderHalo) }
             }
 
-            // Endpoint labels live IN the top lane (not a row below): 0km pinned left,
-            // total km pinned right. The current-position pill floats between them and
-            // slides as the list scrolls. As the pill nears an end, that endpoint label
-            // fades out so the moving pill gracefully "merges" into the endpoint instead
-            // of colliding — one lane carries all three readouts.
+            // Bottom lane: the route's 0km / total endpoint labels pinned at the far corners,
+            // and the window range pill centered on the bracket between them. Moving the
+            // endpoints down here (from a former top lane) is what shrinks the strip's height.
             if (hasRoute) {
                 val endLabel = MaterialTheme.colorScheme.onSurfaceVariant
-                // How close (as a fraction of width) the pill can get before an endpoint
-                // label starts fading, reaching 0 alpha when the pill sits on the end.
-                val fadeStart = 0.16f
-                val f = listFrac ?: -1f
-                val startAlpha = if (f < 0f) 1f else ((f / fadeStart).coerceIn(0f, 1f))
-                val endAlpha = if (f < 0f) 1f else (((1f - f) / fadeStart).coerceIn(0f, 1f))
-
                 Text(
                     "0km",
                     style = MaterialTheme.typography.labelSmall,
                     color = endLabel,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .alpha(startAlpha),
+                    modifier = Modifier.align(Alignment.BottomStart),
                 )
                 Text(
                     formatDistance(routeLengthMeters),
                     style = MaterialTheme.typography.labelSmall,
                     color = endLabel,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .alpha(endAlpha),
+                    modifier = Modifier.align(Alignment.BottomEnd),
                 )
 
-                // The floating current-position pill, centered on the list fraction and
-                // clamped so it never spills past the edges.
-                if (listFrac != null && listPositionMeters != null) {
-                    val pillWidth = 52.dp
-                    val cx = fullWidth * listFrac
-                    val pillX = (cx - pillWidth / 2)
-                        .coerceIn(0.dp, (fullWidth - pillWidth).coerceAtLeast(0.dp))
-                    Box(
+                // The range readout: always a single centered "a–b km" pill on the bracket's
+                // window midpoint, clamped by its MEASURED width so a wide range label at the
+                // route end pins flush inside the edge instead of spilling past it.
+                if (listStartMeters != null && listEndMeters != null &&
+                    startFrac != null && endFrac != null
+                ) {
+                    var pillW by remember { mutableStateOf(0.dp) }
+                    val density = LocalDensity.current
+                    val cx = fullWidth * ((startFrac + endFrac) / 2f)
+                    val pillX = (cx - pillW / 2)
+                        .coerceIn(0.dp, (fullWidth - pillW).coerceAtLeast(0.dp))
+                    RangePill(
+                        text = formatRangeCompact(listStartMeters, listEndMeters),
                         modifier = Modifier
-                            .align(Alignment.TopStart)
+                            .align(Alignment.BottomStart)
                             .offset(x = pillX)
-                            .clip(RoundedCornerShape(50))
-                            .background(MaterialTheme.colorScheme.primary)
-                            .padding(horizontal = 8.dp, vertical = 1.dp),
-                    ) {
-                        Text(
-                            formatDistance(listPositionMeters),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                        )
-                    }
+                            .onSizeChanged { pillW = with(density) { it.width.toDp() } },
+                    )
                 }
             }
         }
     }
 }
 
-/**
- * The "you are here" rider playhead: a vertical red line from the strip top [topY] down
- * to [bottomY], capped by a downward triangle pointer at the top. Because it's a
- * vertical bar (not a point), a cluster of dots at the rider's along-route position
- * can't occlude it — it cuts straight through. A light [halo] underlay keeps it legible
- * on both ride themes and over the dots.
- */
-private fun DrawScope.drawRiderMarker(x: Float, topY: Float, bottomY: Float, color: Color, halo: Color) {
-    val stem = 3.dp.toPx()
-    val head = 6.dp.toPx() // half-width of the triangle pointer
-
-    // Halo underlay: a fatter light line + outline so the red never disappears.
-    drawLine(halo, Offset(x, topY), Offset(x, bottomY), strokeWidth = stem + 3.dp.toPx())
-
-    // Triangle pointer at the very top, aimed down the playhead.
-    val tri = Path().apply {
-        moveTo(x - head, topY)
-        lineTo(x + head, topY)
-        lineTo(x, topY + head * 1.4f)
-        close()
+/** A rounded primary pill carrying a bold km readout — the shared style for the range pills. */
+@Composable
+private fun RangePill(text: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 8.dp, vertical = 1.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimary,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
     }
-    drawPath(tri, halo, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
-    drawPath(tri, color)
-
-    // The bright red playhead.
-    drawLine(color, Offset(x, topY), Offset(x, bottomY), strokeWidth = stem)
 }
 
 /**

@@ -184,19 +184,19 @@ class MainActivity : ComponentActivity() {
         // Hoisted here so the list scroll position is preserved across navigation to
         // the detail/filter screens and back.
         val waybookListState = rememberLazyListState()
-        // Hoisted too: the Waybook screen leaves the composition when a detail/filter is
-        // open, so a guard living there would reset and re-fire the initial auto-scroll on
-        // every return, yanking the user off the row they drilled into. Keeping it here
-        // makes "scroll to first POI ahead" a once-per-session action.
-        val didInitialScroll = remember { mutableStateOf(false) }
+        // Position-following flag, hoisted so it SURVIVES a POI-detail round-trip (the Waybook
+        // screen leaves the composition there, so a flag living inside it would reset to true on
+        // return and yank the rider back to the current position). Only a fresh field-tap
+        // (entryTick bump, below) re-arms it; a manual scroll in the list clears it.
+        var followPosition by remember { mutableStateOf(true) }
 
-        // Each fresh field-tap (entryTick bump) re-arms the auto-scroll and returns to the
-        // overview: the rider wants "what's next from here", not wherever they'd scrolled.
+        // Each fresh field-tap (entryTick bump) re-engages position-following and returns to
+        // the overview: the rider wants "what's next from here", not wherever they'd scrolled.
         // Skips the initial composition (tick 0) so first launch keeps initialScreen.
         val tick = entryTick.intValue
         LaunchedEffect(tick) {
             if (tick == 0) return@LaunchedEffect
-            didInitialScroll.value = false
+            followPosition = true
             screen = Screen.Waybook
         }
 
@@ -223,11 +223,11 @@ class MainActivity : ComponentActivity() {
                 onBuild = ::runBuild,
                 onOpenSettings = { screen = Screen.Settings },
                 onOpenPoi = { screen = Screen.Detail(it.id) },
-                reentryKey = tick,
+                following = followPosition,
+                onUserScrolled = { followPosition = false },
                 // OSM hours, or a Google result already fetched this session → badge in list.
                 hoursOf = { poi -> hoursFor(poi, repository.cachedHours(poi.id)?.hours) },
                 listState = waybookListState,
-                didInitialScroll = didInitialScroll,
             )
 
             is Screen.Settings -> {

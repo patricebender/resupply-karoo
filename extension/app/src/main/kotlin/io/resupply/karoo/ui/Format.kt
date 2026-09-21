@@ -19,6 +19,26 @@ fun formatDistance(meters: Int): String =
 
 fun formatDistance(meters: Double): String = formatDistance(meters.toInt())
 
+/**
+ * Compact along-route range for the collapsed range pill, e.g. "20–21 km" or "800–950 m".
+ * Shares one unit across both ends so it reads as a single span, not two independent
+ * distances. Uses km when either end is ≥ 1 km. If both ends round to the same displayed
+ * value (a degenerate span), shows that single value instead of "x–x".
+ */
+fun formatRangeCompact(startMeters: Double, endMeters: Double): String {
+    val lo = minOf(startMeters, endMeters)
+    val hi = maxOf(startMeters, endMeters)
+    return if (hi >= 1000) {
+        val a = "%.1f".format(lo / 1000.0)
+        val b = "%.1f".format(hi / 1000.0)
+        if (a == b) "$a km" else "$a–$b km"
+    } else {
+        val a = lo.toInt()
+        val b = hi.toInt()
+        if (a == b) "$a m" else "$a–$b m"
+    }
+}
+
 // Shared status colors (open = green, closed = muted red), used by list + detail.
 val OpenGreen = Color(0xFF2E7D32)
 val ClosedRed = Color(0xFFB00020)

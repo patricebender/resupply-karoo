@@ -22,6 +22,20 @@ object OpeningHours {
 
     enum class OpenState { OPEN, CLOSED, UNKNOWN }
 
+    /**
+     * Whether a POI will be *open when the rider gets there*, judged against a future
+     * arrival time rather than "now" (see [Hours.arrivalStatus]):
+     *   OPEN       — arriving comfortably inside opening hours.
+     *   CLOSE_CALL — arriving within [CLOSE_CALL_MARGIN_MIN] of opening or closing (cutting
+     *                it fine — the rider might just make it, or just miss it).
+     *   CLOSED     — arriving while shut.
+     *   UNKNOWN    — no usable hours to judge against.
+     */
+    enum class ArrivalStatus { OPEN, CLOSE_CALL, CLOSED, UNKNOWN }
+
+    /** Minutes either side of an open/close boundary that count as a "close call" arrival. */
+    const val CLOSE_CALL_MARGIN_MIN = 30
+
     /** A minutes-of-day interval, e.g. 08:00-18:00 → [480, 1080]. */
     data class TimeRange(val startMin: Int, val endMin: Int) {
         fun format(): String = "${hhmm(startMin)}–${hhmm(endMin)}"
@@ -77,6 +91,19 @@ object OpeningHours {
             if (is247) return Status(OpenState.OPEN)
             if (unknown || rawFallback != null) return Status(OpenState.UNKNOWN)
             return statusOf(schedule, now)
+        }
+
+        /**
+         * Will this be open when the rider arrives at [arrival]? Judges the schedule against a
+         * future time so the list can say "you'll make it" vs "it'll be shut" rather than a
+         * now-relative open/closed. 24/7 is always OPEN; anything we can't structure
+         * (raw/unknown) is UNKNOWN. Otherwise OPEN inside hours, CLOSE_CALL within
+         * [CLOSE_CALL_MARGIN_MIN] of an open/close edge, else CLOSED. See [ArrivalStatus].
+         */
+        fun arrivalStatus(arrival: Calendar): ArrivalStatus {
+            if (is247) return ArrivalStatus.OPEN
+            if (unknown || rawFallback != null) return ArrivalStatus.UNKNOWN
+            return arrivalStatusOf(schedule, arrival)
         }
 
         companion object {
@@ -250,6 +277,34 @@ object OpeningHours {
             }
         }
         return Status(OpenState.CLOSED)
+    }
+
+    /**
+     * Arrival-time classification from a normalized [schedule]. The rider's arrival lands on a
+     * specific weekday + minute-of-day; we check that day's ranges (and the previous day's, for
+     * a range that wraps past midnight). Inside a range → OPEN, unless within
+     * [CLOSE_CALL_MARGIN_MIN] of its close (cutting it fine). Outside every range → CLOSED,
+     * unless within the margin *before* a range opens (might just make it) → CLOSE_CALL.
+     */
+    private fun arrivalStatusOf(schedule: Map<Int, List<TimeRange>>, arrival: Calendar): ArrivalStatus {
+        val day = dayIndex(arrival)
+        val minute = arrival.get(Calendar.HOUR_OF_DAY) * 60 + arrival.get(Calendar.MINUTE)
+        val margin = CLOSE_CALL_MARGIN_MIN
+
+        // Open now (this day's ranges, plus the prior day's ranges that wrap past midnight).
+        val prevWrap = schedule[(day + 6) % 7].orEmpty().filter { it.endMin < it.startMin }
+        for (r in schedule[day].orEmpty() + prevWrap) {
+            if (contains(r, minute)) {
+                // Effective minutes until this range closes (accounting for a past-midnight wrap).
+                val toClose = if (r.endMin >= r.startMin) r.endMin - minute
+                else (if (minute >= r.startMin) r.endMin + 24 * 60 - minute else r.endMin - minute)
+                return if (toClose <= margin) ArrivalStatus.CLOSE_CALL else ArrivalStatus.OPEN
+            }
+        }
+
+        // Closed on arrival — but flag a near-miss if a range opens within the margin later today.
+        val opensSoon = schedule[day].orEmpty().any { it.startMin in (minute + 1)..(minute + margin) }
+        return if (opensSoon) ArrivalStatus.CLOSE_CALL else ArrivalStatus.CLOSED
     }
 
     private fun contains(r: TimeRange, minute: Int): Boolean =

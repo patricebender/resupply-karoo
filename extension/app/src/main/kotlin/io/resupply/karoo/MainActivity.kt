@@ -85,6 +85,11 @@ class MainActivity : ComponentActivity() {
     // "no live position" and the screen renders as it did before.
     private val progressSystem by lazy { KarooSystemService(applicationContext) }
     private val toDestMeters = MutableStateFlow<Double?>(null)
+    // Rider's ride-average speed (m/s), followed live off the same connection. Turns a POI's
+    // distance-ahead into an estimated arrival time for the "open on arrival" list cue. Average
+    // (not instantaneous) speed because a stop is kilometres out — the whole-ride pace predicts
+    // arrival far better than a momentary value. Null until the first sample.
+    private val avgSpeedMps = MutableStateFlow<Double?>(null)
     // Whether a route is loaded (and its name/distance), followed live off the same
     // connection. Drives the landing screen's route hero vs "load a route" explainer and
     // gates the build action — a roadbook only makes sense along a route.
@@ -132,6 +137,12 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch {
                 progressSystem.locationFlow().collect { riderLocation.value = LatLng(it.lat, it.lng) }
             }
+            lifecycleScope.launch {
+                progressSystem.streamDataFlow(DataType.Type.AVERAGE_SPEED).collect { state ->
+                    avgSpeedMps.value = (state as? StreamState.Streaming)
+                        ?.dataPoint?.values?.get(DataType.Field.AVERAGE_SPEED)
+                }
+            }
         }
 
         // Launched from a "Tap to build" / "Tap for nearby" data field: kick off a build (see
@@ -171,6 +182,7 @@ class MainActivity : ComponentActivity() {
         val pois by repository.pois.collectAsStateWithLifecycle()
         val routeLength by repository.routeLengthMeters.collectAsStateWithLifecycle()
         val toDest by toDestMeters.collectAsStateWithLifecycle()
+        val avgSpeed by avgSpeedMps.collectAsStateWithLifecycle()
         val route by routeState.collectAsStateWithLifecycle()
         val rider by riderLocation.collectAsStateWithLifecycle()
         val nearbyLive by repository.nearbyLive.collectAsStateWithLifecycle()
@@ -207,6 +219,7 @@ class MainActivity : ComponentActivity() {
                 safeWaterOnly = config.safeWaterOnly,
                 routeLengthMeters = routeLength,
                 progressMeters = progressMeters,
+                avgSpeedMps = avgSpeed,
                 routeState = route,
                 riderLocation = rider,
                 nearbyLive = nearbyLive,
@@ -302,9 +315,16 @@ class MainActivity : ComponentActivity() {
                     val googleEligible = poi.tags["opening_hours"] == null &&
                         Category.ofType(poi.type) in GOOGLE_HOURS_CATEGORIES &&
                         BuildConfig.PLACES_API_KEY.isNotEmpty()
+                    // "Open on arrival" for the detail view: the estimated arrival time at this
+                    // POI, same math as the list row (distance-ahead + average speed). Only for a
+                    // POI still ahead on a route; null otherwise → the detail omits the ETA.
+                    val detailArrival = progressMeters
+                        ?.let { io.resupply.karoo.data.aheadMetersFor(poi, it) }
+                        ?.let { io.resupply.karoo.data.etaArrival(it, avgSpeed) }
                     PoiDetailScreen(
                         poi = poi,
                         hasRoute = routeLength > 0,
+                        arrival = detailArrival,
                         cachedDescription = repository.cachedDescription(poi.id),
                         loadDescription = { fetchDescription(poi) },
                         cachedGoogleHours = repository.cachedHours(poi.id),

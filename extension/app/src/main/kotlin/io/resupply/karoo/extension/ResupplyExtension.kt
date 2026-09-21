@@ -12,12 +12,14 @@ import io.hammerhead.karooext.models.Symbol
 import io.resupply.karoo.BuildConfig
 import io.resupply.karoo.build.BuildController
 import io.resupply.karoo.build.BuildState
+import io.resupply.karoo.build.promoteCachedRoadbook
 import io.resupply.karoo.build.refetchThresholdMeters
 import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.ConfigStore
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.PoiDatabase
 import io.resupply.karoo.data.PoiQuery
+import io.resupply.karoo.data.RoadbookCache
 import io.resupply.karoo.data.ResupplyRepository
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.haversine
@@ -49,6 +51,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var repository: ResupplyRepository
     private lateinit var configStore: ConfigStore
+    private lateinit var roadbookCache: RoadbookCache
     private lateinit var query: Deferred<PoiQuery>
 
     // Shared, connected system service the data field streams route progress from.
@@ -69,6 +72,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
         super.onCreate()
         repository = ResupplyRepository.get(applicationContext)
         configStore = ConfigStore(applicationContext)
+        roadbookCache = RoadbookCache.get(applicationContext)
         // PoiDatabase.get() seeds the ~310k-row Germany DB on first launch; that's far too
         // slow for the main thread (ANRs the service). Build it off-thread and hand out a
         // Deferred so a build triggered before the seed finishes awaits it instead of
@@ -86,15 +90,14 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
     }
 
     /**
-     * Track route-loaded state for the extension's lifetime, and clear the roadbook whenever
-     * the route context stops matching the current POIs — navigation stops (route removed), a
-     * *different* route is loaded, or a route is loaded while a route-less (nearby) set is
-     * showing. In every case the overview then shows its "build" prompt for the new context
-     * (no stale POIs, no manual rebuild button needed). Live nearby mode ends the moment a
-     * route loads (the refresher's route-gate flips [nearbyLive] off). Lives here — not in
-     * [startMap] — because the map layer is subscribed/cancelled as the ride view comes and
-     * goes, but this must run whenever the extension is alive so the refresher's gate stays
-     * current.
+     * Track route-loaded state for the extension's lifetime and keep the roadbook in step with
+     * navigation. When a (new or changed) route loads, [realizeRoadbookForRoute] shows its cached
+     * roadbook instantly or, failing that, clears to the build prompt; when navigation ends, the
+     * route roadbook is dropped. Either way the overview reflects the current context with no
+     * manual rebuild, and live nearby mode ends the moment a route loads (the refresher's
+     * route-gate flips [nearbyLive] off). Lives here — not in [startMap] — because the map layer is
+     * subscribed/cancelled as the ride view comes and goes, but this must run whenever the
+     * extension is alive so the refresher's gate stays current.
      */
     private fun watchNavState() {
         navConsumerId = karooSystem.addConsumer<OnNavigationState> { event ->
@@ -111,16 +114,17 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 is OnNavigationState.NavigationState.NavigatingToDestination -> return@addConsumer
 
                 is OnNavigationState.NavigationState.NavigatingRoute -> {
-                    // Clear only on a genuinely DIFFERENT route (name/distance change), or a route
-                    // loaded over a route-less/nearby set (null → key). Same route reloaded keeps
-                    // its roadbook.
+                    // Cheap change-detector only: name+distance is enough to tell "same route as the
+                    // last event" from "a new/changed route", so we don't decode+hash the polyline on
+                    // every repeated NavigatingRoute event. The authoritative route match (and the
+                    // cache lookup) happens in realizeRoadbookForRoute via the polyline hash — this
+                    // key just decides whether to bother. Same route reloaded keeps whatever is
+                    // showing (its roadbook, or a prompt if never built).
                     val key = "${state.name}|${state.routeDistance}"
-                    if (key != lastRouteKey && repository.pois.value.isNotEmpty()) {
-                        Timber.d("route context changed ($lastRouteKey → $key) → clearing roadbook")
-                        repository.clear() // also flips nearbyLive off
-                        repository.setBuildState(BuildState.Idle)
+                    if (key != lastRouteKey) {
+                        lastRouteKey = key
+                        realizeRoadbookForRoute(state)
                     }
-                    lastRouteKey = key
                 }
 
                 is OnNavigationState.NavigationState.Idle -> {
@@ -134,6 +138,38 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                     }
                     lastRouteKey = null
                 }
+            }
+        }
+    }
+
+    /**
+     * A (new or changed) route just loaded: show its roadbook instantly if we've built it before.
+     * Looks the route up in [RoadbookCache] by its full build key and, on a hit, promotes the
+     * cached POIs into the live set with no DB query and no rebuild tap — so the data field jumps
+     * straight from "Tap to build" to showing places the moment the route is on screen. On a miss
+     * the previous roadbook is cleared, leaving the field's build prompt for this new context.
+     *
+     * Runs off the nav-consumer thread (the promotion touches DataStore/disk). A stale build state
+     * is reset either way so a leftover "Success" from the last route can't linger.
+     */
+    private fun realizeRoadbookForRoute(state: OnNavigationState.NavigationState.NavigatingRoute) {
+        scope.launch {
+            val config = configStore.config.first()
+            val regions = configStore.installedRegions.first()
+            val hit = promoteCachedRoadbook(
+                routePolyline = state.routePolyline,
+                routeDistance = state.routeDistance,
+                config = config,
+                installedRegions = regions,
+                repository = repository,
+                roadbookCache = roadbookCache,
+                configStore = configStore,
+            )
+            if (!hit) {
+                // Never built (or inputs changed): drop any prior roadbook so the field prompts
+                // to build for this route rather than showing the last route's places.
+                if (repository.pois.value.isNotEmpty()) repository.clear()
+                repository.setBuildState(BuildState.Idle)
             }
         }
     }
@@ -209,7 +245,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
         Timber.d("onBonusAction: build")
         scope.launch {
             withKarooConnection(applicationContext) { system ->
-                BuildController(system, configStore, repository, query.await()).runBuild()
+                BuildController(system, configStore, repository, roadbookCache, query.await()).runBuild()
             }
         }
     }

@@ -36,6 +36,7 @@ import io.resupply.karoo.data.RegionCatalogClient
 import io.resupply.karoo.data.RegionManifestEntry
 import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.ResupplyRepository
+import io.resupply.karoo.data.RoadbookCache
 import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.WikipediaClient
 import io.resupply.karoo.data.toRouteState
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var configStore: ConfigStore
     private lateinit var repository: ResupplyRepository
+    private lateinit var roadbookCache: RoadbookCache
     private lateinit var query: Deferred<PoiQuery>
 
     // Live route progress for the overview: a long-lived connection streaming
@@ -108,6 +110,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         configStore = ConfigStore(applicationContext)
         repository = ResupplyRepository.get(applicationContext)
+        roadbookCache = RoadbookCache.get(applicationContext)
         // Seeding the ~310k-row Germany DB on first launch is too slow for the main thread;
         // build the query off-thread and await it where a build actually needs it.
         query = lifecycleScope.async(Dispatchers.IO) { PoiQuery(PoiDatabase.get(applicationContext)) }
@@ -249,7 +252,15 @@ class MainActivity : ComponentActivity() {
                     onClear = {
                         repository.clear()
                         repository.setBuildState(BuildState.Idle)
-                        lifecycleScope.launch { configStore.clearFavorites() }
+                        lifecycleScope.launch {
+                            // The trashcan is a full reset: forget this route's cached places AND
+                            // its saved favorites so a rebuild starts genuinely fresh.
+                            configStore.currentRouteKey()?.let { routeKey ->
+                                roadbookCache.removeRoute(routeKey)
+                                configStore.forgetRouteFavorites(routeKey)
+                            }
+                            configStore.clearCurrentRouteKey()
+                        }
                     },
                     onOpenRegions = { screen = Screen.Regions },
                     onBack = { screen = Screen.Waybook },
@@ -362,7 +373,7 @@ class MainActivity : ComponentActivity() {
                 return@connect
             }
             lifecycleScope.launch {
-                BuildController(system, configStore, repository, query.await()).runBuild()
+                BuildController(system, configStore, repository, roadbookCache, query.await()).runBuild()
                 system.disconnect()
             }
         }

@@ -52,8 +52,9 @@ data class ResupplyConfig(
      */
     val safeWaterOnly: Boolean = true,
     /**
-     * The rider's starred POIs on the current roadbook, by id. Persisted for one build (see
-     * [ConfigStore.clearFavorites]); route-mode only. Drives the timeline stars and the
+     * The rider's starred POIs on the current roadbook, by id. Derived in the config flow as the
+     * per-route favorites cache entry for the loaded route (see [ConfigStore]); route-mode only,
+     * and it persists across rebuilds/restarts of that route. Drives the timeline stars and the
      * favorites data field; combined with [favoritesOnly] it also narrows [showsPoi].
      */
     val favoritePoiIds: Set<String> = emptySet(),

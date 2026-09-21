@@ -46,6 +46,10 @@ val ClosedRed = Color(0xFFB00020)
 // Neutral tint for the "hours exist but are seasonal/complex" badge/chip.
 val SeasonalGrey = Color(0xFF757575)
 
+// The "close call" amber for an ETA that lands near an open/close edge — cutting it fine.
+// Deeper than the favorites gold so it reads as caution, not a star, on the light theme.
+val EtaCloseCallAmber = Color(0xFFEF6C00)
+
 // The favorites star fill — a warm amber-gold, used by the list/detail/header star toggles
 // and the timeline stars so favorites read as one feature.
 val FavoriteYellow = Color(0xFFFFB300)

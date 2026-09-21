@@ -72,6 +72,8 @@ import io.resupply.karoo.data.PoiSource
 import io.resupply.karoo.data.aheadMetersFor
 import io.resupply.karoo.data.behindMetersFor
 import io.resupply.karoo.data.RouteState
+import io.resupply.karoo.data.etaArrival
+import io.resupply.karoo.data.formatEtaClock
 import io.resupply.karoo.data.formatKm
 import io.resupply.karoo.data.poiSourceFor
 import io.resupply.karoo.util.LatLng
@@ -103,6 +105,10 @@ fun WaybookScreen(
     // stream. Drives the timeline marker, per-row distance-ahead, and the initial
     // scroll to the first POI ahead.
     progressMeters: Double?,
+    // Rider's ride-average speed (m/s) for the per-row ETA + "open on arrival" cue. Null until
+    // the first sample or with no live stream; the row then omits the ETA and falls back to the
+    // now-relative open/closed badge only.
+    avgSpeedMps: Double?,
     // Whether a route is loaded on the Karoo (and its name/distance). Drives the empty
     // state: route hero + "Find places" when loaded, a "find places near you" prompt when not.
     routeState: RouteState,
@@ -356,12 +362,24 @@ fun WaybookScreen(
                     // Known progress but no ahead-crossing ⇒ behind the rider; how far back.
                     behind = progressMeters?.takeIf { ahead == null }?.let { behindMetersFor(poi, it) }
                 }
+                // "Open on arrival": for a POI still ahead on a route, estimate the arrival
+                // clock time from its distance-ahead + the rider's average speed, then judge
+                // its hours against *that* time (not "now"). Route-only and only while ahead —
+                // a passed or nearby POI has no meaningful along-route arrival. Null (no ETA
+                // line) until there's a real moving average — before the ride starts we don't
+                // fabricate one (see [etaArrival]).
+                val arrival = if (source == PoiSource.ROUTE && ahead != null) {
+                    etaArrival(ahead, avgSpeedMps)
+                } else {
+                    null
+                }
                 PoiRow(
                     poi = poi,
                     hours = hoursOf(poi),
                     hasRoute = routeLengthMeters > 0,
                     aheadMeters = ahead,
                     behindMeters = behind,
+                    arrival = arrival,
                     onClick = { onOpenPoi(poi) },
                     // Route mode: a per-row star (trailing) to favorite straight from the list.
                     // Live mode: no star (favorites are route-only) — the chevron stays instead.
@@ -578,6 +596,9 @@ private fun PoiRow(
     aheadMeters: Double?,
     // Meters behind the rider once passed (≥0); null when still ahead / no position.
     behindMeters: Double?,
+    // Estimated arrival clock time for a POI ahead on a route; null when not applicable (nearby,
+    // passed, or no live speed). Drives the "open on arrival" ETA line.
+    arrival: java.util.Calendar?,
     onClick: () -> Unit,
     // Route mode: show the trailing star to favorite from the list. Live mode: false → the
     // chevron shows instead (favorites are route-only).
@@ -599,11 +620,21 @@ private fun PoiRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Left rail: the category icon (with the open/closed status badge) stacked over
-        // the route distance to/from this POI, so both live on the narrow left edge and
-        // the name/type text gets the full remaining width.
+        // the route distance to/from this POI and the detour, so all three live on the narrow
+        // left edge and the name/type/ETA text gets the full remaining width (keeping rows to
+        // at most three lines on the right).
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             StatusIcon(style = style, hours = hours)
             DistanceLabel(aheadMeters = aheadMeters, behindMeters = behindMeters)
+            // Detour (only meaningful along a route): a compact "+120m" under the distance.
+            if (hasRoute && poi.detourMeters > 0) {
+                Text(
+                    "+${formatDistance(poi.detourMeters)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
         }
         Spacer(Modifier.size(16.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -615,15 +646,9 @@ private fun PoiRow(
             )
             // Line 2: type. Line 3 (when closed): "opens Mon 08:00".
             TypeAndOpensLine(hours = hours, typeLabel = labelForPoi(poi))
-            // Detour (only meaningful along a route).
-            if (hasRoute && poi.detourMeters > 0) {
-                Text(
-                    "detour ${formatDistance(poi.detourMeters)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
+            // "Open on arrival": ETA clock time, tinted by whether the POI will be open then —
+            // green (open), amber (a close call), grey (no hours to judge).
+            if (arrival != null) EtaLine(arrival = arrival, hours = hours)
         }
         // Route mode: a star to favorite this POI straight from the list (the row itself still
         // opens the detail). Live mode: the plain chevron, since favorites don't apply there.
@@ -714,6 +739,35 @@ private fun DistanceLabel(aheadMeters: Double?, behindMeters: Double?) {
             modifier = Modifier.padding(top = 3.dp),
         )
     }
+}
+
+/**
+ * "Open on arrival" line: the estimated arrival clock time (e.g. "ETA 14:35"), tinted by
+ * whether the POI will be open then — green (open), amber (a close call, arriving near an
+ * open/close edge), grey (no hours to judge, or arriving while shut). Judges the hours against
+ * the *arrival* time, not "now", so the rider sees whether it's worth aiming for. The word
+ * "closed" is only spelled out when we're confident; a close call stays terse to avoid crying
+ * wolf on a jittery average speed.
+ */
+@Composable
+private fun EtaLine(arrival: java.util.Calendar, hours: OpeningHours.Hours?) {
+    val status = remember(hours, arrival.timeInMillis) {
+        hours?.arrivalStatus(arrival) ?: OpeningHours.ArrivalStatus.UNKNOWN
+    }
+    val (color, suffix) = when (status) {
+        OpeningHours.ArrivalStatus.OPEN -> OpenGreen to " · open"
+        OpeningHours.ArrivalStatus.CLOSE_CALL -> EtaCloseCallAmber to " · close"
+        OpeningHours.ArrivalStatus.CLOSED -> ClosedRed to " · closed"
+        OpeningHours.ArrivalStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant to ""
+    }
+    Text(
+        "ETA ${formatEtaClock(arrival)}$suffix",
+        style = MaterialTheme.typography.bodySmall,
+        color = color,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /**

@@ -84,6 +84,9 @@ import kotlinx.coroutines.launch
 fun PoiDetailScreen(
     poi: Poi,
     hasRoute: Boolean,
+    // Estimated arrival time at this POI (distance-ahead + average speed), or null when it's not
+    // ahead on a route / no live position. Drives the "open on arrival" ETA callout.
+    arrival: java.util.Calendar?,
     cachedDescription: String?,
     loadDescription: suspend () -> String?,
     // Google Places fallback for hours when OSM has none. Null when the feature is
@@ -176,6 +179,15 @@ fun PoiDetailScreen(
             statusPill?.let {
                 Spacer(Modifier.height(10.dp))
                 Pill(it.text, it.color, Color.White)
+            }
+            // "Open on arrival": the ETA at this POI, judged against its hours at that time —
+            // green (open), amber (a close call), red (closed), grey (no hours). Shown as a
+            // colored pill on its own line, just under the now-relative status, so the rider
+            // sees both "open now" and "will it be open when I get there".
+            arrival?.let { eta ->
+                val etaPill = remember(hours, eta.timeInMillis) { etaPillFor(hours, eta) }
+                Spacer(Modifier.height(6.dp))
+                Pill(etaPill.text, etaPill.color, Color.White)
             }
             val routePills = buildList {
                 poi.distancesAlongRoute.firstOrNull()?.let { add("at ${formatDistance(it)}") }
@@ -614,6 +626,22 @@ private fun GoogleHoursFallback(
 
 /** A color-coded status headline for the hero pill row, derived from resolved hours. */
 private data class StatusPill(val text: String, val color: Color)
+
+/**
+ * The "open on arrival" pill: the ETA clock time plus a verdict against the POI's hours at that
+ * time — "ETA 14:35 · open" (green), "· close" (amber, a close call), "· closed" (red), or a
+ * plain "ETA 14:35" (grey) when there are no hours to judge. Mirrors the list row's [EtaLine].
+ */
+private fun etaPillFor(hours: OpeningHours.Hours?, arrival: java.util.Calendar): StatusPill {
+    val clock = io.resupply.karoo.data.formatEtaClock(arrival)
+    val status = hours?.arrivalStatus(arrival) ?: OpeningHours.ArrivalStatus.UNKNOWN
+    return when (status) {
+        OpeningHours.ArrivalStatus.OPEN -> StatusPill("ETA $clock · open", OpenGreen)
+        OpeningHours.ArrivalStatus.CLOSE_CALL -> StatusPill("ETA $clock · close", EtaCloseCallAmber)
+        OpeningHours.ArrivalStatus.CLOSED -> StatusPill("ETA $clock · closed", ClosedRed)
+        OpeningHours.ArrivalStatus.UNKNOWN -> StatusPill("ETA $clock", SeasonalGrey)
+    }
+}
 
 /** Resolve the open/closed/seasonal/24-7 pill from already-parsed [hours]. */
 private fun statusPillFor(hours: OpeningHours.Hours?): StatusPill? {

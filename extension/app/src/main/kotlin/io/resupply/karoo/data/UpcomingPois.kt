@@ -135,3 +135,49 @@ fun elideName(name: String?, maxChars: Int): String? {
 
 /** Absorbs GPS jitter around the rider's position (meters). */
 const val DEFAULT_TOLERANCE_METERS = 50.0
+
+/**
+ * Below this average speed we have no trustworthy basis for an ETA: the rider is stopped, or —
+ * critically — hasn't started the ride yet (a loaded-but-unridden route reports a ~0 average).
+ * We show NO ETA rather than inventing one from a guessed pace, which reads as a confident-but-
+ * fictional arrival time before the wheels have turned. ~5.4 km/h.
+ */
+const val MIN_ETA_SPEED_MPS = 1.5
+
+/**
+ * Minutes to ride [aheadMeters] at [speedMps], or null when [speedMps] is missing or below
+ * [MIN_ETA_SPEED_MPS] — i.e. we don't have a real moving average to project from, so there's no
+ * honest ETA to give. Returns 0 for a POI underfoot. The arrival time an ETA yields is only as
+ * good as the average speed behind it, so this is deliberately conservative: a genuine ride
+ * average is required, never a placeholder.
+ */
+fun etaMinutes(aheadMeters: Double, speedMps: Double?): Double? {
+    val speed = speedMps?.takeIf { it >= MIN_ETA_SPEED_MPS } ?: return null
+    return aheadMeters.coerceAtLeast(0.0) / speed / 60.0
+}
+
+/**
+ * Clock arrival time: [now] plus the ride time for [aheadMeters] at [speedMps], or null when
+ * there's no trustworthy speed to project from (see [etaMinutes] — e.g. the ride hasn't started).
+ * The arrival [java.util.Calendar] is what opening hours are judged against
+ * ([OpeningHours.Hours.arrivalStatus]).
+ */
+fun etaArrival(
+    aheadMeters: Double,
+    speedMps: Double?,
+    now: java.util.Calendar = java.util.Calendar.getInstance(),
+): java.util.Calendar? {
+    val minutes = etaMinutes(aheadMeters, speedMps) ?: return null
+    val arrival = now.clone() as java.util.Calendar
+    arrival.add(java.util.Calendar.SECOND, (minutes * 60.0).toInt())
+    return arrival
+}
+
+/**
+ * Clock time of arrival for display, e.g. "14:35". 24-hour, matching the opening-hours table.
+ */
+fun formatEtaClock(arrival: java.util.Calendar): String =
+    "%02d:%02d".format(
+        arrival.get(java.util.Calendar.HOUR_OF_DAY),
+        arrival.get(java.util.Calendar.MINUTE),
+    )

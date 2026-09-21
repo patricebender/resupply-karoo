@@ -32,23 +32,16 @@ class PoiQuery(private val database: PoiDatabase) {
     ): List<Poi> {
         if (route.size < 2) return emptyList()
 
-        // Query with the extended bbox so sparse segments (and smart mode's scarce categories)
+        // Query with the extended reach so sparse segments (and smart mode's scarce categories)
         // can reach further; the exact per-candidate cutoff is applied in selectAlongRoute.
         val maxRadius = CorridorTuning.maxReachMeters(radiusMeters, smart)
 
-        var minLat = Double.MAX_VALUE; var maxLat = -Double.MAX_VALUE
-        var minLng = Double.MAX_VALUE; var maxLng = -Double.MAX_VALUE
-        for (p in route) {
-            minLat = minOf(minLat, p.lat); maxLat = maxOf(maxLat, p.lat)
-            minLng = minOf(minLng, p.lng); maxLng = maxOf(maxLng, p.lng)
-        }
-        val dLat = maxRadius / METERS_PER_DEG_LAT
-        val midLat = (minLat + maxLat) / 2
-        val dLng = maxRadius / (METERS_PER_DEG_LAT * cos(Math.toRadians(midLat)))
-
-        val rows = candidatesInBox(
-            minLat - dLat, maxLat + dLat, minLng - dLng, maxLng + dLng,
-        )
+        // Fetch along a SEGMENTED corridor, not one whole-route bbox. A single bbox over a long
+        // route that snakes across a region is a huge rectangle mostly far from the line — the
+        // R*Tree returns every POI in it, and those all flow through the (linear) selection. A
+        // per-chunk bbox instead hugs the local geometry, so the union of fetched rows ≈ the
+        // corridor's swept area, independent of route shape. Rows are de-duped by osm id.
+        val rows = candidatesAlongRoute(route, maxRadius)
 
         // Carry each Row through selection so we can emit its parsed tags at the end.
         val byId = HashMap<String, Row>(rows.size)
@@ -141,6 +134,20 @@ class PoiQuery(private val database: PoiDatabase) {
         )
     }
 
+    /**
+     * Fetch corridor candidates as the union of the tight per-chunk bboxes from
+     * [corridorChunkBoxes], de-duped by osm id (chunk boxes overlap at their shared seam vertex).
+     */
+    private fun candidatesAlongRoute(route: List<LatLng>, reachMeters: Int): List<Row> {
+        val byId = LinkedHashMap<String, Row>()   // preserve first-seen order; de-dup seams
+        for (b in corridorChunkBoxes(route, reachMeters)) {
+            for (r in candidatesInBox(b.minLat, b.maxLat, b.minLng, b.maxLng)) {
+                byId.putIfAbsent(r.osmId, r)
+            }
+        }
+        return ArrayList(byId.values)
+    }
+
     /** R*Tree range-scan within a bbox, across all categories. */
     private fun candidatesInBox(
         minLat: Double, maxLat: Double, minLng: Double, maxLng: Double,
@@ -186,6 +193,51 @@ class PoiQuery(private val database: PoiDatabase) {
 // Extracted from PoiQuery.queryCorridor so the density/relevance logic can be unit-tested
 // on the JVM against a real route + real POIs. queryCorridor does the bbox DB fetch, then
 // hands the candidates here.
+
+/** An extended lat/lng bounding box to R*Tree-scan for one corridor chunk. */
+data class CorridorBox(val minLat: Double, val maxLat: Double, val minLng: Double, val maxLng: Double)
+
+/** Route length per corridor-fetch chunk (metres). A distance budget, not a vertex count, so a
+ *  chunk is the same geographic size regardless of GPX sampling density. */
+private const val CHUNK_METERS = 2_000.0
+
+/**
+ * Split [route] into contiguous ~[CHUNK_METERS] chunks and return each chunk's bounding box grown
+ * by [reachMeters] on all sides. The union of these tight boxes hugs the corridor, so on a long
+ * strung-out route it fetches a fraction of what one whole-route bbox (area ~ extent²) would.
+ *
+ * Pure and DB-free so it's unit-testable off-device (see SegmentedCorridorTest). Correctness: every
+ * vertex lands in some chunk and each box is grown by the full reach, so any POI within reach of any
+ * segment is inside some box — the union covers everything the single bbox would that's actually in
+ * reach, dropping only the far POIs it over-fetched (which selectAlongRoute discarded anyway).
+ * Consecutive chunks share a boundary vertex so the seam segment is fully covered by both.
+ */
+fun corridorChunkBoxes(route: List<LatLng>, reachMeters: Int): List<CorridorBox> {
+    val dLat = reachMeters / METERS_PER_DEG_LAT
+    val boxes = ArrayList<CorridorBox>()
+    var start = 0
+    while (start < route.size - 1) {
+        // Grow this chunk vertex by vertex until it has covered ~CHUNK_METERS of route.
+        var minLat = route[start].lat; var maxLat = route[start].lat
+        var minLng = route[start].lng; var maxLng = route[start].lng
+        var chunkLen = 0.0
+        var end = start
+        while (end < route.size - 1 && chunkLen < CHUNK_METERS) {
+            end++
+            val p = route[end]
+            minLat = minOf(minLat, p.lat); maxLat = maxOf(maxLat, p.lat)
+            minLng = minOf(minLng, p.lng); maxLng = maxOf(maxLng, p.lng)
+            chunkLen += haversine(route[end - 1], p)
+        }
+        // Longitude scale at this chunk's own latitude (not the whole-route mid-lat), so the box
+        // stays tight where the route runs far north/south of its overall centre.
+        val chunkMidLat = (minLat + maxLat) / 2
+        val dLng = reachMeters / (METERS_PER_DEG_LAT * cos(Math.toRadians(chunkMidLat)))
+        boxes.add(CorridorBox(minLat - dLat, maxLat + dLat, minLng - dLng, maxLng + dLng))
+        start = end   // overlap the next chunk by this boundary vertex
+    }
+    return boxes
+}
 
 /** Density/relevance tunables for [selectAlongRoute]. */
 object CorridorTuning {

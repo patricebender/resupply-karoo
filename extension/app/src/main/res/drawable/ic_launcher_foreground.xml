@@ -54,7 +54,7 @@
             android:strokeColor="#0F1A18"
             android:strokeWidth="12" />
         <path
-            android:pathData="M 462 152 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0"
+            android:pathData="M 410 152 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0"
             android:fillColor="#C79BE8"
             android:strokeColor="#0F1A18"
             android:strokeWidth="12" />

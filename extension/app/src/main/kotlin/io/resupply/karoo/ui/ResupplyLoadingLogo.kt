@@ -99,14 +99,15 @@ private val letterR: Path = PathParser()
         )
     }
 
-// Each dot sits on a route vertex; the fraction is its position along the polyline (0..1),
-// computed from the segment lengths. Cyan at (152,404), yellow at (332,282), purple at the
-// terminus (462,152).
+// Each dot's fraction is its position along the polyline (0..1), computed from the segment
+// lengths. Cyan at (152,404), yellow at (332,282), purple pulled 52px in from the end onto the
+// final segment (410,152) so it sits ON the route with a trailing stub — the head passes it and
+// pops naturally, then finishes the stub. Matches the dot placement in ic_resupply.
 private data class Dot(val fraction: Float, val color: Color)
 private val DOTS = listOf(
     Dot(0.179f, DotCyan),
     Dot(0.624f, DotYellow),
-    Dot(1.0f, DotPurple),
+    Dot(0.907f, DotPurple),
 )
 
 /**

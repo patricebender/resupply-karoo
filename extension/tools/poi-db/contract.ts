@@ -13,7 +13,10 @@ export type Category =
   | "bike"
   | "fuel"
   | "ice_cream"
-  | "hotels";
+  | "hotels"
+  | "pharmacy"
+  | "atm"
+  | "campground";
 
 export const ALL_CATEGORIES: Category[] = [
   "restaurants",
@@ -25,6 +28,9 @@ export const ALL_CATEGORIES: Category[] = [
   "fuel",
   "ice_cream",
   "hotels",
+  "pharmacy",
+  "atm",
+  "campground",
 ];
 
 /** Subset of karoo-ext Symbol.POI.Types we emit. */
@@ -39,4 +45,7 @@ export type PoiType =
   | "GAS_STATION"
   | "ICE_CREAM"
   | "LODGING"
+  | "PHARMACY"
+  | "ATM"
+  | "CAMPING"
   | "GENERIC";

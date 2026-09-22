@@ -56,6 +56,18 @@ export const CATEGORY_RULES: Record<Category, TagRule[]> = {
     { key: "tourism", value: "hostel", type: "LODGING" },
     { key: "tourism", value: "motel", type: "LODGING" },
   ],
+  pharmacy: [{ key: "amenity", value: "pharmacy", type: "PHARMACY" }],
+  // ATMs and bank branches (which nearly always have an ATM) share one cash pin.
+  atm: [
+    { key: "amenity", value: "atm", type: "ATM" },
+    { key: "amenity", value: "bank", type: "ATM" },
+  ],
+  // Campsites, backcountry huts, and shelters — the bikepacker's sleep spots.
+  campground: [
+    { key: "tourism", value: "camp_site", type: "CAMPING" },
+    { key: "tourism", value: "wilderness_hut", type: "CAMPING" },
+    { key: "amenity", value: "shelter", type: "CAMPING" },
+  ],
 };
 
 /** All rules for the enabled categories, flattened. */

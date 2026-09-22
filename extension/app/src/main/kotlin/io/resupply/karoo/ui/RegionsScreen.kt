@@ -85,7 +85,7 @@ fun RegionsScreen(
     confirmRemove?.let { region ->
         ConfirmDialog(
             icon = Icons.Filled.Delete,
-            accent = ClosedRed,
+            accent = MaterialTheme.colorScheme.error,
             title = "Remove ${region.label}?",
             message = "This deletes its downloaded places from the device. You can download it again later.",
             confirmLabel = "Remove",
@@ -114,7 +114,7 @@ fun RegionsScreen(
         when (state) {
             is RegionDownloadState.ManifestFailed -> Text(
                 "Couldn't reach the region list. Check your connection and try again.",
-                color = ClosedRed,
+                color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(16.dp),
             )
@@ -367,7 +367,7 @@ private fun RegionRow(
             if (failedThis) {
                 Text(
                     (state as RegionDownloadState.Failed).reason,
-                    color = ClosedRed,
+                    color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

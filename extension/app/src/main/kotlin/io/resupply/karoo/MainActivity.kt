@@ -6,7 +6,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,6 +42,7 @@ import io.resupply.karoo.data.WikipediaClient
 import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.extension.toSymbol
 import io.resupply.karoo.ui.SettingsScreen
+import io.resupply.karoo.ui.theme.ResupplyTheme
 import io.resupply.karoo.ui.PoiDetailScreen
 import io.resupply.karoo.ui.RegionDownloadState
 import io.resupply.karoo.ui.RegionsScreen
@@ -154,9 +154,13 @@ class MainActivity : ComponentActivity() {
         if (intent?.getStringExtra(EXTRA_ACTION) == ACTION_BUILD) buildFromField()
 
         setContent {
-            MaterialTheme {
+            // Theme is driven by the persisted mode; collect it here so the very first frame is
+            // already the right theme (initialValue = default SYSTEM) and there's no purple flash
+            // before the config flow emits. One ResupplyTheme at the root wraps the whole app.
+            val config by configStore.config.collectAsStateWithLifecycle(initialValue = ResupplyConfig())
+            ResupplyTheme(config.themeMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    ResupplyApp(initialScreen = Screen.Waybook)
+                    ResupplyApp(config = config, initialScreen = Screen.Waybook)
                 }
             }
         }
@@ -178,8 +182,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun ResupplyApp(initialScreen: Screen = Screen.Waybook) {
-        val config by configStore.config.collectAsStateWithLifecycle(initialValue = ResupplyConfig())
+    private fun ResupplyApp(config: ResupplyConfig, initialScreen: Screen = Screen.Waybook) {
         val buildState by repository.buildState.collectAsStateWithLifecycle()
         val pois by repository.pois.collectAsStateWithLifecycle()
         val routeLength by repository.routeLengthMeters.collectAsStateWithLifecycle()
@@ -262,6 +265,10 @@ class MainActivity : ComponentActivity() {
                     },
                     onSmartDistanceToggle = { on ->
                         lifecycleScope.launch { configStore.setSmartDistance(on) }
+                    },
+                    themeMode = config.themeMode,
+                    onThemeModeChange = { mode ->
+                        lifecycleScope.launch { configStore.setThemeMode(mode) }
                     },
                     onBuild = ::runBuild,
                     onClear = {

@@ -1,23 +1,38 @@
 package io.resupply.karoo.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,12 +48,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.ResupplyConfig
+import io.resupply.karoo.data.ThemeMode
 import kotlin.math.roundToInt
 
 /**
@@ -61,6 +78,8 @@ fun SettingsScreen(
     onCategoryToggle: (Category, Boolean) -> Unit,
     onSafeWaterToggle: (Boolean) -> Unit,
     onSmartDistanceToggle: (Boolean) -> Unit,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onBuild: () -> Unit,
     onClear: () -> Unit,
     onOpenRegions: () -> Unit,
@@ -186,6 +205,10 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(20.dp))
+            SectionHeader("Appearance")
+            AppearanceSection(mode = themeMode, onModeChange = onThemeModeChange)
+
+            Spacer(Modifier.height(20.dp))
             SectionHeader("Data")
             RegionsRow(summary = installedSummary, enabled = !building, onClick = onOpenRegions)
         }
@@ -194,7 +217,7 @@ fun SettingsScreen(
     if (showClearDialog) {
         ConfirmDialog(
             icon = Icons.Filled.Delete,
-            accent = ClosedRed,
+            accent = MaterialTheme.colorScheme.error,
             title = "Clear this roadbook?",
             message = "Removes the places found for the current route and the favorites you saved " +
                 "for it. Building the same route again will start fresh.",
@@ -289,6 +312,131 @@ private fun SmartDistanceRow(checked: Boolean, enabled: Boolean, onToggle: (Bool
     }
 }
 
+/**
+ * The Appearance section: a single three-way theme toggle — Light / Auto / Dark — mapping directly
+ * to the three [ThemeMode]s. Auto ([ThemeMode.SYSTEM]) follows the Karoo's day/night mode and is
+ * the default; Light/Dark are explicit rider overrides. One control, three explicit states — no
+ * hidden coupling, the selected segment is always what you get.
+ */
+@Composable
+private fun AppearanceSection(mode: ThemeMode, onModeChange: (ThemeMode) -> Unit) {
+    ThemeModeToggle(
+        mode = mode,
+        onModeChange = onModeChange,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** The three segments, in display order (left→right), each with its icon + label. */
+private val THEME_SEGMENTS = listOf(
+    Triple(ThemeMode.LIGHT, Icons.Filled.WbSunny, "Light"),
+    Triple(ThemeMode.SYSTEM, Icons.Filled.BrightnessAuto, "Auto"),
+    Triple(ThemeMode.DARK, Icons.Filled.DarkMode, "Dark"),
+)
+
+/**
+ * A segmented Light / Auto / Dark control: a rounded track holding three equal cells, with a
+ * highlighted pill thumb that slides to the selected cell (animated offset + color, the same motion
+ * vocabulary as the header star toggle). Thin dividers between the resting cells sell the "three
+ * segments" read; the active cell's content flips to the primary's on-color, the others stay muted.
+ * Tapping a cell selects that [ThemeMode]. Width is measured so the thumb lands on exact thirds.
+ */
+@Composable
+private fun ThemeModeToggle(
+    mode: ThemeMode,
+    onModeChange: (ThemeMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val count = THEME_SEGMENTS.size
+    val selectedIndex = THEME_SEGMENTS.indexOfFirst { it.first == mode }.coerceAtLeast(0)
+    val thumbIndex by animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "thememode-thumb",
+    )
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val thumbColor = MaterialTheme.colorScheme.primary
+    val onThumb = MaterialTheme.colorScheme.onPrimary
+    val onTrack = MaterialTheme.colorScheme.onSurfaceVariant
+    val divider = MaterialTheme.colorScheme.outlineVariant
+
+    val trackHeight = 46.dp
+    val inset = 3.dp // uniform gap between the thumb and the track edge on all sides
+
+    BoxWithConstraints(
+        modifier = modifier
+            .height(trackHeight)
+            .clip(RoundedCornerShape(percent = 50))
+            .background(trackColor),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        val segmentWidth = maxWidth / count
+
+        // Resting dividers between cells — fade out as the thumb approaches so it never overlaps
+        // the accent pill. Two dividers for three cells.
+        for (i in 1 until count) {
+            // Distance (in cells) from the thumb centre to this divider; near → hide it.
+            val near = (kotlin.math.abs(thumbIndex + 0.5f - i)).coerceIn(0f, 1f)
+            Box(
+                modifier = Modifier
+                    .offset(x = segmentWidth * i)
+                    .padding(vertical = 12.dp)
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(divider.copy(alpha = 0.6f * near)),
+            )
+        }
+
+        // The sliding accent pill, exactly one cell wide minus the uniform inset, centred in its
+        // cell and offset to the (fractional) selected index.
+        Box(
+            modifier = Modifier
+                .offset(x = segmentWidth * thumbIndex + inset)
+                .padding(vertical = inset)
+                .width(segmentWidth - inset * 2)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(percent = 50))
+                .background(thumbColor),
+        )
+
+        // The three cells on top: each exactly one third wide, content centred within it.
+        Row(modifier = Modifier.fillMaxSize()) {
+            THEME_SEGMENTS.forEachIndexed { index, (segMode, icon, label) ->
+                val active = index == selectedIndex
+                val content by animateColorAsState(
+                    targetValue = if (active) onThumb else onTrack,
+                    animationSpec = tween(durationMillis = 300),
+                    label = "thememode-content",
+                )
+                Row(
+                    modifier = Modifier
+                        .width(segmentWidth)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(percent = 50))
+                        .clickable { onModeChange(segMode) },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = content,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                        color = content,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** Uppercase section label shared by the settings sections. */
 @Composable
 private fun SectionHeader(text: String) {
@@ -342,7 +490,7 @@ private fun BuildErrorLine(state: BuildState, modifier: Modifier = Modifier) {
     if (state is BuildState.Error) {
         Text(
             state.message,
-            color = ClosedRed,
+            color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.bodyMedium,
             modifier = modifier.padding(bottom = 8.dp),
         )

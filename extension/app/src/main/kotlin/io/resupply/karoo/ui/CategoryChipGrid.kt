@@ -113,7 +113,7 @@ private fun CategoryChip(
             // No label, so the icon carries the meaning — name it for accessibility.
             contentDescription = style.label,
             tint = if (on) Color.White else style.color,
-            modifier = Modifier.size(26.dp),
+            modifier = Modifier.size(26.dp * style.iconScale),
         )
         // Post-build count of found places for an enabled category — a small corner badge.
         if (on && count != null) {

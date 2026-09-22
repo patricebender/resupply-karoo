@@ -6,10 +6,9 @@ import androidx.compose.material.icons.filled.LocalBar
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Icecream
 import androidx.compose.material.icons.filled.LocalGasStation
-import androidx.compose.material.icons.filled.Cabin
+import androidx.compose.material.icons.filled.Atm
 import androidx.compose.material.icons.filled.Hotel
-import androidx.compose.material.icons.filled.LocalAtm
-import androidx.compose.material.icons.filled.LocalPharmacy
+import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -27,7 +26,17 @@ import io.resupply.karoo.data.Poi
  * Colors echo the mockup (warm cafe, green outdoors, …) and stay distinct on the
  * Karoo's small display.
  */
-data class CategoryStyle(val color: Color, val icon: ImageVector, val label: String)
+/**
+ * [iconScale] multiplies the icon's drawn size at each render site. It's 1 for the solid
+ * Material glyphs; a lettered icon like ATM fills less of its box, so it's bumped up to
+ * read at the same visual weight as the others.
+ */
+data class CategoryStyle(
+    val color: Color,
+    val icon: ImageVector,
+    val label: String,
+    val iconScale: Float = 1f,
+)
 
 // Category tint, shared by the types within it (dots read by category color).
 private val RESTAURANT = Color(0xFFD84315)
@@ -54,9 +63,10 @@ private val STYLES: Map<String, CategoryStyle> = mapOf(
     "GAS_STATION" to CategoryStyle(FUEL, Icons.Filled.LocalGasStation, "Gas station"),
     "ICE_CREAM" to CategoryStyle(ICE_CREAM, Icons.Filled.Icecream, "Ice cream"),
     "LODGING" to CategoryStyle(HOTEL, Icons.Filled.Hotel, "Hotel"),
-    "PHARMACY" to CategoryStyle(PHARMACY, Icons.Filled.LocalPharmacy, "Pharmacy"),
-    "ATM" to CategoryStyle(ATM, Icons.Filled.LocalAtm, "ATM"),
-    "CAMPING" to CategoryStyle(CAMPGROUND, Icons.Filled.Cabin, "Campground"),
+    "PHARMACY" to CategoryStyle(PHARMACY, Icons.Filled.LocalHospital, "Pharmacy"),
+    // The "ATM" lettering fills less of its box than a solid glyph — scale it up to match.
+    "ATM" to CategoryStyle(ATM, Icons.Filled.Atm, "ATM", iconScale = 1.3f),
+    "CAMPING" to CategoryStyle(CAMPGROUND, TentIcon, "Campground"),
 )
 
 private val FALLBACK = CategoryStyle(Color(0xFF757575), Icons.Filled.Place, "Place")

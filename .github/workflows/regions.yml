@@ -52,7 +52,9 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          # Node 22, not 24: better-sqlite3 v11's native addon aborts (SIGABRT in
+          # ~Statement at teardown) under Node 24. v11 supports up to Node 22.
+          node-version: "22"
           cache: npm
           cache-dependency-path: extension/tools/poi-db/package-lock.json
 

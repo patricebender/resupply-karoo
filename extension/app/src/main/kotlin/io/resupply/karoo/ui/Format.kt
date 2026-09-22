@@ -1,5 +1,7 @@
 package io.resupply.karoo.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.Poi
@@ -39,15 +41,51 @@ fun formatRangeCompact(startMeters: Double, endMeters: Double): String {
     }
 }
 
-// Shared status colors (open = green, closed = muted red), used by list + detail.
+// Shared status colors (open = green, closed = muted red), used by list + detail. These sit on
+// the themed surface, so they're theme-aware: the values below are tuned for the light (cream)
+// theme; on the dark brand tile they'd read muddy, so the @Composable accessors brighten them.
 val OpenGreen = Color(0xFF2E7D32)
 val ClosedRed = Color(0xFFB00020)
 
 // Neutral tint for the "hours exist but are seasonal/complex" badge/chip.
 val SeasonalGrey = Color(0xFF757575)
 
+// Dark-theme variants: brighter so they carry on the near-black teal surface.
+private val OpenGreenDark = Color(0xFF66BB6A)
+private val ClosedRedDark = Color(0xFFEF5350)
+private val SeasonalGreyDark = Color(0xFF9AA5A0)
+
+/** Open-status green, brightened on the dark theme so it reads on the brand tile. */
+val openGreen: Color
+    @Composable get() = if (isSystemInDarkTheme()) OpenGreenDark else OpenGreen
+
+/** Closed-status red, brightened on the dark theme (the deep maroon is invisible on the tile). */
+val closedRed: Color
+    @Composable get() = if (isSystemInDarkTheme()) ClosedRedDark else ClosedRed
+
+/** Seasonal/unknown grey, lifted on the dark theme. */
+val seasonalGrey: Color
+    @Composable get() = if (isSystemInDarkTheme()) SeasonalGreyDark else SeasonalGrey
+
+/**
+ * Map a light-theme status [color] (as produced by the non-composable pill helpers) to its
+ * dark-theme variant when the dark theme is active. A pass-through on the light theme and for
+ * colors without a dark variant (e.g. [EtaCloseCallAmber], which reads on both).
+ */
+@Composable
+fun themedStatus(color: Color): Color = if (isSystemInDarkTheme()) {
+    when (color) {
+        OpenGreen -> OpenGreenDark
+        ClosedRed -> ClosedRedDark
+        SeasonalGrey -> SeasonalGreyDark
+        else -> color
+    }
+} else {
+    color
+}
+
 // The "close call" amber for an ETA that lands near an open/close edge — cutting it fine.
-// Deeper than the favorites gold so it reads as caution, not a star, on the light theme.
+// Deeper than the favorites gold so it reads as caution, not a star. Bright enough for both themes.
 val EtaCloseCallAmber = Color(0xFFEF6C00)
 
 // The favorites star fill — a warm amber-gold, used by the list/detail/header star toggles

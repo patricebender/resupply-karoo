@@ -209,7 +209,7 @@ fun PoiDetailScreen(
             val statusPill = remember(hours) { statusPillFor(hours) }
             statusPill?.let {
                 Spacer(Modifier.height(10.dp))
-                Pill(it.text, it.color, Color.White)
+                Pill(it.text, themedStatus(it.color), Color.White)
             }
             // "Open on arrival": the ETA at this POI, judged against its hours at that time —
             // green (open), amber (a close call), red (closed), grey (no hours). Shown as a
@@ -218,7 +218,7 @@ fun PoiDetailScreen(
             arrival?.let { eta ->
                 val etaPill = remember(hours, eta.timeInMillis) { etaPillFor(hours, eta) }
                 Spacer(Modifier.height(6.dp))
-                Pill(etaPill.text, etaPill.color, Color.White)
+                Pill(etaPill.text, themedStatus(etaPill.color), Color.White)
             }
             val routePills = buildList {
                 poi.distancesAlongRoute.firstOrNull()?.let { add("at ${formatDistance(it)}") }
@@ -327,13 +327,13 @@ private fun DrinkingWaterSection(subtype: String, potability: String) {
     data class State(val pill: String, val color: Color, val icon: ImageVector, val note: String?)
 
     val state = when (potability) {
-        "yes" -> State("Drinking water", OpenGreen, Icons.Filled.WaterDrop, "Safe to refill here.")
+        "yes" -> State("Drinking water", openGreen, Icons.Filled.WaterDrop, "Safe to refill here.")
         "no" -> State(
-            "Not drinking water", ClosedRed, Icons.Filled.DoNotDisturbOn,
+            "Not drinking water", closedRed, Icons.Filled.DoNotDisturbOn,
             "Marked as non-potable — don't drink.",
         )
         else -> State(
-            "Potability unknown", SeasonalGrey, Icons.AutoMirrored.Filled.HelpOutline,
+            "Potability unknown", seasonalGrey, Icons.AutoMirrored.Filled.HelpOutline,
             if (subtype == "graveyard") {
                 "Cemeteries almost always have a tap, but it isn't mapped — not confirmed."
             } else {
@@ -507,7 +507,7 @@ private fun OpensCallout(label: String) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(ClosedRed.copy(alpha = 0.10f))
+            .background(closedRed.copy(alpha = 0.10f))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -515,7 +515,7 @@ private fun OpensCallout(label: String) {
         Icon(
             Icons.Filled.Schedule,
             contentDescription = null,
-            tint = ClosedRed,
+            tint = closedRed,
             modifier = Modifier.size(16.dp),
         )
         Spacer(Modifier.size(8.dp))
@@ -544,7 +544,7 @@ private fun AlwaysOpenCallout() {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(OpenGreen.copy(alpha = 0.12f))
+            .background(openGreen.copy(alpha = 0.12f))
             .padding(horizontal = 16.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -552,7 +552,7 @@ private fun AlwaysOpenCallout() {
             Icon(
                 Icons.Filled.Schedule,
                 contentDescription = null,
-                tint = OpenGreen,
+                tint = openGreen,
                 modifier = Modifier.size(22.dp),
             )
             Spacer(Modifier.size(8.dp))
@@ -560,7 +560,7 @@ private fun AlwaysOpenCallout() {
                 "24/7",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = OpenGreen,
+                color = openGreen,
             )
         }
         Spacer(Modifier.height(4.dp))

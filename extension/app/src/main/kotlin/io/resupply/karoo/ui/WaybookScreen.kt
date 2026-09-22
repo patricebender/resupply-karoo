@@ -519,7 +519,7 @@ private fun StarToggle(
  * stays subtle on a bike computer glanced at speed.
  */
 @Composable
-private fun PulsingDot(size: Dp, color: Color = OpenGreen) {
+private fun PulsingDot(size: Dp, color: Color = openGreen) {
     val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "livePulse")
     val alpha by pulse.animateFloat(
         initialValue = 1f,
@@ -555,7 +555,7 @@ private fun LiveChip() {
             "Live",
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
-            color = OpenGreen,
+            color = openGreen,
             maxLines = 1,
         )
     }
@@ -679,9 +679,9 @@ private fun StatusIcon(style: CategoryStyle, hours: OpeningHours.Hours?) {
     val status = remember(hours) { hours?.status() }
     val seasonal = hours?.rawFallback != null
     val badge: Color? = when {
-        seasonal -> SeasonalGrey
-        status?.state == OpeningHours.OpenState.OPEN -> OpenGreen
-        status?.state == OpeningHours.OpenState.CLOSED -> ClosedRed
+        seasonal -> seasonalGrey
+        status?.state == OpeningHours.OpenState.OPEN -> openGreen
+        status?.state == OpeningHours.OpenState.CLOSED -> closedRed
         else -> null
     }
     Box(modifier = Modifier.size(40.dp)) {
@@ -755,9 +755,9 @@ private fun EtaLine(arrival: java.util.Calendar, hours: OpeningHours.Hours?) {
         hours?.arrivalStatus(arrival) ?: OpeningHours.ArrivalStatus.UNKNOWN
     }
     val (color, suffix) = when (status) {
-        OpeningHours.ArrivalStatus.OPEN -> OpenGreen to " · open"
+        OpeningHours.ArrivalStatus.OPEN -> openGreen to " · open"
         OpeningHours.ArrivalStatus.CLOSE_CALL -> EtaCloseCallAmber to " · close"
-        OpeningHours.ArrivalStatus.CLOSED -> ClosedRed to " · closed"
+        OpeningHours.ArrivalStatus.CLOSED -> closedRed to " · closed"
         OpeningHours.ArrivalStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant to ""
     }
     Text(

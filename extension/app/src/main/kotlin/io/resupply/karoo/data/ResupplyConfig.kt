@@ -32,6 +32,12 @@ enum class Category(val id: String, val label: String) {
     }
 }
 
+/**
+ * App theme selection. [SYSTEM] follows the Karoo's day/night mode (the default); [LIGHT]/[DARK]
+ * are explicit rider overrides. Resolved to a concrete scheme by `ResupplyTheme`.
+ */
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
 /** Rider-configurable build settings. */
 data class ResupplyConfig(
     /** Detour search radius around the route, in meters. Ignored while [smartDistance] is on. */
@@ -63,6 +69,8 @@ data class ResupplyConfig(
      * that isn't a favorite — so the list, map pins and fields all narrow together.
      */
     val favoritesOnly: Boolean = false,
+    /** How the app resolves its light/dark theme. Defaults to following the Karoo system mode. */
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
 ) {
     /**
      * Whether [poi] should be shown under this config: its category must be enabled, and —

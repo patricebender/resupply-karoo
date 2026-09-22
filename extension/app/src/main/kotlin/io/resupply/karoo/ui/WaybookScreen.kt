@@ -747,7 +747,7 @@ private fun StatusIcon(style: CategoryStyle, hours: OpeningHours.Hours?) {
                 style.icon,
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(22.dp * style.iconScale),
             )
         }
         badge?.let {

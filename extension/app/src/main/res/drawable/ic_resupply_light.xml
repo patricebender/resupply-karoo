@@ -1,0 +1,76 @@
+<!--
+  Resupply icon tile, LIGHT variant: the inverse of ic_resupply — a cream squircle with the ink
+  "R", the stepped route (orange over an ink casing) and the three coloured waypoint dots
+  (ink-outlined). The route + dots keep their brand colour so the mark stays recognisable; only
+  the tile and the ink/cream roles flip. Shown in DARK mode (the cream tile pops on the dark
+  surface); ic_resupply (dark tile) is shown in LIGHT mode. Keep in sync with ic_resupply.xml.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- tile (cream) -->
+    <path
+        android:pathData="M116,0 L396,0 A116,116 0 0 1 512,116 L512,396 A116,116 0 0 1 396,512 L116,512 A116,116 0 0 1 0,396 L0,116 A116,116 0 0 1 116,0 Z"
+        android:fillColor="#F2EDE3" />
+
+    <!-- faint background contour lines, clipped to the tile (ink at ~0.28 alpha) -->
+    <group>
+        <clip-path android:pathData="M116,0 L396,0 A116,116 0 0 1 512,116 L512,396 A116,116 0 0 1 396,512 L116,512 A116,116 0 0 1 0,396 L0,116 A116,116 0 0 1 116,0 Z" />
+        <path
+            android:pathData="M-40 452 C 90 400 150 470 300 402 S 470 330 560 360"
+            android:strokeColor="#0F1A18"
+            android:strokeWidth="8"
+            android:strokeAlpha="0.28" />
+        <path
+            android:pathData="M-40 512 C 90 460 150 530 300 462 S 470 390 560 420"
+            android:strokeColor="#0F1A18"
+            android:strokeWidth="8"
+            android:strokeAlpha="0.28" />
+    </group>
+
+    <!-- "R" letterform (ink; translate 157,118 scale 1.054 from the source) -->
+    <group
+        android:translateX="157"
+        android:translateY="118"
+        android:scaleX="1.054"
+        android:scaleY="1.054">
+        <path
+            android:pathData="M0 0 H58 V260 H0 Z M58 0 H120 A68 68 0 0 1 120 136 H58 Z M58 46 H120 A22 22 0 0 1 120 90 H58 Z M104 136 H164 L188 260 H128 Z"
+            android:fillColor="#14211E"
+            android:fillType="evenOdd" />
+    </group>
+
+    <!-- route: ink casing then orange, stepped polyline -->
+    <path
+        android:pathData="M52 404 L152 404 L228 282 L332 282 L398 152 L462 152"
+        android:strokeColor="#14211E"
+        android:strokeWidth="54"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M52 404 L152 404 L228 282 L332 282 L398 152 L462 152"
+        android:strokeColor="#E8873B"
+        android:strokeWidth="22"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- waypoint dots (ink outline, brand fill) -->
+    <path
+        android:pathData="M 152 404 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0"
+        android:fillColor="#5FC7E3"
+        android:strokeColor="#14211E"
+        android:strokeWidth="12" />
+    <path
+        android:pathData="M 332 282 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0"
+        android:fillColor="#F2C14E"
+        android:strokeColor="#14211E"
+        android:strokeWidth="12" />
+    <path
+        android:pathData="M 462 152 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0"
+        android:fillColor="#C79BE8"
+        android:strokeColor="#14211E"
+        android:strokeWidth="12" />
+</vector>

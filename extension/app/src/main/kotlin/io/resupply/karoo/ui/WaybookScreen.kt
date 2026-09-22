@@ -54,6 +54,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +86,19 @@ import kotlin.math.abs
 // jumps snap instantly, so a discontinuity re-syncs the list without the range bracket
 // visibly crawling toward the (instantly-moved) strip bike glyph.
 private const val SMOOTH_FOLLOW_ROWS = 3
+
+// True when the active theme is dark (dark surface). Drives the logo swap below.
+@Composable
+private fun isDarkTheme(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
+/**
+ * The Resupply squircle mark, themed: the dark-tile [R.drawable.ic_resupply] on the light theme,
+ * the cream-tile [R.drawable.ic_resupply_light] on the dark theme, so the tile contrasts with the
+ * surface either way. [ResupplyLoadingLogo] mirrors this swap for its animated variant.
+ */
+@Composable
+private fun resupplyLogo(): Painter =
+    painterResource(if (isDarkTheme()) R.drawable.ic_resupply_light else R.drawable.ic_resupply)
 
 /**
  * The Waybook ROUTE view: a header with build + settings shortcuts and a live build
@@ -476,7 +491,7 @@ private fun Header(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Image(
-                    painter = painterResource(R.drawable.ic_resupply),
+                    painter = resupplyLogo(),
                     contentDescription = null,
                     modifier = Modifier.size(28.dp),
                 )
@@ -853,7 +868,7 @@ private fun NoCategoriesState(onOpenSettings: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Image(
-            painter = painterResource(R.drawable.ic_resupply),
+            painter = resupplyLogo(),
             contentDescription = null,
             modifier = Modifier.size(72.dp),
         )
@@ -893,7 +908,7 @@ private fun NoFavoritesState(onShowAll: () -> Unit) {
         // stars on one screen read as broken). The favorites cue is the copy and the row/header
         // stars, not a hero star here.
         Image(
-            painter = painterResource(R.drawable.ic_resupply),
+            painter = resupplyLogo(),
             contentDescription = null,
             modifier = Modifier.size(72.dp),
         )
@@ -976,7 +991,7 @@ private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, o
             ResupplyLoadingLogo(size = 72.dp)
         } else {
             Image(
-                painter = painterResource(R.drawable.ic_resupply),
+                painter = resupplyLogo(),
                 contentDescription = null,
                 modifier = Modifier.size(72.dp),
             )
@@ -1055,7 +1070,7 @@ private fun NearbyReadyState(buildState: BuildState, hasFix: Boolean, paused: Bo
             ResupplyLoadingLogo(size = 72.dp)
         } else {
             Image(
-                painter = painterResource(R.drawable.ic_resupply),
+                painter = resupplyLogo(),
                 contentDescription = null,
                 modifier = Modifier.size(72.dp),
             )

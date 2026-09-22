@@ -85,13 +85,13 @@
     "group": "Europe"
   },
   {
-    "id": "italy",
-    "label": "Italy",
+    "id": "albania",
+    "label": "Albania",
     "group": "Europe"
   },
   {
-    "id": "switzerland",
-    "label": "Switzerland",
+    "id": "andorra",
+    "label": "Andorra",
     "group": "Europe"
   },
   {
@@ -100,18 +100,33 @@
     "group": "Europe"
   },
   {
-    "id": "france",
-    "label": "France",
-    "group": "Europe"
-  },
-  {
-    "id": "netherlands",
-    "label": "Netherlands",
-    "group": "Europe"
-  },
-  {
     "id": "belgium",
     "label": "Belgium",
+    "group": "Europe"
+  },
+  {
+    "id": "bosnia-herzegovina",
+    "label": "Bosnia and Herzegovina",
+    "group": "Europe"
+  },
+  {
+    "id": "bulgaria",
+    "label": "Bulgaria",
+    "group": "Europe"
+  },
+  {
+    "id": "croatia",
+    "label": "Croatia",
+    "group": "Europe"
+  },
+  {
+    "id": "cyprus",
+    "label": "Cyprus",
+    "group": "Europe"
+  },
+  {
+    "id": "czech-republic",
+    "label": "Czech Republic",
     "group": "Europe"
   },
   {
@@ -120,13 +135,158 @@
     "group": "Europe"
   },
   {
+    "id": "estonia",
+    "label": "Estonia",
+    "group": "Europe"
+  },
+  {
+    "id": "finland",
+    "label": "Finland",
+    "group": "Europe"
+  },
+  {
+    "id": "france",
+    "label": "France",
+    "group": "Europe"
+  },
+  {
+    "id": "greece",
+    "label": "Greece",
+    "group": "Europe"
+  },
+  {
+    "id": "hungary",
+    "label": "Hungary",
+    "group": "Europe"
+  },
+  {
+    "id": "iceland",
+    "label": "Iceland",
+    "group": "Europe"
+  },
+  {
+    "id": "ireland",
+    "label": "Ireland",
+    "group": "Europe"
+  },
+  {
+    "id": "italy",
+    "label": "Italy",
+    "group": "Europe"
+  },
+  {
+    "id": "kosovo",
+    "label": "Kosovo",
+    "group": "Europe"
+  },
+  {
+    "id": "latvia",
+    "label": "Latvia",
+    "group": "Europe"
+  },
+  {
+    "id": "liechtenstein",
+    "label": "Liechtenstein",
+    "group": "Europe"
+  },
+  {
+    "id": "lithuania",
+    "label": "Lithuania",
+    "group": "Europe"
+  },
+  {
+    "id": "luxembourg",
+    "label": "Luxembourg",
+    "group": "Europe"
+  },
+  {
+    "id": "malta",
+    "label": "Malta",
+    "group": "Europe"
+  },
+  {
+    "id": "moldova",
+    "label": "Moldova",
+    "group": "Europe"
+  },
+  {
+    "id": "monaco",
+    "label": "Monaco",
+    "group": "Europe"
+  },
+  {
+    "id": "montenegro",
+    "label": "Montenegro",
+    "group": "Europe"
+  },
+  {
+    "id": "netherlands",
+    "label": "Netherlands",
+    "group": "Europe"
+  },
+  {
+    "id": "north-macedonia",
+    "label": "North Macedonia",
+    "group": "Europe"
+  },
+  {
     "id": "norway",
     "label": "Norway",
     "group": "Europe"
   },
   {
+    "id": "poland",
+    "label": "Poland",
+    "group": "Europe"
+  },
+  {
+    "id": "portugal",
+    "label": "Portugal",
+    "group": "Europe"
+  },
+  {
+    "id": "romania",
+    "label": "Romania",
+    "group": "Europe"
+  },
+  {
+    "id": "serbia",
+    "label": "Serbia",
+    "group": "Europe"
+  },
+  {
+    "id": "slovakia",
+    "label": "Slovakia",
+    "group": "Europe"
+  },
+  {
+    "id": "slovenia",
+    "label": "Slovenia",
+    "group": "Europe"
+  },
+  {
+    "id": "spain",
+    "label": "Spain",
+    "group": "Europe"
+  },
+  {
     "id": "sweden",
     "label": "Sweden",
+    "group": "Europe"
+  },
+  {
+    "id": "switzerland",
+    "label": "Switzerland",
+    "group": "Europe"
+  },
+  {
+    "id": "ukraine",
+    "label": "Ukraine",
+    "group": "Europe"
+  },
+  {
+    "id": "united-kingdom",
+    "label": "United Kingdom",
     "group": "Europe"
   }
 ]

@@ -6,7 +6,10 @@ import androidx.compose.material.icons.filled.LocalBar
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Icecream
 import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.Cabin
 import androidx.compose.material.icons.filled.Hotel
+import androidx.compose.material.icons.filled.LocalAtm
+import androidx.compose.material.icons.filled.LocalPharmacy
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -36,6 +39,9 @@ private val BIKE = Color(0xFF2E7D32)
 private val FUEL = Color(0xFF455A64)
 private val ICE_CREAM = Color(0xFFE91E63)
 private val HOTEL = Color(0xFF5E35B1)
+private val PHARMACY = Color(0xFFC62828)
+private val ATM = Color(0xFF00838F)
+private val CAMPGROUND = Color(0xFF33691E)
 
 private val STYLES: Map<String, CategoryStyle> = mapOf(
     "FOOD" to CategoryStyle(RESTAURANT, Icons.Filled.Restaurant, "Restaurant"),
@@ -48,6 +54,9 @@ private val STYLES: Map<String, CategoryStyle> = mapOf(
     "GAS_STATION" to CategoryStyle(FUEL, Icons.Filled.LocalGasStation, "Gas station"),
     "ICE_CREAM" to CategoryStyle(ICE_CREAM, Icons.Filled.Icecream, "Ice cream"),
     "LODGING" to CategoryStyle(HOTEL, Icons.Filled.Hotel, "Hotel"),
+    "PHARMACY" to CategoryStyle(PHARMACY, Icons.Filled.LocalPharmacy, "Pharmacy"),
+    "ATM" to CategoryStyle(ATM, Icons.Filled.LocalAtm, "ATM"),
+    "CAMPING" to CategoryStyle(CAMPGROUND, Icons.Filled.Cabin, "Campground"),
 )
 
 private val FALLBACK = CategoryStyle(Color(0xFF757575), Icons.Filled.Place, "Place")
@@ -71,6 +80,9 @@ fun styleForCategory(category: Category): CategoryStyle = styleForType(
         Category.FUEL -> "GAS_STATION"
         Category.ICE_CREAM -> "ICE_CREAM"
         Category.HOTELS -> "LODGING"
+        Category.PHARMACY -> "PHARMACY"
+        Category.ATM -> "ATM"
+        Category.CAMPGROUND -> "CAMPING"
     },
 )
 

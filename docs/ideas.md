@@ -48,4 +48,5 @@ Tie ETA (#1) to sunset: "Bike shop closes before sunset, 12 km ahead" in the rid
 - Note / checked-off state on favorites ("filled bottles here").
 - Export the whole roadbook to the phone (per-POI QR exists; a full summary / GPX waypoints
   would let riders pre-plan).
-- More categories: pharmacies, ATMs, campsites/shelters, water-refill stations, viewpoints.
+- More categories: pharmacies ✅, ATMs ✅, campsites/shelters ✅ (shipped); still open:
+  water-refill stations, viewpoints.

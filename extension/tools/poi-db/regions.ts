@@ -48,17 +48,66 @@ const GERMANY_STATES: Array<{ id: string; label: string; slug: string }> = [
   { id: "thueringen", label: "Thüringen", slug: "thueringen" },
 ];
 
-/** Whole-country regions (no sub-region breakdown). */
-const COUNTRIES: Array<{ id: string; label: string; geofabrik: string }> = [
-  { id: "italy", label: "Italy", geofabrik: "europe/italy" },
-  { id: "switzerland", label: "Switzerland", geofabrik: "europe/switzerland" },
+/**
+ * Whole-country regions (no sub-region breakdown), covering Europe so a
+ * cross-continental route (e.g. the Transcontinental Race) is resuppliable country by
+ * country. Alphabetical by label. `geofabrik` is a Geofabrik path minus `-latest.osm.pbf`;
+ * a string[] merges several extracts (the United Kingdom has no single whole-UK extract, so
+ * it's assembled from England/Scotland/Wales — Northern Ireland comes with Ireland).
+ *
+ * Deliberately excluded: Russia, Turkey, Georgia, Belarus, Azores, Faroe Islands — out of
+ * practical TCR scope and/or oversized for the on-device (Range-chunked) download path.
+ */
+const COUNTRIES: Array<{ id: string; label: string; geofabrik: string | string[] }> = [
+  { id: "albania", label: "Albania", geofabrik: "europe/albania" },
+  { id: "andorra", label: "Andorra", geofabrik: "europe/andorra" },
   { id: "austria", label: "Austria", geofabrik: "europe/austria" },
-  { id: "france", label: "France", geofabrik: "europe/france" },
-  { id: "netherlands", label: "Netherlands", geofabrik: "europe/netherlands" },
   { id: "belgium", label: "Belgium", geofabrik: "europe/belgium" },
+  { id: "bosnia-herzegovina", label: "Bosnia and Herzegovina", geofabrik: "europe/bosnia-herzegovina" },
+  { id: "bulgaria", label: "Bulgaria", geofabrik: "europe/bulgaria" },
+  { id: "croatia", label: "Croatia", geofabrik: "europe/croatia" },
+  { id: "cyprus", label: "Cyprus", geofabrik: "europe/cyprus" },
+  { id: "czech-republic", label: "Czech Republic", geofabrik: "europe/czech-republic" },
   { id: "denmark", label: "Denmark", geofabrik: "europe/denmark" },
+  { id: "estonia", label: "Estonia", geofabrik: "europe/estonia" },
+  { id: "finland", label: "Finland", geofabrik: "europe/finland" },
+  { id: "france", label: "France", geofabrik: "europe/france" },
+  { id: "greece", label: "Greece", geofabrik: "europe/greece" },
+  { id: "hungary", label: "Hungary", geofabrik: "europe/hungary" },
+  { id: "iceland", label: "Iceland", geofabrik: "europe/iceland" },
+  { id: "ireland", label: "Ireland", geofabrik: "europe/ireland-and-northern-ireland" },
+  { id: "italy", label: "Italy", geofabrik: "europe/italy" },
+  { id: "kosovo", label: "Kosovo", geofabrik: "europe/kosovo" },
+  { id: "latvia", label: "Latvia", geofabrik: "europe/latvia" },
+  { id: "liechtenstein", label: "Liechtenstein", geofabrik: "europe/liechtenstein" },
+  { id: "lithuania", label: "Lithuania", geofabrik: "europe/lithuania" },
+  { id: "luxembourg", label: "Luxembourg", geofabrik: "europe/luxembourg" },
+  { id: "malta", label: "Malta", geofabrik: "europe/malta" },
+  { id: "moldova", label: "Moldova", geofabrik: "europe/moldova" },
+  { id: "monaco", label: "Monaco", geofabrik: "europe/monaco" },
+  { id: "montenegro", label: "Montenegro", geofabrik: "europe/montenegro" },
+  { id: "netherlands", label: "Netherlands", geofabrik: "europe/netherlands" },
+  { id: "north-macedonia", label: "North Macedonia", geofabrik: "europe/macedonia" },
   { id: "norway", label: "Norway", geofabrik: "europe/norway" },
+  { id: "poland", label: "Poland", geofabrik: "europe/poland" },
+  { id: "portugal", label: "Portugal", geofabrik: "europe/portugal" },
+  { id: "romania", label: "Romania", geofabrik: "europe/romania" },
+  { id: "serbia", label: "Serbia", geofabrik: "europe/serbia" },
+  { id: "slovakia", label: "Slovakia", geofabrik: "europe/slovakia" },
+  { id: "slovenia", label: "Slovenia", geofabrik: "europe/slovenia" },
+  { id: "spain", label: "Spain", geofabrik: "europe/spain" },
   { id: "sweden", label: "Sweden", geofabrik: "europe/sweden" },
+  { id: "switzerland", label: "Switzerland", geofabrik: "europe/switzerland" },
+  { id: "ukraine", label: "Ukraine", geofabrik: "europe/ukraine" },
+  {
+    id: "united-kingdom",
+    label: "United Kingdom",
+    geofabrik: [
+      "europe/united-kingdom/england",
+      "europe/united-kingdom/scotland",
+      "europe/united-kingdom/wales",
+    ],
+  },
 ];
 
 export const REGIONS: Region[] = [

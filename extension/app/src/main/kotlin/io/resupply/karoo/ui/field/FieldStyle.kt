@@ -22,6 +22,9 @@ private val BIKE = Color(0xFF2E7D32)
 private val FUEL = Color(0xFF455A64)
 private val ICE_CREAM = Color(0xFFE91E63)
 private val HOTEL = Color(0xFF5E35B1)
+private val PHARMACY = Color(0xFFC62828)
+private val ATM = Color(0xFF00838F)
+private val CAMPGROUND = Color(0xFF33691E)
 
 private val STYLES: Map<Category, FieldStyle> = mapOf(
     Category.RESTAURANTS to FieldStyle(RESTAURANT, "🍴", "Food"),
@@ -33,6 +36,9 @@ private val STYLES: Map<Category, FieldStyle> = mapOf(
     Category.FUEL to FieldStyle(FUEL, "⛽", "Fuel"),
     Category.ICE_CREAM to FieldStyle(ICE_CREAM, "🍦", "Ice"),
     Category.HOTELS to FieldStyle(HOTEL, "🛏️", "Hotel"),
+    Category.PHARMACY to FieldStyle(PHARMACY, "💊", "Pharm"),
+    Category.ATM to FieldStyle(ATM, "🏧", "ATM"),
+    Category.CAMPGROUND to FieldStyle(CAMPGROUND, "⛺", "Camp"),
 )
 
 fun styleFor(category: Category): FieldStyle =

@@ -33,5 +33,8 @@ private fun symbolType(type: String): String = when (type) {
     "GAS_STATION" -> Symbol.POI.Types.GAS_STATION
     "ICE_CREAM" -> Symbol.POI.Types.FOOD       // no ice-cream pin in karoo-ext → food icon
     "LODGING" -> Symbol.POI.Types.LODGING
+    "PHARMACY" -> Symbol.POI.Types.FIRST_AID   // no pharmacy pin → first-aid (medical) icon
+    "ATM" -> Symbol.POI.Types.ATM
+    "CAMPING" -> Symbol.POI.Types.CAMPING
     else -> Symbol.POI.Types.GENERIC
 }

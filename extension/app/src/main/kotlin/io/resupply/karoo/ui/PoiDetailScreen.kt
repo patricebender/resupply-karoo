@@ -166,7 +166,7 @@ fun PoiDetailScreen(
                 modifier = Modifier.size(56.dp).clip(CircleShape).background(style.color),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(style.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+                Icon(style.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp * style.iconScale))
             }
             Spacer(Modifier.height(10.dp))
             Text(

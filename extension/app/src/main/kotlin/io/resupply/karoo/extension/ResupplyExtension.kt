@@ -30,9 +30,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -63,8 +67,17 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
     // Identity of the last route we saw navigating (name + distance), so we can tell a genuine
     // route *change* from repeated events for the same route. Null when route-less.
     @Volatile private var lastRouteKey: String? = null
+    // The last route we saw navigating (polyline + distance), so a radius-change rebuild can target
+    // it directly without re-reading nav state (which mid-ride often doesn't re-emit). Null when
+    // route-less. Written by the nav consumer, read by the radius watcher.
+    @Volatile private var lastRoute: OnNavigationState.NavigationState.NavigatingRoute? = null
     // Lifetime consumer id for the nav-state watcher (removed in onDestroy).
     private var navConsumerId: String? = null
+
+    // Last location the nearby refresher queried around. Shared between the move-driven collector
+    // and the periodic tick so both re-query the same center; null when route-less tracking hasn't
+    // started (or a route is loaded). Volatile: written/read from separate refresher coroutines.
+    @Volatile private var lastFetchCenter: LatLng? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -83,6 +96,8 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
             if (connected) {
                 watchNavState()
                 startNearbyRefresher()
+                startRadiusChangeWatcher()
+                startNearbyTicker()
             }
         }
     }
@@ -100,7 +115,16 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
     private fun watchNavState() {
         navConsumerId = karooSystem.addConsumer<OnNavigationState> { event ->
             val state = event.state
-            routeLoaded.set(state is OnNavigationState.NavigationState.NavigatingRoute)
+            val nowRouting = state is OnNavigationState.NavigationState.NavigatingRoute
+            if (nowRouting) {
+                // A route loading ends a route-less session: drop the "Live" flag NOW (not on the
+                // next location tick) so the header can't show the nearby "Live" chip alongside
+                // route-mode UI, and clear any pause from that session so returning to route-less
+                // later starts live search fresh.
+                repository.setNearbyLive(false)
+                if (repository.nearbyPaused.value) repository.setNearbyPaused(false)
+            }
+            routeLoaded.set(nowRouting)
 
             // A detour to a tapped POI (NavigatingToDestination) drops the route context from the
             // event, but the original route is still loaded underneath and resumes when the detour
@@ -112,6 +136,9 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 is OnNavigationState.NavigationState.NavigatingToDestination -> return@addConsumer
 
                 is OnNavigationState.NavigationState.NavigatingRoute -> {
+                    // Hold the current route so a radius-change rebuild can target it directly
+                    // (no nav re-read). Updated on every event so the polyline stays fresh.
+                    lastRoute = state
                     // Cheap change-detector only: name+distance is enough to tell "same route as the
                     // last event" from "a new/changed route", so we don't decode+hash the polyline on
                     // every repeated NavigatingRoute event. The authoritative route match (and the
@@ -135,6 +162,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                         repository.setBuildState(BuildState.Idle)
                     }
                     lastRouteKey = null
+                    lastRoute = null
                 }
             }
         }
@@ -182,12 +210,17 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
      */
     private fun startNearbyRefresher() {
         scope.launch {
-            var lastFetchCenter: LatLng? = null
             karooSystem.locationFlow().collect { loc ->
                 if (routeLoaded.get()) {
                     // A route is loaded → not our job; reset so re-entering route-less refetches.
                     lastFetchCenter = null
                     repository.setNearbyLive(false)
+                    return@collect
+                }
+                if (repository.nearbyPaused.value) {
+                    // Live search paused by the rider → stand down until they start a new search
+                    // (overview Find button) or a route loads. Don't set nearbyLive.
+                    lastFetchCenter = null
                     return@collect
                 }
                 val here = LatLng(loc.lat, loc.lng)
@@ -198,29 +231,102 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 // "tracking you", including right after a manual nearby build. It stays true
                 // until a route loads or the roadbook is cleared.
                 repository.setNearbyLive(true)
+                // A fix just arrived → a "No GPS signal" error from an earlier failed attempt is
+                // now stale. Clear it (Idle) so the overview/Settings banner drops without a
+                // manual rebuild. Only touch an Error — never clobber a Building/Success.
+                if (repository.buildState.value is BuildState.Error) {
+                    repository.setBuildState(BuildState.Idle)
+                }
 
                 val threshold = refetchThresholdMeters(config.detourMeters, config.smartDistance)
                 val moved = lastFetchCenter?.let { haversine(it, here) } ?: Double.MAX_VALUE
                 if (moved < threshold) return@collect
 
-                val pois = try {
-                    withContext(Dispatchers.IO) {
-                        query.await().queryNearby(here, config.detourMeters, config.smartDistance)
-                    }
-                } catch (e: Exception) {
-                    Timber.w(e, "nearby refresh query failed")
-                    return@collect // keep last set, retry next tick (lastFetchCenter unchanged)
-                }
-                if (pois.isNotEmpty()) {
-                    repository.setPois(pois)
-                    repository.setRouteLength(0.0) // nearby: no route → strip hidden
-                    Timber.d("nearby refresh: ${pois.size} POIs @ ${here.lat},${here.lng}")
-                }
-                // Advance the center even on an empty result so we don't re-query the DB on
-                // every tick in a POI-free area; keep the last non-empty set on the map/fields.
-                lastFetchCenter = here
+                refreshNearbyAt(here, config)
             }
         }
+    }
+
+    /**
+     * Re-run the search when the rider changes the search radius (the detour distance or the
+     * smart-distance toggle) so the shown POIs never go stale under a changed setting — the rider
+     * might not think to rebuild, so we do it for them:
+     *  - route loaded, with a roadbook already built → rebuild that KNOWN route via
+     *    [BuildController.rebuildForRoute] (the new radius is a cache miss → recompute + re-cache).
+     *    We target the held [lastRoute] directly rather than re-reading nav state: mid-ride the nav
+     *    state often doesn't re-emit, so a re-read would time out and fall through to a nearby build,
+     *    clobbering the route roadbook. (No build if nothing's built yet — a route build is
+     *    deliberate; a radius change shouldn't start one unasked.)
+     *  - route-less (live) → re-query at the last center via [refreshNearbyAt].
+     * Watches only those two config fields (via [distinctUntilChanged] on the pair) so unrelated
+     * writes — category toggles, theme — don't trigger a re-query. Drops the initial emission (not a
+     * change). The detour slider commits to config only on release (see SettingsScreen), so a drag
+     * lands here as a single settled value — no debounce needed to coalesce intermediate steps.
+     */
+    private fun startRadiusChangeWatcher() {
+        scope.launch {
+            configStore.config
+                .map { it.detourMeters to it.smartDistance }
+                .distinctUntilChanged()
+                .drop(1) // initial value is the current setting, not a change
+                .collect {
+                    when {
+                        routeLoaded.get() -> {
+                            // Only rebuild a roadbook that actually exists — don't start a build
+                            // the rider never asked for just because they nudged the slider.
+                            val route = lastRoute ?: return@collect
+                            if (repository.pois.value.isEmpty()) return@collect
+                            BuildController(karooSystem, configStore, repository, roadbookCache, query.await())
+                                .rebuildForRoute(route.routePolyline, route.routeDistance)
+                        }
+                        repository.nearbyPaused.value -> return@collect
+                        else -> {
+                            val center = lastFetchCenter ?: return@collect
+                            refreshNearbyAt(center, configStore.config.first())
+                        }
+                    }
+                }
+        }
+    }
+
+    /**
+     * Periodic nearby re-query: while riding route-less, refresh the set every [NEARBY_TICK_MS]
+     * at the last known location even when the rider is stationary (the move-driven
+     * [startNearbyRefresher] alone wouldn't fire then). Reads config fresh each tick. No-op until
+     * the move-driven refresher has established a center. Local SQLite query, no network.
+     */
+    private fun startNearbyTicker() {
+        scope.launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(NEARBY_TICK_MS)
+                if (routeLoaded.get() || repository.nearbyPaused.value) continue
+                val center = lastFetchCenter ?: continue
+                refreshNearbyAt(center, configStore.config.first())
+            }
+        }
+    }
+
+    /**
+     * Query nearby POIs around [center] with the current [config] and publish them, advancing
+     * [lastFetchCenter]. Shared by the move-driven refresher and the periodic ticker so both stay
+     * in step. Keeps the last non-empty set on a query failure; advances the center even on an
+     * empty result so a POI-free area isn't re-queried every tick.
+     */
+    private suspend fun refreshNearbyAt(center: LatLng, config: io.resupply.karoo.data.ResupplyConfig) {
+        val pois = try {
+            withContext(Dispatchers.IO) {
+                query.await().queryNearby(center, config.detourMeters, config.smartDistance)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "nearby refresh query failed")
+            return // keep last set, retry next tick (lastFetchCenter unchanged)
+        }
+        if (pois.isNotEmpty()) {
+            repository.setPois(pois)
+            repository.setRouteLength(0.0) // nearby: no route → strip hidden
+            Timber.d("nearby refresh: ${pois.size} POIs @ ${center.lat},${center.lng}")
+        }
+        lastFetchCenter = center
     }
 
     /**
@@ -294,5 +400,8 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
 
     private companion object {
         const val ACTION_BUILD = "build"
+        // Live-mode periodic re-query cadence: keeps the nearby set fresh when the rider is
+        // stationary or has just changed the search radius, without waiting for movement.
+        const val NEARBY_TICK_MS = 30_000L
     }
 }

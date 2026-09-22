@@ -26,6 +26,7 @@ import io.resupply.karoo.build.BuildController
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.ConfigStore
+import io.resupply.karoo.data.CorridorTuning
 import io.resupply.karoo.data.PlacesClient
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.PoiDatabase
@@ -191,11 +192,21 @@ class MainActivity : ComponentActivity() {
         val route by routeState.collectAsStateWithLifecycle()
         val rider by riderLocation.collectAsStateWithLifecycle()
         val nearbyLive by repository.nearbyLive.collectAsStateWithLifecycle()
+        val nearbyPaused by repository.nearbyPaused.collectAsStateWithLifecycle()
         // Live position along the route, mirroring the field's math
         // (UpcomingPoisDataType): route length − distance-to-destination. Null when we
         // have no route or no live stream — the overview then drops the position cues.
         val progressMeters: Double? = toDest?.takeIf { routeLength > 0.0 }
             ?.let { (routeLength - it).coerceIn(0.0, routeLength) }
+
+        // The nearby list/radar must scale to the query's ACTUAL reach, not the raw setting:
+        // in smart mode the query fetches out to CorridorTuning.maxReachMeters (≫ detourMeters),
+        // so a fixed detourMeters here would drop POIs the query surfaced and mis-scale the radar.
+        val nearbyRadiusMeters = if (config.smartDistance) {
+            CorridorTuning.maxReachMeters(config.detourMeters, smart = true)
+        } else {
+            config.detourMeters
+        }
 
         var screen: Screen by remember { mutableStateOf(initialScreen) }
         // Hoisted here so the list scroll position is preserved across navigation to
@@ -228,7 +239,8 @@ class MainActivity : ComponentActivity() {
                 routeState = route,
                 riderLocation = rider,
                 nearbyLive = nearbyLive,
-                nearbyRadiusMeters = config.detourMeters,
+                nearbyPaused = nearbyPaused,
+                nearbyRadiusMeters = nearbyRadiusMeters,
                 buildState = buildState,
                 favoritePoiIds = config.favoritePoiIds,
                 favoritesOnly = config.favoritesOnly,
@@ -254,6 +266,14 @@ class MainActivity : ComponentActivity() {
                 SettingsScreen(
                     config = config,
                     buildState = buildState,
+                    // No route = live (nearby) mode. Route mode gets rebuild + trashcan; live mode
+                    // gets the "Stop live search" control instead. Gated on the route (not
+                    // nearbyLive) so the mode is stable from the moment there's no route.
+                    routeLoaded = route is RouteState.Loaded,
+                    // Live search on/off reflects the rider's intent (on unless paused); hasFix
+                    // gates whether it can actually run. Together they drive the 3-state toggle.
+                    liveOn = !nearbyPaused,
+                    hasFix = rider != null,
                     pois = pois,
                     installedSummary = installedSummary(installed),
                     onDetourChange = { m -> lifecycleScope.launch { configStore.setDetour(m) } },
@@ -282,6 +302,17 @@ class MainActivity : ComponentActivity() {
                                 configStore.forgetRouteFavorites(routeKey)
                             }
                             configStore.clearCurrentRouteKey()
+                        }
+                    },
+                    onToggleLive = { turnOn ->
+                        if (turnOn) {
+                            // Resume: a fresh nearby build (which clears the pause) repopulates and
+                            // the refresher/ticker take over tracking again.
+                            runBuild()
+                        } else {
+                            // Pause → pre-search state (POIs cleared, not live, refresher stood
+                            // down). The overview falls back to its Find invitation.
+                            repository.pauseNearby()
                         }
                     },
                     onOpenRegions = { screen = Screen.Regions },
@@ -375,9 +406,9 @@ class MainActivity : ComponentActivity() {
      * nearby from the live nav state; we just trigger it.
      *
      * One case we *don't* auto-build: no route AND no location fix. A nearby build would just
-     * spin on "Waiting for GPS…" and fail, so we drop the rider on the overview instead (its
-     * [NearbyReadyState] with a manual "Find places nearby" button) — they can retry once a
-     * fix lands rather than watching an auto-build fail.
+     * spin on "Waiting for GPS…" and fail, so we drop the rider on the overview instead — its
+     * [NearbyReadyState] shows a "Waiting for GPS signal" face with the Find button disabled
+     * until a fix lands, at which point the button enables and they can search.
      *
      * The observed [routeState]/[riderLocation] flows are still at their initial values at
      * intent time (the [progressSystem] connection hasn't emitted yet on a cold launch), so we
@@ -401,13 +432,17 @@ class MainActivity : ComponentActivity() {
             } != null
         } ?: false
 
+        // Only build once we have a route or a fix. With neither, do nothing here: the overview's
+        // "Waiting for GPS signal" face (driven by the live riderLocation flow) carries the state
+        // and enables its Find button the moment a fix arrives — no error, no timeout to explain.
         if (resolved) runBuild()
-        // else: no route and no fix → do nothing; the overview's NearbyReadyState lets the
-        // rider retry manually once GPS is available.
     }
 
     /** Build from the app by spinning up a short-lived Karoo connection. */
     private fun runBuild() {
+        // A manual build is the rider starting a search again — lift any live-search pause so the
+        // refresher resumes tracking once this build lands (route-less case).
+        repository.setNearbyPaused(false)
         repository.setBuildState(BuildState.Building("Connecting…"))
         val system = KarooSystemService(applicationContext)
         system.connect { connected ->

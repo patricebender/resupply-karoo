@@ -48,35 +48,8 @@ class BuildController(
             }?.state
 
             when (nav) {
-                is OnNavigationState.NavigationState.NavigatingRoute -> {
-                    val buildKey = routeBuildKey(nav.routePolyline, config, installedRegions)
-
-                    // Cache hit: this route with these inputs was built before — reuse the stored
-                    // set and skip the DB query. Promotion re-derives this route's favorites, so
-                    // its stars come back too.
-                    val cached = roadbookCache.get(buildKey)
-                    if (cached != null && cached.isNotEmpty()) {
-                        Timber.d("build cache hit: reusing ${cached.size} POIs for route")
-                        promoteRoadbook(cached, nav.routePolyline, nav.routeDistance, repository, configStore)
-                        return@withLock succeed(cached.size, byCategory(cached))
-                    }
-
-                    // Miss: recompute. Clear only now so a hit above kept the held set intact.
-                    repository.clear()
-                    publish(BuildState.Building())
-                    val route = decodeLatLng(nav.routePolyline)
-                    Timber.d("build along route: ${route.size} pts, detour=${config.detourMeters}, smart=${config.smartDistance}")
-                    // Cache the route length so the Waybook strip can place POI dots.
-                    repository.setRouteLength(cumulativeDistances(route).lastOrNull() ?: 0.0)
-                    val pois = withContext(Dispatchers.IO) {
-                        query.queryCorridor(route, config.detourMeters, config.smartDistance)
-                    }
-                    // Point the derived favorites at this route (its stars, if any, reappear;
-                    // showsPoi decides which are visible under the current categories/radius).
-                    configStore.setCurrentRouteKey(sha256(nav.routePolyline))
-                    if (pois.isNotEmpty()) roadbookCache.put(buildKey, pois)
-                    finish(pois)
-                }
+                is OnNavigationState.NavigationState.NavigatingRoute ->
+                    buildForRoute(nav.routePolyline, nav.routeDistance, config, installedRegions)
                 else -> {
                     // No route: build around the rider. This needs a location fix — with no
                     // satellite reception the Karoo may have none, so tell the rider we're
@@ -94,7 +67,7 @@ class BuildController(
                     val pois = withContext(Dispatchers.IO) {
                         query.queryNearby(LatLng(loc.lat, loc.lng), config.detourMeters, config.smartDistance)
                     }
-                    finish(pois) // nearby sets are never cached
+                    finish(pois, nearby = true) // nearby sets are never cached
                 }
             }
         } catch (e: Exception) {
@@ -103,14 +76,77 @@ class BuildController(
         }
     }
 
+    /**
+     * Rebuild the roadbook for a KNOWN route, without re-reading the nav state. Used when the
+     * caller already holds the current route (e.g. a radius-change auto-rebuild): reading nav state
+     * again is both needless and unsafe — mid-ride it often doesn't re-emit, so [runBuild] would
+     * time out and fall through to a nearby build, silently replacing the route roadbook. Serialized
+     * with [runBuild] through the same [mutex] so it can't race a concurrent build.
+     */
+    suspend fun rebuildForRoute(routePolyline: String, routeDistance: Double): BuildState =
+        mutex.withLock {
+            val config = configStore.config.first()
+            val installedRegions = configStore.installedRegions.first()
+            try {
+                buildForRoute(routePolyline, routeDistance, config, installedRegions)
+            } catch (e: Exception) {
+                Timber.e(e, "route rebuild failed")
+                fail(e.message ?: "Build failed")
+            }
+        }
+
+    /**
+     * Build (or reuse a cached) roadbook along [routePolyline]. Shared by the nav-driven [runBuild]
+     * and the known-route [rebuildForRoute]. A cache hit (same route + config + regions) promotes
+     * the stored set with no DB query; a miss recomputes the corridor and caches it. Caller holds
+     * the [mutex].
+     */
+    private suspend fun buildForRoute(
+        routePolyline: String,
+        routeDistance: Double,
+        config: io.resupply.karoo.data.ResupplyConfig,
+        installedRegions: Set<String>,
+    ): BuildState {
+        val buildKey = routeBuildKey(routePolyline, config, installedRegions)
+
+        // Cache hit: this route with these inputs was built before — reuse the stored set and skip
+        // the DB query. Promotion re-derives this route's favorites, so its stars come back too.
+        val cached = roadbookCache.get(buildKey)
+        if (cached != null && cached.isNotEmpty()) {
+            Timber.d("build cache hit: reusing ${cached.size} POIs for route")
+            promoteRoadbook(cached, routePolyline, routeDistance, repository, configStore)
+            return succeed(cached.size, byCategory(cached))
+        }
+
+        // Miss: recompute. Clear only now so a hit above kept the held set intact.
+        repository.clear()
+        publish(BuildState.Building())
+        val route = decodeLatLng(routePolyline)
+        Timber.d("build along route: ${route.size} pts, detour=${config.detourMeters}, smart=${config.smartDistance}")
+        // Cache the route length so the Waybook strip can place POI dots.
+        repository.setRouteLength(cumulativeDistances(route).lastOrNull() ?: 0.0)
+        val pois = withContext(Dispatchers.IO) {
+            query.queryCorridor(route, config.detourMeters, config.smartDistance)
+        }
+        // Point the derived favorites at this route (its stars, if any, reappear; showsPoi decides
+        // which are visible under the current categories/radius).
+        configStore.setCurrentRouteKey(sha256(routePolyline))
+        if (pois.isNotEmpty()) roadbookCache.put(buildKey, pois)
+        return finish(pois, nearby = false)
+    }
+
     /** Show the freshly-queried [pois] and publish the terminal build state. */
-    private fun finish(pois: List<Poi>): BuildState {
+    private fun finish(pois: List<Poi>, nearby: Boolean): BuildState {
         repository.setPois(pois)
-        return if (pois.isEmpty()) {
-            // Likely outside an installed region — guide the user rather than an empty success.
-            fail("No POIs here — download this region?")
-        } else {
-            succeed(pois.size, byCategory(pois))
+        return when {
+            pois.isNotEmpty() -> succeed(pois.size, byCategory(pois))
+            // Nearby: an empty result is benign — the rider is just in a POI-free spot and the
+            // refresher will keep looking as they move. Report an honest "searched, found none"
+            // (Success 0) so the overview shows its "no places nearby" face, not a hard error.
+            nearby -> BuildState.Success(0, emptyMap(), System.currentTimeMillis()).also { publish(it) }
+            // Route: an empty result most likely means the route is outside an installed region —
+            // that's actionable, so guide the user rather than a silent empty success.
+            else -> fail("No POIs here — download this region?")
         }
     }
 

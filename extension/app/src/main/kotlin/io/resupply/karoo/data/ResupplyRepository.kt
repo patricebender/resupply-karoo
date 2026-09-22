@@ -48,6 +48,32 @@ class ResupplyRepository private constructor(filesDir: File) {
     private val _nearbyLive = MutableStateFlow(false)
     val nearbyLive: StateFlow<Boolean> = _nearbyLive.asStateFlow()
 
+    /**
+     * Whether the rider has paused route-less live search (the Settings toggle). While true the
+     * background refresher/ticker stand down — no auto-search, no [nearbyLive] — so the overview
+     * falls back to its "find live resupply" invitation, exactly as before a search started.
+     * Session-scoped (not persisted) and auto-reset when a route loads or a fresh nearby build
+     * runs: it's "paused for now", never a sticky global that silently suppresses live search.
+     */
+    private val _nearbyPaused = MutableStateFlow(false)
+    val nearbyPaused: StateFlow<Boolean> = _nearbyPaused.asStateFlow()
+
+    fun setNearbyPaused(paused: Boolean) {
+        _nearbyPaused.value = paused
+    }
+
+    /**
+     * Stop live search and return to the pre-search state: clear the shown POIs, drop the "Live"
+     * status, and mark paused so the refresher stands down until the rider starts a new search
+     * (the overview's Find button) or a route loads.
+     */
+    fun pauseNearby() {
+        _nearbyPaused.value = true
+        _nearbyLive.value = false
+        _pois.value = emptyList()
+        _buildState.value = BuildState.Idle
+    }
+
     /** In-memory cache of fetched place descriptions, keyed by POI id. */
     private val descriptions = mutableMapOf<String, String>()
 

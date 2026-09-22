@@ -2,7 +2,11 @@ package io.resupply.karoo.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -48,7 +53,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.resupply.karoo.build.BuildState
@@ -69,6 +79,16 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     config: ResupplyConfig,
     buildState: BuildState,
+    // Whether a route is loaded. No route = live (nearby) mode, which auto-refreshes as the rider
+    // moves and on a periodic tick, so a manual rebuild is redundant — the rebuild arrow (and the
+    // trashcan) are route-mode only. In live mode the top bar carries a "Stop live search" control.
+    routeLoaded: Boolean,
+    // Live (nearby) search on/off — the rider's intent (on unless they've paused it). Drives the
+    // live-mode toggle's on (pulsing) vs off (crossed-out) look.
+    liveOn: Boolean,
+    // A GPS fix is available. The live toggle follows the overview Find button's rule: with no fix
+    // there's nothing to run, so the toggle is disabled (inert) regardless of on/off.
+    hasFix: Boolean,
     // The whole built set (every category). The chip badges count the *visible* subset of
     // this through [ResupplyConfig.showsPoi], so a category toggle or the safe-water switch
     // updates the counts live, in step with the map/overview and with no rebuild.
@@ -82,6 +102,9 @@ fun SettingsScreen(
     onThemeModeChange: (ThemeMode) -> Unit,
     onBuild: () -> Unit,
     onClear: () -> Unit,
+    // Toggle route-less live search. true = resume (a fresh search repopulates + tracking takes
+    // over); false = pause → pre-search state (overview shows its invitation).
+    onToggleLive: (Boolean) -> Unit,
     onOpenRegions: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -124,27 +147,43 @@ fun SettingsScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text("Settings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            IconButton(onClick = onBuild, enabled = !building) {
-                if (building) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
+            if (routeLoaded) {
+                // Route mode: rebuild the roadbook (a deliberate one-shot) + trashcan to clear it.
+                IconButton(onClick = onBuild, enabled = !building) {
+                    if (building) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = "Rebuild",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                IconButton(onClick = { showClearDialog = true }, enabled = hasPins && !building) {
                     Icon(
-                        Icons.Filled.Refresh,
-                        contentDescription = "Rebuild",
-                        tint = MaterialTheme.colorScheme.primary,
+                        Icons.Filled.Delete,
+                        contentDescription = "Clear places",
+                        // Full error red when usable; disabled tint reads as "nothing to clear".
+                        tint = if (hasPins && !building) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        },
                     )
                 }
-            }
-            IconButton(onClick = { showClearDialog = true }, enabled = hasPins && !building) {
-                Icon(
-                    Icons.Filled.Delete,
-                    contentDescription = "Clear places",
-                    // Full error red when usable; disabled tint reads as "nothing to clear".
-                    tint = if (hasPins && !building) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                    },
+            } else {
+                // Live (nearby) mode: neither rebuild nor trashcan make sense (the set refreshes
+                // itself and there's no route to clear). Instead a live search on/off toggle.
+                LiveToggle(
+                    on = liveOn,
+                    // Turning on runs a build → show the "coming online" spinner state until it
+                    // lands, so the ~second of loading reads as progress, not a dead tap.
+                    loading = building,
+                    // No fix → nothing to run against; the toggle is inert. (Loading is handled
+                    // separately so the ON transition still shows the spinner rather than greying.)
+                    enabled = hasFix && !building,
+                    onToggle = { onToggleLive(!liveOn) },
                 )
             }
         }
@@ -186,17 +225,30 @@ fun SettingsScreen(
             if (!config.smartDistance) {
                 Spacer(Modifier.height(12.dp))
                 SectionHeader("Detour radius")
-                Text(
-                    formatDistance(config.detourMeters),
-                    style = MaterialTheme.typography.titleMedium,
-                )
                 val options = ResupplyConfig.DETOUR_OPTIONS_METERS
                 val currentIndex = options.indexOfFirst { it >= config.detourMeters }
                     .let { if (it < 0) options.lastIndex else it }
+                // Track the drag locally so the label + thumb follow the finger, but only COMMIT to
+                // config on release (onValueChangeFinished). Persisting every intermediate step
+                // would emit config changes mid-drag → the extension would rebuild the roadbook
+                // repeatedly as the finger moves. Committing once on release means one rebuild for
+                // the value the rider actually chose. `dragIndex == null` → not dragging, show the
+                // persisted value; keyed on currentIndex so an external change (or a fresh screen)
+                // resets cleanly.
+                var dragIndex by remember(currentIndex) { mutableStateOf<Float?>(null) }
+                val shownIndex = dragIndex ?: currentIndex.toFloat()
+                Text(
+                    formatDistance(options[shownIndex.roundToInt().coerceIn(0, options.lastIndex)]),
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Slider(
-                    value = currentIndex.toFloat(),
-                    onValueChange = { raw ->
-                        onDetourChange(options[raw.roundToInt().coerceIn(0, options.lastIndex)])
+                    value = shownIndex,
+                    onValueChange = { raw -> dragIndex = raw },
+                    onValueChangeFinished = {
+                        dragIndex?.let { raw ->
+                            onDetourChange(options[raw.roundToInt().coerceIn(0, options.lastIndex)])
+                        }
+                        dragIndex = null
                     },
                     valueRange = 0f..options.lastIndex.toFloat(),
                     steps = options.size - 2,
@@ -227,6 +279,99 @@ fun SettingsScreen(
                 onClear()
             },
             onDismiss = { showClearDialog = false },
+        )
+    }
+}
+
+/**
+ * The live-mode top-bar toggle: one "● Live" pill with clear on/off semantics.
+ *  - ON  → a tinted-green pill, a slow-pulsing green dot + "Live". Tap to pause.
+ *  - OFF → the SAME pill, muted, with a single diagonal slash struck across the whole control
+ *          (the universal "off" mark) — the label stays "Live" so it reads as "Live: off", not a
+ *          different mode. Tap to resume (a fresh search repopulates and tracking takes back over).
+ *  - disabled ([enabled] false, i.e. no GPS fix) → the off look, greyed and inert. Matches the
+ *    overview Find button's "no fix → nothing to run" rule.
+ * The pulse only breathes in the ON state; every other state is static.
+ */
+@Composable
+private fun LiveToggle(on: Boolean, loading: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+    val active = on && enabled
+    // Coming online: the rider tapped ON and the build is running. Wear the green "live" look
+    // already (accent + tinted fill, no slash) so the transition reads as "turning on", with a
+    // spinner in the dot slot until the POIs land.
+    val accent = when {
+        active || loading -> openGreen
+        enabled -> MaterialTheme.colorScheme.onSurfaceVariant // off but toggleable
+        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // no fix → inert
+    }
+    val container = if (active || loading) {
+        openGreen.copy(alpha = 0.14f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+
+    val pulse = rememberInfiniteTransition(label = "liveTogglePulse")
+    val breath by pulse.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "liveToggleDotAlpha",
+    )
+    val dotAlpha = if (active) breath else 1f
+    // The slash marks "off"; it must NOT show while loading (that's a turning-on state, not off).
+    val slashed = !active && !loading
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(container)
+            .clickable(enabled = enabled, onClick = onToggle)
+            // Strike a diagonal slash across the ENTIRE pill when off/unavailable (never while
+            // loading), drawn after the content so it sits on top. Round cap + a slight overshoot
+            // so it spans corner-to-corner cleanly.
+            .drawWithContent {
+                drawContent()
+                if (slashed) {
+                    val pad = size.height * 0.18f
+                    drawLine(
+                        color = accent,
+                        start = Offset(pad, size.height - pad),
+                        end = Offset(size.width - pad, pad),
+                        strokeWidth = size.height * 0.09f,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        // Dot slot: a spinner while coming online, otherwise a plain dot (the slash, when off,
+        // lives on the pill — not the dot). Same 9dp footprint so the label doesn't shift.
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(9.dp),
+                strokeWidth = 1.5.dp,
+                color = accent,
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(9.dp)
+                    .alpha(dotAlpha)
+                    .clip(CircleShape)
+                    .background(accent),
+            )
+        }
+        Spacer(Modifier.size(7.dp))
+        Text(
+            "Live",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = accent,
+            maxLines = 1,
         )
     }
 }

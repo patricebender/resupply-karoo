@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -21,6 +22,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -29,11 +31,19 @@ import kotlin.math.min
 // Resupply brand colours (match the ic_resupply squircle).
 private val Cream = Color(0xFFF2EDE3)
 private val Tile = Color(0xFF0F1A18)
+private val Ink = Color(0xFF14211E)
 private val Contour = Color(0xFF2A3A36)
 private val RouteOrange = Color(0xFFE8873B)
 private val DotCyan = Color(0xFF5FC7E3)
 private val DotYellow = Color(0xFFF2C14E)
 private val DotPurple = Color(0xFFC79BE8)
+
+// The tile flips with the theme to match the static ic_resupply ↔ ic_resupply_light swap: dark
+// tile (cream R) on the light theme, cream tile (ink R) on the dark theme. ONLY these three roles
+// change — the route, dots, contours and every animation timing stay exactly as the original.
+private class TilePalette(val tile: Color, val letter: Color, val casing: Color)
+private val DarkTile = TilePalette(tile = Tile, letter = Cream, casing = Tile)
+private val LightTile = TilePalette(tile = Cream, letter = Ink, casing = Ink)
 
 // The animation lives in the same 512x512 space as ic_resupply: a dark squircle tile with
 // faint contour lines, the "R" letterform, the stepped route and three waypoint dots. We
@@ -124,12 +134,15 @@ fun ResupplyLoadingLogo(
         label = "progress",
     )
 
+    // Only the tile/R/casing recolour with the theme; the route, dots and animation are unchanged.
+    val palette = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) LightTile else DarkTile
+
     Canvas(modifier = modifier.size(size)) {
-        drawResupply(progress)
+        drawResupply(progress, palette)
     }
 }
 
-private fun DrawScope.drawResupply(progress: Float) {
+private fun DrawScope.drawResupply(progress: Float, palette: TilePalette) {
     // Scale the 512-space geometry into the canvas (uniform, centred).
     val scale = min(this.size.width, this.size.height) / ART
     val dx = (this.size.width - ART * scale) / 2f
@@ -147,12 +160,12 @@ private fun DrawScope.drawResupply(progress: Float) {
 
     // Squircle tile + faint contours (clipped to the tile), then the R on top.
     val tile = scaled(tilePath)
-    drawPath(tile, color = Tile)
+    drawPath(tile, color = palette.tile)
     clipPath(tile) {
         drawPath(scaled(contour1), color = Contour, alpha = 0.5f, style = Stroke(width = 8f * scale))
         drawPath(scaled(contour2), color = Contour, alpha = 0.5f, style = Stroke(width = 8f * scale))
     }
-    drawPath(scaled(letterR), color = Cream)
+    drawPath(scaled(letterR), color = palette.letter)
 
     val path = scaled(routePath)
     val measure = PathMeasure().apply { setPath(path, false) }
@@ -160,8 +173,8 @@ private fun DrawScope.drawResupply(progress: Float) {
     val casingWidth = 54f * scale
     val routeWidth = 22f * scale
 
-    // Dark casing under the whole route (always full — this is the resting icon).
-    drawPath(path, color = Tile, style = Stroke(width = casingWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    // Casing under the whole route (always full — this is the resting icon).
+    drawPath(path, color = palette.casing, style = Stroke(width = casingWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
     // Base orange at low alpha; the traced portion rides brighter on top so a highlight
     // sweeps along the route.
     drawPath(path, color = RouteOrange, alpha = 0.5f, style = Stroke(width = routeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
@@ -189,7 +202,7 @@ private fun DrawScope.drawResupply(progress: Float) {
         }
         val r = baseR * pop
         drawCircle(dot.color, radius = r, center = pos, alpha = alpha)
-        drawCircle(Tile, radius = r, center = pos, alpha = alpha, style = Stroke(width = dotOutline))
+        drawCircle(palette.casing, radius = r, center = pos, alpha = alpha, style = Stroke(width = dotOutline))
     }
 
     // Travelling head: a bright dot riding the tip of the traced route.

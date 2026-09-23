@@ -35,39 +35,13 @@ android {
             props.getProperty("PLACES_API_KEY") ?: System.getenv("PLACES_API_KEY") ?: ""
         }
         buildConfigField("String", "PLACES_API_KEY", "\"$placesKey\"")
-    }
 
-    // Editions: same app, different bundled POI data. Each flavor sets the seed asset it
-    // ships (in its own source set, e.g. src/usa/assets/) and the region ids that data
-    // provides — persisted as installed on first run (see BundledSeed / the startup
-    // reconcile). `lean` bundles nothing; the rider downloads every region on demand.
-    flavorDimensions += "edition"
-    productFlavors {
-        create("lean") {
-            dimension = "edition"
-            applicationIdSuffix = ".lean"
-            versionNameSuffix = "-lean"
-            buildConfigField("String", "SEED_ASSET", "\"\"")
-            buildConfigField("String", "SEED_REGION_IDS", "\"\"")
-        }
-        create("coreEurope") {
-            dimension = "edition"
-            applicationIdSuffix = ".europe"
-            versionNameSuffix = "-europe"
-            buildConfigField("String", "SEED_ASSET", "\"pois-core-europe.sqlite\"")
-            buildConfigField(
-                "String",
-                "SEED_REGION_IDS",
-                "\"germany,france,italy,belgium,netherlands,luxembourg\"",
-            )
-        }
-        create("usa") {
-            dimension = "edition"
-            applicationIdSuffix = ".usa"
-            versionNameSuffix = "-usa"
-            buildConfigField("String", "SEED_ASSET", "\"pois-usa.sqlite\"")
-            buildConfigField("String", "SEED_REGION_IDS", "\"usa\"")
-        }
+        // A single "Resupply" app: nothing bundled, the rider downloads regions on demand
+        // (fast, over WiFi). The seed machinery (BundledSeed / seedFromAsset) is kept but
+        // dormant — these empty values make it a no-op — so a bundled edition can be
+        // reintroduced later without re-plumbing. See git history for the flavor setup.
+        buildConfigField("String", "SEED_ASSET", "\"\"")
+        buildConfigField("String", "SEED_REGION_IDS", "\"\"")
     }
 
     // Release signing key. In CI the keystore is a base64 secret decoded to a temp file;
@@ -180,29 +154,17 @@ tasks.register("generateManifest") {
             ?.map { "$baseUrl/${it.name}" }
             ?: emptyList()
 
-        // Which edition (product flavor) this manifest is for — CI sets EDITION per build.
-        // Each edition is a distinct Karoo library entry: the packageName carries the
-        // flavor's applicationIdSuffix so the three don't collide, and the label/description
-        // say what's bundled. Defaults to the lean edition for a hand-run manifest.
-        val edition = System.getenv("EDITION") ?: "lean"
-        val (idSuffix, editionLabel, editionBlurb) = when (edition) {
-            "usa" -> Triple(".usa", "Resupply (USA)", " USA POIs bundled offline.")
-            "coreEurope" -> Triple(".europe", "Resupply (Europe)", " Western-Europe POIs bundled offline.")
-            else -> Triple(".lean", "Resupply", " Download the regions you need on demand.")
-        }
-        val packageName = android.defaultConfig.applicationId + idSuffix
-
         val manifest = linkedMapOf(
-            "label" to editionLabel,
-            "packageName" to packageName,
+            "label" to "Resupply",
+            "packageName" to android.defaultConfig.applicationId,
             "iconUrl" to "$baseUrl/resupply.png",
             "latestApkUrl" to "$baseUrl/app-release.apk",
             "latestVersion" to android.defaultConfig.versionName,
             "latestVersionCode" to android.defaultConfig.versionCode,
             "developer" to "github.com/patricebender",
             "description" to "Turns a loaded route into an offline guide of POIs along the way " +
-                "(water, food, bike shops, fuel and more), with in-ride data fields and a map layer." +
-                editionBlurb,
+                "(water, food, bike shops, fuel and more), with in-ride data fields and a map layer. " +
+                "Download the regions you ride on demand.",
             "releaseNotes" to releaseNotes,
             "screenshotUrls" to screenshotUrls,
             "tags" to listOf("navigation", "poi"),

@@ -52,28 +52,6 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # Verify the published region files match the app's schema before we bundle any of
-      # them. A stale regions release (older schema) fails here so we never ship an APK
-      # whose seed the app would reject.
-      - name: Check regions schema
-        if: ${{ steps.rp.outputs.releases_created == 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p seed
-          gh release download regions-latest --pattern 'manifest.json' --dir seed --clobber
-          SCHEMA="$(jq -r '.schemaVersion' seed/manifest.json)"
-          APP_VER="$(grep -oP 'BUNDLED_DB_VERSION\s*=\s*\K[0-9]+' \
-            extension/app/src/main/kotlin/io/resupply/karoo/data/PoiDatabase.kt)"
-          echo "regions release schemaVersion=$SCHEMA, app BUNDLED_DB_VERSION=$APP_VER"
-          if [[ "$SCHEMA" != "$APP_VER" ]]; then
-            echo "::error::regions-latest is schema v$SCHEMA but the app expects v$APP_VER." \
-              "Re-run the 'Build region files' workflow (all) to publish v$APP_VER, then release." >&2
-            exit 1
-          fi
-          echo "REGIONS_SCHEMA=$SCHEMA" >> "$GITHUB_ENV"
-
       - name: Rasterize library icon
         if: ${{ steps.rp.outputs.releases_created == 'true' }}
         run: |
@@ -82,18 +60,13 @@ jobs:
             extension/app/resupply-icon.svg -o extension/app/resupply.png
           ls -la extension/app/resupply.png
 
-      # Build and publish all three editions: same app + same version/changelog, differing
-      # only in bundled POI data. Each is a separate GitHub release + Karoo library entry
-      # (distinct applicationId per flavor), so a rider installs whichever suits them:
-      #   lean       — no bundled data, download every region on demand
-      #   coreEurope — germany+france+italy+belgium+netherlands+luxembourg bundled
-      #   usa        — usa (all states) bundled
-      # Each edition's release is tagged <extension-tag>-<edition>.
-      - name: Build + publish editions
+      # One "Resupply" app: no bundled POI data — the rider downloads the regions they ride
+      # on demand (fast, over WiFi). So there's no seed to fetch or schema-gate here; the
+      # region files are gated on-device at download time against BUNDLED_DB_VERSION.
+      - name: Build signed release APK
         if: ${{ steps.rp.outputs.releases_created == 'true' }}
         working-directory: extension
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPR_USER: ${{ github.actor }}
           GPR_KEY: ${{ secrets.GITHUB_TOKEN }}
           VERSION_CODE: ${{ github.run_number }}
@@ -102,86 +75,24 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          # Manifest is path-scoped (package "extension"); the tag output is namespaced.
-          BASE_TAG: ${{ steps.rp.outputs['extension--tag_name'] }}
-          REPO: ${{ github.repository }}
+          BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.rp.outputs['extension--tag_name'] }}
+        run: |
+          ./gradlew :app:generateManifest :app:assembleRelease --no-daemon
+
+      - name: Attach release assets
+        if: ${{ steps.rp.outputs.releases_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.rp.outputs['extension--tag_name'] }}
         run: |
           set -euo pipefail
-          SCHEMA="$REGIONS_SCHEMA"
-
-          # Assemble one edition's seed asset into its flavor source set from the published
-          # region files. usa is a single Complete file; coreEurope merges its 6 countries
-          # (poi-only dedup, mirroring build-seed-set.sh); lean bundles nothing.
-          seed_edition() {
-            local edition="$1"; shift
-            local flavor_dir="app/src/$edition/assets"
-            mkdir -p "$flavor_dir"
-            case "$edition" in
-              lean) echo "lean: no bundled seed"; return 0 ;;
-              usa) local ids=(usa); local out="$flavor_dir/pois-usa.sqlite" ;;
-              coreEurope)
-                local ids=(germany france italy belgium netherlands luxembourg)
-                local out="$flavor_dir/pois-core-europe.sqlite" ;;
-              *) echo "::error::unknown edition $edition" >&2; return 1 ;;
-            esac
-            mkdir -p seed
-            for id in "${ids[@]}"; do
-              gh release download regions-latest --repo "$REPO" \
-                --pattern "${id}-v${SCHEMA}.sqlite.gz" --dir seed --clobber
-              gunzip -c "seed/${id}-v${SCHEMA}.sqlite.gz" > "seed/${id}.sqlite"
-            done
-            # Single region → just use it; multiple → offset-merge poi rows + dedup osm_id.
-            cp "seed/${ids[0]}.sqlite" "$out"
-            local ver; ver="$(sqlite3 "$out" 'PRAGMA user_version;')"
-            for id in "${ids[@]:1}"; do
-              local off; off="$(sqlite3 "$out" 'SELECT COALESCE(MAX(id),0) FROM poi;')"
-              sqlite3 "$out" "ATTACH 'seed/${id}.sqlite' AS r; BEGIN; \
-                INSERT INTO poi (id,osm_id,lat,lng,type,category,name,tags,region_id) \
-                SELECT id+$off,osm_id,lat,lng,type,category,name,tags,region_id FROM r.poi; \
-                COMMIT; DETACH r;"
-            done
-            if [[ ${#ids[@]} -gt 1 ]]; then
-              sqlite3 "$out" "DELETE FROM poi WHERE id NOT IN (SELECT MIN(id) FROM poi GROUP BY osm_id);"
-            fi
-            sqlite3 "$out" "VACUUM; PRAGMA user_version=$ver;"
-            echo "seeded $edition: $(sqlite3 "$out" 'SELECT COUNT(*) FROM poi;') POIs (schema $ver)"
-          }
-
-          # Capitalize the flavor for the gradle task name (coreEurope -> CoreEurope).
-          cap() { printf '%s' "$(tr '[:lower:]' '[:upper:]' <<<"${1:0:1}")${1:1}"; }
-
-          for edition in lean coreEurope usa; do
-            echo "::group::edition $edition"
-            TAG="${BASE_TAG}-${edition}"
-            BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
-
-            # Restore a clean AndroidManifest ($BASE_URL$ placeholder) before each build,
-            # since generateManifest substitutes it in place per edition.
-            git checkout -- app/src/main/AndroidManifest.xml
-
-            seed_edition "$edition"
-
-            EDITION="$edition" BASE_URL="$BASE_URL" \
-              ./gradlew :app:generateManifest ":app:assemble$(cap "$edition")Release" --no-daemon
-
-            APK="app/build/outputs/apk/$edition/release/app-$edition-release.apk"
-            cp "$APK" "app-release.apk"
-            cp "app-release.apk" "resupply-${TAG}.apk"
-
-            # Each edition gets its own release at its tag on this commit (same version +
-            # changelog for all three); create it if a re-run hasn't already.
-            if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-              gh release create "$TAG" --repo "$REPO" --target "$GITHUB_SHA" \
-                --title "Resupply ${edition} ${BASE_TAG}" \
-                --notes "Resupply ${edition} edition, ${BASE_TAG}. See the ${BASE_TAG} release for the changelog."
-            fi
-
-            # Library update fetches fixed names (app-release.apk, manifest.json, resupply.png)
-            # at each edition's release download path; the versioned copy is for humans.
-            ASSETS=(app-release.apk "resupply-${TAG}.apk" app/manifest.json)
-            [ -f app/resupply.png ] && ASSETS+=(app/resupply.png)
-            for shot in app/preview*.png; do [ -e "$shot" ] && ASSETS+=("$shot"); done
-            gh release upload "$TAG" "${ASSETS[@]}" --repo "$REPO" --clobber
-            rm -f app-release.apk "resupply-${TAG}.apk"
-            echo "::endgroup::"
+          # The library update mechanism fetches assets by fixed name at the release's
+          # download path (app-release.apk, manifest.json, resupply.png). Keep those names.
+          cp extension/app/build/outputs/apk/release/app-release.apk app-release.apk
+          # Also publish a versioned copy for humans sideloading from the releases page.
+          cp app-release.apk "resupply-${TAG}.apk"
+          ASSETS=(app-release.apk "resupply-${TAG}.apk" extension/app/manifest.json extension/app/resupply.png)
+          for shot in extension/app/preview*.png; do
+            [ -e "$shot" ] && ASSETS+=("$shot")
           done
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber

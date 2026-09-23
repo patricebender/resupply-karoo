@@ -288,5 +288,335 @@
     "id": "united-kingdom",
     "label": "United Kingdom",
     "group": "Europe"
+  },
+  {
+    "id": "usa",
+    "label": "USA",
+    "group": "North America"
+  },
+  {
+    "id": "usa-alabama",
+    "label": "Alabama",
+    "group": "North America"
+  },
+  {
+    "id": "usa-alaska",
+    "label": "Alaska",
+    "group": "North America"
+  },
+  {
+    "id": "usa-arizona",
+    "label": "Arizona",
+    "group": "North America"
+  },
+  {
+    "id": "usa-arkansas",
+    "label": "Arkansas",
+    "group": "North America"
+  },
+  {
+    "id": "usa-california",
+    "label": "California",
+    "group": "North America"
+  },
+  {
+    "id": "usa-colorado",
+    "label": "Colorado",
+    "group": "North America"
+  },
+  {
+    "id": "usa-connecticut",
+    "label": "Connecticut",
+    "group": "North America"
+  },
+  {
+    "id": "usa-delaware",
+    "label": "Delaware",
+    "group": "North America"
+  },
+  {
+    "id": "usa-district-of-columbia",
+    "label": "District of Columbia",
+    "group": "North America"
+  },
+  {
+    "id": "usa-florida",
+    "label": "Florida",
+    "group": "North America"
+  },
+  {
+    "id": "usa-georgia",
+    "label": "Georgia",
+    "group": "North America"
+  },
+  {
+    "id": "usa-hawaii",
+    "label": "Hawaii",
+    "group": "North America"
+  },
+  {
+    "id": "usa-idaho",
+    "label": "Idaho",
+    "group": "North America"
+  },
+  {
+    "id": "usa-illinois",
+    "label": "Illinois",
+    "group": "North America"
+  },
+  {
+    "id": "usa-indiana",
+    "label": "Indiana",
+    "group": "North America"
+  },
+  {
+    "id": "usa-iowa",
+    "label": "Iowa",
+    "group": "North America"
+  },
+  {
+    "id": "usa-kansas",
+    "label": "Kansas",
+    "group": "North America"
+  },
+  {
+    "id": "usa-kentucky",
+    "label": "Kentucky",
+    "group": "North America"
+  },
+  {
+    "id": "usa-louisiana",
+    "label": "Louisiana",
+    "group": "North America"
+  },
+  {
+    "id": "usa-maine",
+    "label": "Maine",
+    "group": "North America"
+  },
+  {
+    "id": "usa-maryland",
+    "label": "Maryland",
+    "group": "North America"
+  },
+  {
+    "id": "usa-massachusetts",
+    "label": "Massachusetts",
+    "group": "North America"
+  },
+  {
+    "id": "usa-michigan",
+    "label": "Michigan",
+    "group": "North America"
+  },
+  {
+    "id": "usa-minnesota",
+    "label": "Minnesota",
+    "group": "North America"
+  },
+  {
+    "id": "usa-mississippi",
+    "label": "Mississippi",
+    "group": "North America"
+  },
+  {
+    "id": "usa-missouri",
+    "label": "Missouri",
+    "group": "North America"
+  },
+  {
+    "id": "usa-montana",
+    "label": "Montana",
+    "group": "North America"
+  },
+  {
+    "id": "usa-nebraska",
+    "label": "Nebraska",
+    "group": "North America"
+  },
+  {
+    "id": "usa-nevada",
+    "label": "Nevada",
+    "group": "North America"
+  },
+  {
+    "id": "usa-new-hampshire",
+    "label": "New Hampshire",
+    "group": "North America"
+  },
+  {
+    "id": "usa-new-jersey",
+    "label": "New Jersey",
+    "group": "North America"
+  },
+  {
+    "id": "usa-new-mexico",
+    "label": "New Mexico",
+    "group": "North America"
+  },
+  {
+    "id": "usa-new-york",
+    "label": "New York",
+    "group": "North America"
+  },
+  {
+    "id": "usa-north-carolina",
+    "label": "North Carolina",
+    "group": "North America"
+  },
+  {
+    "id": "usa-north-dakota",
+    "label": "North Dakota",
+    "group": "North America"
+  },
+  {
+    "id": "usa-ohio",
+    "label": "Ohio",
+    "group": "North America"
+  },
+  {
+    "id": "usa-oklahoma",
+    "label": "Oklahoma",
+    "group": "North America"
+  },
+  {
+    "id": "usa-oregon",
+    "label": "Oregon",
+    "group": "North America"
+  },
+  {
+    "id": "usa-pennsylvania",
+    "label": "Pennsylvania",
+    "group": "North America"
+  },
+  {
+    "id": "usa-rhode-island",
+    "label": "Rhode Island",
+    "group": "North America"
+  },
+  {
+    "id": "usa-south-carolina",
+    "label": "South Carolina",
+    "group": "North America"
+  },
+  {
+    "id": "usa-south-dakota",
+    "label": "South Dakota",
+    "group": "North America"
+  },
+  {
+    "id": "usa-tennessee",
+    "label": "Tennessee",
+    "group": "North America"
+  },
+  {
+    "id": "usa-texas",
+    "label": "Texas",
+    "group": "North America"
+  },
+  {
+    "id": "usa-utah",
+    "label": "Utah",
+    "group": "North America"
+  },
+  {
+    "id": "usa-vermont",
+    "label": "Vermont",
+    "group": "North America"
+  },
+  {
+    "id": "usa-virginia",
+    "label": "Virginia",
+    "group": "North America"
+  },
+  {
+    "id": "usa-washington",
+    "label": "Washington",
+    "group": "North America"
+  },
+  {
+    "id": "usa-west-virginia",
+    "label": "West Virginia",
+    "group": "North America"
+  },
+  {
+    "id": "usa-wisconsin",
+    "label": "Wisconsin",
+    "group": "North America"
+  },
+  {
+    "id": "usa-wyoming",
+    "label": "Wyoming",
+    "group": "North America"
+  },
+  {
+    "id": "canada",
+    "label": "Canada",
+    "group": "North America"
+  },
+  {
+    "id": "canada-alberta",
+    "label": "Alberta",
+    "group": "North America"
+  },
+  {
+    "id": "canada-british-columbia",
+    "label": "British Columbia",
+    "group": "North America"
+  },
+  {
+    "id": "canada-manitoba",
+    "label": "Manitoba",
+    "group": "North America"
+  },
+  {
+    "id": "canada-new-brunswick",
+    "label": "New Brunswick",
+    "group": "North America"
+  },
+  {
+    "id": "canada-newfoundland-and-labrador",
+    "label": "Newfoundland and Labrador",
+    "group": "North America"
+  },
+  {
+    "id": "canada-northwest-territories",
+    "label": "Northwest Territories",
+    "group": "North America"
+  },
+  {
+    "id": "canada-nova-scotia",
+    "label": "Nova Scotia",
+    "group": "North America"
+  },
+  {
+    "id": "canada-nunavut",
+    "label": "Nunavut",
+    "group": "North America"
+  },
+  {
+    "id": "canada-ontario",
+    "label": "Ontario",
+    "group": "North America"
+  },
+  {
+    "id": "canada-prince-edward-island",
+    "label": "Prince Edward Island",
+    "group": "North America"
+  },
+  {
+    "id": "canada-quebec",
+    "label": "Quebec",
+    "group": "North America"
+  },
+  {
+    "id": "canada-saskatchewan",
+    "label": "Saskatchewan",
+    "group": "North America"
+  },
+  {
+    "id": "canada-yukon",
+    "label": "Yukon",
+    "group": "North America"
   }
 ]

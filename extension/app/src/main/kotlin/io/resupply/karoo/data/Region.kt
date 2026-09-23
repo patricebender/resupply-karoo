@@ -18,7 +18,7 @@ import timber.log.Timber
 data class Region(
     val id: String,
     val label: String,
-    /** Picker section: "Germany" (Complete + Bundesländer) or "Europe" (countries). */
+    /** Picker section, e.g. "Europe" or "North America". */
     val group: String,
 ) {
     companion object {
@@ -27,13 +27,20 @@ data class Region(
 
         /**
          * Whether [installed] (the set of directly-installed region ids) covers [rowId].
-         * A region covers itself; installing "germany" (Complete) additionally covers every
-         * `germany-<bundesland>` row, since that download contains them all. Used by the
-         * picker to show ✓ on Bundesländer once Germany is installed.
+         * A region covers itself; installing a whole-country "Complete" (germany / usa /
+         * canada) additionally covers every `<country>-<sub>` row, since that download
+         * contains them all. Used by the picker to show ✓ on a state/Bundesland once its
+         * country is installed.
+         *
+         * A child id is `<parent>-<sub>`, so the parent id is the prefix before the first
+         * `-`. This relies on parent ids being single-token (germany/usa/canada); leaf
+         * countries whose own id contains a `-` (bosnia-herzegovina, united-kingdom, …)
+         * have no children, and their prefix (e.g. "bosnia") isn't an installed id, so no
+         * false coverage results.
          */
         fun covers(installed: Set<String>, rowId: String): Boolean =
             rowId in installed ||
-                (SEED_REGION_ID in installed && rowId.startsWith("$SEED_REGION_ID-"))
+                rowId.substringBefore('-').let { it != rowId && it in installed }
     }
 }
 

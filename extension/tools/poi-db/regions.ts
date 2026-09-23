@@ -13,17 +13,19 @@
 // several extracts (Germany Complete = all 16 Bundesländer), reusing the merge/dedup
 // logic shared with build-multi-region.sh.
 //
-// `group` drives the picker's top-level sections (all "Europe" today). Within a group the
-// app builds a country tree: only Germany is broken down to Bundesland granularity (its
-// `germany-*` ids nest under the `germany` parent); other countries are whole-country leaves.
+// `group` drives the picker's top-level sections ("Europe", "North America"). Within a
+// group the app builds a country tree: a country whose id is a prefix of other ids (e.g.
+// `germany` → `germany-hessen`, `usa` → `usa-california`) is an expandable parent whose
+// `<id>-*` entries nest under it; other countries are whole-country leaves. The nesting is
+// derived from the ids, not hardcoded per country.
 
 export interface Region {
-  /** Stable id: `germany`, `germany-bayern`, `italy`, … Also the filename stem. */
+  /** Stable id: `germany`, `germany-bayern`, `usa`, `usa-texas`, … Also the filename stem. */
   id: string;
   /** Display name shown in the picker. */
   label: string;
   /** Picker section. */
-  group: "Europe";
+  group: "Europe" | "North America";
   /** Geofabrik path(s) under download.geofabrik.de, minus `-latest.osm.pbf`. */
   geofabrik: string | string[];
 }
@@ -110,6 +112,49 @@ const COUNTRIES: Array<{ id: string; label: string; geofabrik: string | string[]
   },
 ];
 
+// US states + DC (mainland set; territories like Puerto Rico / US Virgin Islands are
+// omitted). Alphabetical by label; slug == id (Geofabrik's own path segment).
+const US_STATES: Array<{ id: string; label: string; slug: string }> = [
+  "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut",
+  "delaware", "district-of-columbia", "florida", "georgia", "hawaii", "idaho", "illinois",
+  "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland", "massachusetts",
+  "michigan", "minnesota", "mississippi", "missouri", "montana", "nebraska", "nevada",
+  "new-hampshire", "new-jersey", "new-mexico", "new-york", "north-carolina", "north-dakota",
+  "ohio", "oklahoma", "oregon", "pennsylvania", "rhode-island", "south-carolina",
+  "south-dakota", "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+  "west-virginia", "wisconsin", "wyoming",
+].map((slug) => ({
+  id: slug,
+  slug,
+  // Title-case the slug for display: "new-york" → "New York". Keep small joining words
+  // lowercase ("district-of-columbia" → "District of Columbia").
+  label: slug
+    .split("-")
+    .map((w, i) =>
+      i > 0 && (w === "of" || w === "and")
+        ? w
+        : w[0]!.toUpperCase() + w.slice(1),
+    )
+    .join(" "),
+}));
+
+// Canada's 10 provinces + 3 territories. Alphabetical by label; slug == id.
+const CANADA_PROVINCES: Array<{ id: string; label: string; slug: string }> = [
+  { id: "alberta", label: "Alberta", slug: "alberta" },
+  { id: "british-columbia", label: "British Columbia", slug: "british-columbia" },
+  { id: "manitoba", label: "Manitoba", slug: "manitoba" },
+  { id: "new-brunswick", label: "New Brunswick", slug: "new-brunswick" },
+  { id: "newfoundland-and-labrador", label: "Newfoundland and Labrador", slug: "newfoundland-and-labrador" },
+  { id: "northwest-territories", label: "Northwest Territories", slug: "northwest-territories" },
+  { id: "nova-scotia", label: "Nova Scotia", slug: "nova-scotia" },
+  { id: "nunavut", label: "Nunavut", slug: "nunavut" },
+  { id: "ontario", label: "Ontario", slug: "ontario" },
+  { id: "prince-edward-island", label: "Prince Edward Island", slug: "prince-edward-island" },
+  { id: "quebec", label: "Quebec", slug: "quebec" },
+  { id: "saskatchewan", label: "Saskatchewan", slug: "saskatchewan" },
+  { id: "yukon", label: "Yukon", slug: "yukon" },
+];
+
 export const REGIONS: Region[] = [
   // Germany — whole country, merged from all 16 Bundesland extracts. Shown in the picker
   // as the expandable "Germany" node (getting it installs the whole country); the states
@@ -133,6 +178,36 @@ export const REGIONS: Region[] = [
     label: c.label,
     group: "Europe",
     geofabrik: c.geofabrik,
+  })),
+
+  // USA — whole country merged from all 51 state/DC extracts; the expandable "USA" node,
+  // with per-state downloads nested under it (same shape as Germany). "Complete" is a very
+  // large on-device download; states are the practical unit.
+  {
+    id: "usa",
+    label: "USA",
+    group: "North America",
+    geofabrik: US_STATES.map((s) => `north-america/us/${s.slug}`),
+  },
+  ...US_STATES.map((s): Region => ({
+    id: `usa-${s.id}`,
+    label: s.label,
+    group: "North America",
+    geofabrik: `north-america/us/${s.slug}`,
+  })),
+
+  // Canada — same pattern, merged from all province/territory extracts.
+  {
+    id: "canada",
+    label: "Canada",
+    group: "North America",
+    geofabrik: CANADA_PROVINCES.map((p) => `north-america/canada/${p.slug}`),
+  },
+  ...CANADA_PROVINCES.map((p): Region => ({
+    id: `canada-${p.id}`,
+    label: p.label,
+    group: "North America",
+    geofabrik: `north-america/canada/${p.slug}`,
   })),
 ];
 

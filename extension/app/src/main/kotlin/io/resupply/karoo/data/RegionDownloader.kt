@@ -93,7 +93,7 @@ class RegionDownloader {
             return Result.Failed("decompression failed")
         }
 
-        val count = PoiDatabase.installFromFile(context, sqlite, entry.id)
+        val count = PoiDatabase.installFromFile(context, sqlite, entry.id, entry.dataVersion)
             ?: return Result.Failed("region file rejected on install")
         return Result.Installed(count)
     }

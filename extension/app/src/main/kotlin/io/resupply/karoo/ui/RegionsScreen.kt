@@ -66,6 +66,8 @@ fun RegionsScreen(
     regions: List<Region>,
     manifest: Map<String, RegionManifestEntry>,
     installedRegions: Set<String>,
+    /** Installed data version per region id; an update is offered when the manifest outranks it. */
+    installedVersions: Map<String, Int>,
     onWifi: Boolean,
     manifestLoading: Boolean,
     manifestFailed: Boolean,
@@ -76,6 +78,7 @@ fun RegionsScreen(
     /** Region id currently being removed (in-DB, fast), or null. */
     removingRegionId: String?,
     onDownload: (Region) -> Unit,
+    onUpdate: (Region) -> Unit,
     onRemove: (Region) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -120,6 +123,14 @@ fun RegionsScreen(
     val startDownload: (Region) -> Unit = { region ->
         val big = (manifest[region.id]?.bytesGz ?: 0L) >= LARGE_REGION_BYTES
         if (big) confirmLarge = region else onDownload(region)
+    }
+
+    // An update is offered only for a directly-installed region (one in [installedRegions],
+    // i.e. `removable`) whose manifest data version outranks the installed one — not for a
+    // state merely covered by an installed country.
+    val hasUpdate: (String) -> Boolean = { id ->
+        id in installedRegions &&
+            (manifest[id]?.dataVersion ?: 0) > (installedVersions[id] ?: 1)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -194,8 +205,10 @@ fun RegionsScreen(
                                 live = live?.takeIf { it.regionId == country.region.id },
                                 failedReason = failedRegionIds[country.region.id],
                                 removing = removingRegionId == country.region.id,
+                                updateAvailable = hasUpdate(country.region.id),
                                 enabled = !busy && manifest.containsKey(country.region.id),
                                 onDownload = { startDownload(country.region) },
+                                onUpdate = { onUpdate(country.region) },
                                 onRemove = { confirmRemove = country.region },
                             )
                             HorizontalDivider()
@@ -213,9 +226,11 @@ fun RegionsScreen(
                                 live = live?.takeIf { it.regionId == country.region.id },
                                 failedReason = failedRegionIds[country.region.id],
                                 removing = removingRegionId == country.region.id,
+                                updateAvailable = hasUpdate(country.region.id),
                                 enabled = !busy && manifest.containsKey(country.region.id),
                                 onExpandToggle = { expanded[country.region.id] = !countryOpen },
                                 onDownload = { startDownload(country.region) },
+                                onUpdate = { onUpdate(country.region) },
                                 onRemove = { confirmRemove = country.region },
                             )
                             HorizontalDivider()
@@ -232,8 +247,10 @@ fun RegionsScreen(
                                     live = live?.takeIf { it.regionId == child.id },
                                     failedReason = failedRegionIds[child.id],
                                     removing = removingRegionId == child.id,
+                                    updateAvailable = hasUpdate(child.id),
                                     enabled = !busy && manifest.containsKey(child.id),
                                     onDownload = { startDownload(child) },
+                                    onUpdate = { onUpdate(child) },
                                     onRemove = { confirmRemove = child },
                                 )
                                 HorizontalDivider()
@@ -348,9 +365,11 @@ private fun RegionRow(
     live: LiveDownload?,
     failedReason: String?,
     removing: Boolean,
+    updateAvailable: Boolean,
     enabled: Boolean,
     onExpandToggle: () -> Unit = {},
     onDownload: () -> Unit,
+    onUpdate: () -> Unit,
     onRemove: () -> Unit,
 ) {
     val downloading = live?.phase == LivePhase.DOWNLOADING
@@ -376,11 +395,20 @@ private fun RegionRow(
             Text(region.label, style = MaterialTheme.typography.bodyLarge)
             val subtitle = when {
                 installing -> "Installing…"
+                installed && updateAvailable -> "Update available"
                 installed -> "Installed"
                 entry != null -> "${formatMb(entry.bytesGz)} · ${entry.poiCount} places"
                 else -> "Unavailable"
             }
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (installed && updateAvailable && !installing) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
 
             if (downloading && live != null) {
                 Spacer(Modifier.height(4.dp))
@@ -404,7 +432,14 @@ private fun RegionRow(
             downloading || installing ->
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             installed -> Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("✓", style = MaterialTheme.typography.titleMedium)
+                // Update is offered only on directly-installed rows (removable); reuses the
+                // download service via onUpdate (remove-then-refresh).
+                if (removable && updateAvailable) {
+                    Button(onClick = onUpdate, enabled = enabled) { Text("Update") }
+                    Spacer(Modifier.size(4.dp))
+                } else {
+                    Text("✓", style = MaterialTheme.typography.titleMedium)
+                }
                 if (removable) {
                     IconButton(onClick = onRemove, enabled = enabled) {
                         Icon(Icons.Filled.Delete, contentDescription = "Remove ${region.label}")

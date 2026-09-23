@@ -101,6 +101,17 @@ class PoiDatabase private constructor(private val dbFile: File) {
             )
             d.execSQL("CREATE INDEX IF NOT EXISTS idx_poi_category ON poi(category)")
             d.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_poi_osm ON poi(osm_id)")
+            // Per-region installed data version (see RegionManifestEntry.dataVersion). Additive
+            // and `IF NOT EXISTS` — no BUNDLED_DB_VERSION bump: an install predating this table
+            // simply has no rows, so its regions read as version 1 (the correct floor).
+            d.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS region_meta (
+                  region_id    TEXT PRIMARY KEY,
+                  data_version INTEGER NOT NULL DEFAULT 1
+                )
+                """.trimIndent(),
+            )
         }
 
         /**
@@ -117,14 +128,30 @@ class PoiDatabase private constructor(private val dbFile: File) {
          * null if the file is invalid (wrong schema version, failed integrity check, or no
          * rows) — in which case the live DB is left untouched. [gunzippedDb] is consumed.
          */
-        fun installFromFile(context: Context, gunzippedDb: File, regionId: String): Int? {
+        fun installFromFile(
+            context: Context,
+            gunzippedDb: File,
+            regionId: String,
+            dataVersion: Int,
+        ): Int? {
             val inserted = runCatching { mergeInto(context, gunzippedDb) }
                 .onFailure { Timber.e(it, "region $regionId failed validation/merge") }
                 .getOrNull()
             gunzippedDb.delete()
             if (inserted == null) return null
-            Timber.d("installed region $regionId: +$inserted POIs")
+            setRegionVersion(context, regionId, dataVersion)
+            Timber.d("installed region $regionId v$dataVersion: +$inserted POIs")
             return inserted
+        }
+
+        /** Record (or update) a region's installed data version in `region_meta`. */
+        private fun setRegionVersion(context: Context, regionId: String, dataVersion: Int) {
+            synchronized(this) {
+                get(context.applicationContext).writableDatabase().execSQL(
+                    "INSERT OR REPLACE INTO region_meta (region_id, data_version) VALUES (?, ?)",
+                    arrayOf<Any?>(regionId, dataVersion),
+                )
+            }
         }
 
         /**
@@ -215,6 +242,7 @@ class PoiDatabase private constructor(private val dbFile: File) {
                         arrayOf<Any?>(id),
                     )
                     live.execSQL("DELETE FROM poi WHERE region_id = ?", arrayOf<Any?>(id))
+                    live.execSQL("DELETE FROM region_meta WHERE region_id = ?", arrayOf<Any?>(id))
                     live.setTransactionSuccessful()
                 } finally {
                     live.endTransaction()
@@ -277,6 +305,10 @@ class PoiDatabase private constructor(private val dbFile: File) {
          * empty schema in place (the rider downloads every region). The installed-region set
          * is reconciled from the DB after this (see [installedRegionIdsFromDb] and the
          * startup reconcile), so it always reflects what actually landed.
+         *
+         * The seed writes no `region_meta` rows; its regions read as version 1 via the
+         * backfill in [installedRegionVersionsFromDb], so a first pipeline bump to 2 offers
+         * the rider an update for the bundled coverage.
          */
         private fun seedFromAsset(context: Context, live: SQLiteDatabase) {
             live.execSQL("PRAGMA user_version = $BUNDLED_DB_VERSION")
@@ -313,6 +345,25 @@ class PoiDatabase private constructor(private val dbFile: File) {
                     while (c.moveToNext()) c.getString(0)?.let(out::add)
                 }
             return out
+        }
+
+        /**
+         * Installed data version per region id, the companion to [installedRegionIdsFromDb]
+         * for the startup reconcile. Reads `region_meta`; a region present in `poi` but
+         * missing a `region_meta` row (bundled seed, or an install predating the table)
+         * defaults to 1 — the floor, so a first pipeline bump to 2 correctly reads as an
+         * available update. Only ids actually installed are returned.
+         */
+        fun installedRegionVersionsFromDb(context: Context): Map<String, Int> {
+            val live = get(context.applicationContext).writableDatabase()
+            val versions = mutableMapOf<String, Int>()
+            live.rawQuery("SELECT region_id, data_version FROM region_meta", null).use { c ->
+                while (c.moveToNext()) {
+                    c.getString(0)?.let { versions[it] = c.getInt(1) }
+                }
+            }
+            // Backfill any installed region without a meta row at the floor version.
+            return installedRegionIdsFromDb(context).associateWith { versions[it] ?: 1 }
         }
     }
 }

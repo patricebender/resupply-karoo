@@ -44,6 +44,8 @@ interface ManifestRegion {
   bytesRaw: number;
   poiCount: number;
   sha256: string;
+  /** Monotonic data version (from regions.ts); the app offers an update when it outranks the installed one. */
+  dataVersion: number;
 }
 
 interface Manifest {
@@ -126,6 +128,7 @@ function main(): void {
       bytesRaw: raw.length,
       poiCount: poiCountOf(raw),
       sha256: createHash("sha256").update(gz).digest("hex"),
+      dataVersion: region.dataVersion,
     });
   }
 

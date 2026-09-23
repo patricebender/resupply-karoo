@@ -86,6 +86,21 @@ change; it defaults to the `regions-latest` release.
 `regions.ts` is a tiny CLI too: `npx tsx regions.ts ids`, `... paths <id>`,
 `... app-json`.
 
+## Refreshing a region's data (dataVersion)
+
+`schemaVersion` gates *schema/tag* changes (forces a full reseed). To ship **fresher OSM
+data** for a region without a schema change, use its `dataVersion` instead — a monotonic
+per-region counter the app compares to offer an "Update" affordance in the Regions screen.
+
+1. Bump the region in `DATA_VERSIONS` in `regions.ts` (absent = 1, so add it at 2, then 3…).
+2. Rebuild that region (`npm run build:region <id>`) and `npm run build:manifest`, then
+   re-upload the file + manifest to the release. The version rides the *file*: an unchanged,
+   carried-forward region keeps its old number, so only rebuilt+bumped regions prompt an update.
+
+The app stores the installed `dataVersion` per region in a `region_meta` table in
+`pois.sqlite`; installs predating that table read as 1, so a first bump to 2 correctly
+offers them an update.
+
 ## Bumping the DB version
 
 When the schema or tag allowlist changes, bump **all three** in lockstep so installed

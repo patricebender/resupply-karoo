@@ -358,6 +358,8 @@ class MainActivity : ComponentActivity() {
             is Screen.Regions -> {
                 val installed by configStore.installedRegions
                     .collectAsStateWithLifecycle(initialValue = emptySet())
+                val installedVersions by configStore.installedRegionVersions
+                    .collectAsStateWithLifecycle(initialValue = emptyMap())
                 val onWifi by Connectivity.wifiFlow(applicationContext)
                     .collectAsStateWithLifecycle(initialValue = Connectivity.isOnWifi(applicationContext))
                 val live by RegionDownloadService.liveDownload.collectAsStateWithLifecycle()
@@ -374,6 +376,7 @@ class MainActivity : ComponentActivity() {
                     regions = regionCatalog,
                     manifest = regionManifest.value,
                     installedRegions = installed,
+                    installedVersions = installedVersions,
                     onWifi = onWifi,
                     manifestLoading = manifestLoading.value,
                     manifestFailed = manifestFailed.value,
@@ -381,6 +384,7 @@ class MainActivity : ComponentActivity() {
                     failedRegionIds = failed,
                     removingRegionId = removingRegion.value,
                     onDownload = ::downloadRegion,
+                    onUpdate = ::updateRegion,
                     onRemove = ::removeRegion,
                     onBack = { screen = Screen.Waybook },
                 )
@@ -563,6 +567,11 @@ class MainActivity : ComponentActivity() {
             Timber.d("reconciling installed regions to DB: $dbRegions")
             configStore.setInstalledRegions(dbRegions)
         }
+        val dbVersions = PoiDatabase.installedRegionVersionsFromDb(applicationContext)
+        if (dbVersions != configStore.installedRegionVersions.first()) {
+            Timber.d("reconciling installed region versions to DB: $dbVersions")
+            configStore.setInstalledRegionVersions(dbVersions)
+        }
     }
 
     /** Fetch the region manifest for per-region download sizes/place counts (bridge, small). */
@@ -591,6 +600,16 @@ class MainActivity : ComponentActivity() {
         RegionDownloadService.start(applicationContext, region.id, region.label)
     }
 
+    /**
+     * Refresh an installed region to the latest data: the service removes its rows then
+     * re-downloads and merges, as one foreground unit of work (survives screen sleep, shows
+     * the same progress as a fresh download). The reconcile/on-success write updates the
+     * stored data version, so the Update affordance clears once done.
+     */
+    private fun updateRegion(region: Region) {
+        RegionDownloadService.startUpdate(applicationContext, region.id, region.label)
+    }
+
     /** Remove an installed region's POIs, then drop it from the installed set. */
     private fun removeRegion(region: Region) {
         removingRegion.value = region.id
@@ -599,6 +618,9 @@ class MainActivity : ComponentActivity() {
                 PoiDatabase.removeRegion(applicationContext, region.id)
             }
             configStore.removeInstalledRegion(region.id)
+            configStore.setInstalledRegionVersions(
+                PoiDatabase.installedRegionVersionsFromDb(applicationContext),
+            )
             configStore.clearDownloadStatus(region.id)
             removingRegion.value = null
         }

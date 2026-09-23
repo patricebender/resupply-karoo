@@ -106,7 +106,7 @@ class RegionCatalogClient(private val system: KarooSystemService) {
         // and rebuilds the R*Tree. Recording the installed regionId
         // (ConfigStore.addInstalledRegion) is the caller's job — it owns the store,
         // mirroring how the other clients are wired.
-        val count = PoiDatabase.installFromFile(context, sqlite, entry.id)
+        val count = PoiDatabase.installFromFile(context, sqlite, entry.id, entry.dataVersion)
             ?: return Result.Failed("region file rejected on install")
         return Result.Installed(count)
     }

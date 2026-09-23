@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.1.0](https://github.com/patricebender/resupply-karoo/compare/v1.0.0...v1.1.0) (2026-09-23)
+
+
+### Features
+
+* add USA and Canada regions (Complete + statewise) ([#63](https://github.com/patricebender/resupply-karoo/issues/63)) ([8d9690b](https://github.com/patricebender/resupply-karoo/commit/8d9690b4ab30527136f8c12d0abd36cc5b6b0794))
+* brand color scheme with light/dark theme toggle ([#58](https://github.com/patricebender/resupply-karoo/issues/58)) ([dbb2d27](https://github.com/patricebender/resupply-karoo/commit/dbb2d2782d2b92bec992be5a888634de0b9b26bc))
+* cache roadbook and favorites per route ([#53](https://github.com/patricebender/resupply-karoo/issues/53)) ([8d1d22c](https://github.com/patricebender/resupply-karoo/commit/8d1d22c2a4535b1d5ff3035086fe4dfe74039ba8))
+* extend POI coverage to all of Europe + add pharmacy/ATM/campground categories ([#61](https://github.com/patricebender/resupply-karoo/issues/61)) ([1240ffb](https://github.com/patricebender/resupply-karoo/commit/1240ffb04d37bacd3896a85c1a02476c2ef8ffa0))
+* favorite POIs for the current roadbook ([#49](https://github.com/patricebender/resupply-karoo/issues/49)) ([dcb8f8b](https://github.com/patricebender/resupply-karoo/commit/dcb8f8bec927317f128fda5e00e3deda64f692ad))
+* filter water POIs to safe sources ([#48](https://github.com/patricebender/resupply-karoo/issues/48)) ([41fcc09](https://github.com/patricebender/resupply-karoo/commit/41fcc09bbce018b13b591fc7bce3f930f6bada27))
+* live places around you when no route is loaded ([#45](https://github.com/patricebender/resupply-karoo/issues/45)) ([f1d74ed](https://github.com/patricebender/resupply-karoo/commit/f1d74ed630f30c359f57ebf23e20421b7b71a6c1))
+* make live (nearby) mode self-updating and self-explaining ([#59](https://github.com/patricebender/resupply-karoo/issues/59)) ([8e860bd](https://github.com/patricebender/resupply-karoo/commit/8e860bd12d5dfb84e9bb677eae499197796cf15b))
+* navigate to a POI from its detail view ([#57](https://github.com/patricebender/resupply-karoo/issues/57)) ([a432f5d](https://github.com/patricebender/resupply-karoo/commit/a432f5d8adf947a7692c03522097e49a9063f6b9))
+* route range bracket, live bike marker, and list position-follow ([#54](https://github.com/patricebender/resupply-karoo/issues/54)) ([08207dd](https://github.com/patricebender/resupply-karoo/commit/08207dde1ef637604adf7f5bdb470dc4af524be2))
+* show ETA and "open on arrival" status for POIs along a route ([#56](https://github.com/patricebender/resupply-karoo/issues/56)) ([d6153ca](https://github.com/patricebender/resupply-karoo/commit/d6153ca7fced0acbc752f0738d5849e1d0150a5d))
+* smart search radius that adapts to POI density ([#51](https://github.com/patricebender/resupply-karoo/issues/51)) ([634eeae](https://github.com/patricebender/resupply-karoo/commit/634eeaeb1859d58db9f0b855afb02cc41ee98409))
+* switch POI categories live without rebuilding ([#47](https://github.com/patricebender/resupply-karoo/issues/47)) ([b25b489](https://github.com/patricebender/resupply-karoo/commit/b25b48904fe2fc1b04a58a674c02bff87c568b82))
+* theme-aware Resupply logo (cream tile on dark, dark tile on light) ([#60](https://github.com/patricebender/resupply-karoo/issues/60)) ([ecbfd42](https://github.com/patricebender/resupply-karoo/commit/ecbfd426338b38a6fe1fd1900fb0dc4889eca7c6))
+
+
+### Bug Fixes
+
+* keep restored roadbook classified as a route without a GPS fix ([#52](https://github.com/patricebender/resupply-karoo/issues/52)) ([734b572](https://github.com/patricebender/resupply-karoo/commit/734b57233d0c0c72a1f3d444341e1dd7d375f379))
+* region build on Node 24 + keep unnamed POIs; better category icons ([#62](https://github.com/patricebender/resupply-karoo/issues/62)) ([5f166d0](https://github.com/patricebender/resupply-karoo/commit/5f166d06dbb53b9aa3c7e59bb1f409bfb8597c69))
+
+
+### Performance Improvements
+
+* fetch corridor POIs along a segmented bbox, not one whole-route box ([#55](https://github.com/patricebender/resupply-karoo/issues/55)) ([e1454e5](https://github.com/patricebender/resupply-karoo/commit/e1454e557f74f66642552c1f1ab77823aabae350))
+
 ## [1.0.0](https://github.com/patricebender/resupply-karoo/compare/v0.10.0...v1.0.0) (2026-09-15)
 
 

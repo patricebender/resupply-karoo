@@ -25,7 +25,6 @@ import io.hammerhead.karooext.models.StreamState
 import io.resupply.karoo.build.BuildController
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
-import io.resupply.karoo.data.BundledSeed
 import io.resupply.karoo.data.ConfigStore
 import io.resupply.karoo.data.CorridorTuning
 import io.resupply.karoo.data.PlacesClient
@@ -223,17 +222,14 @@ class MainActivity : ComponentActivity() {
 
         var screen: Screen by remember { mutableStateOf(initialScreen) }
 
-        // First-run onboarding (lean edition only): if nothing is installed and the welcome
-        // hasn't been shown, land on it once. Gated on a persisted flag, not just emptiness, so
-        // it never reappears after the rider removes all their regions. Seeded editions
-        // (usa/coreEurope) always have data, so this never fires for them.
-        if (BundledSeed.isLean) {
-            val onboardingSeen by configStore.onboardingSeen.collectAsStateWithLifecycle(initialValue = true)
-            val installedForOnboarding by configStore.installedRegions.collectAsStateWithLifecycle(initialValue = emptySet())
-            LaunchedEffect(onboardingSeen, installedForOnboarding) {
-                if (!onboardingSeen && installedForOnboarding.isEmpty()) {
-                    screen = Screen.Welcome
-                }
+        // First-run onboarding: if nothing is installed and the welcome hasn't been shown, land
+        // on it once. Gated on a persisted flag, not just emptiness, so it never reappears after
+        // the rider removes all their regions.
+        val onboardingSeen by configStore.onboardingSeen.collectAsStateWithLifecycle(initialValue = true)
+        val installedForOnboarding by configStore.installedRegions.collectAsStateWithLifecycle(initialValue = emptySet())
+        LaunchedEffect(onboardingSeen, installedForOnboarding) {
+            if (!onboardingSeen && installedForOnboarding.isEmpty()) {
+                screen = Screen.Welcome
             }
         }
 

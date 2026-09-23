@@ -3,6 +3,14 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Detect WiFi vs phone-tethered so the picker can advise on download speed. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Region downloads run in a foreground service holding a wake lock, so a large
+         download survives the picker closing / the Karoo's aggressive screen sleep. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".ResupplyApplication"
@@ -34,6 +42,13 @@
                 android:name="io.hammerhead.karooext.EXTENSION_INFO"
                 android:resource="@xml/extension_info" />
         </service>
+
+        <!-- Downloads a region file over WiFi (streamed, uncapped) in the foreground so it
+             survives the app backgrounding and the screen sleeping. -->
+        <service
+            android:name=".service.RegionDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Karoo Extensions library: where the on-device store fetches version/update
              info. $BASE_URL$ is substituted at build time by the generateManifest Gradle

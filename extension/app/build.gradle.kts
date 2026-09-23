@@ -179,16 +179,29 @@ tasks.register("generateManifest") {
             ?.map { "$baseUrl/${it.name}" }
             ?: emptyList()
 
+        // Which edition (product flavor) this manifest is for — CI sets EDITION per build.
+        // Each edition is a distinct Karoo library entry: the packageName carries the
+        // flavor's applicationIdSuffix so the three don't collide, and the label/description
+        // say what's bundled. Defaults to the lean edition for a hand-run manifest.
+        val edition = System.getenv("EDITION") ?: "lean"
+        val (idSuffix, editionLabel, editionBlurb) = when (edition) {
+            "usa" -> Triple(".usa", "Resupply (USA)", " USA POIs bundled offline.")
+            "coreEurope" -> Triple(".europe", "Resupply (Europe)", " Western-Europe POIs bundled offline.")
+            else -> Triple(".lean", "Resupply", " Download the regions you need on demand.")
+        }
+        val packageName = android.defaultConfig.applicationId + idSuffix
+
         val manifest = linkedMapOf(
-            "label" to "Resupply",
-            "packageName" to android.defaultConfig.applicationId,
+            "label" to editionLabel,
+            "packageName" to packageName,
             "iconUrl" to "$baseUrl/resupply.png",
             "latestApkUrl" to "$baseUrl/app-release.apk",
             "latestVersion" to android.defaultConfig.versionName,
             "latestVersionCode" to android.defaultConfig.versionCode,
             "developer" to "github.com/patricebender",
             "description" to "Turns a loaded route into an offline guide of POIs along the way " +
-                "(water, food, bike shops, fuel and more), with in-ride data fields and a map layer.",
+                "(water, food, bike shops, fuel and more), with in-ride data fields and a map layer." +
+                editionBlurb,
             "releaseNotes" to releaseNotes,
             "screenshotUrls" to screenshotUrls,
             "tags" to listOf("navigation", "poi"),

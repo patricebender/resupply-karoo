@@ -22,9 +22,6 @@ data class Region(
     val group: String,
 ) {
     companion object {
-        /** The region the bundled first-run seed installs as. */
-        const val SEED_REGION_ID = "germany"
-
         /**
          * Whether [installed] (the set of directly-installed region ids) covers [rowId].
          * A region covers itself; installing a whole-country "Complete" (germany / usa /

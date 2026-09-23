@@ -40,14 +40,11 @@ class PoiDatabase private constructor(private val dbFile: File) {
 
     companion object {
         private const val DB_NAME = "pois.sqlite"
-        // The bundled seed. Stored uncompressed: AGP's asset merger auto-inflates any
-        // *.gz asset and strips the suffix, so a gzipped seed would (a) end up under a
-        // different name than we open here and (b) save nothing — the APK zip DEFLATEs
-        // the entry regardless. Ship the raw .sqlite and let the APK compress it.
-        private const val SEED_ASSET = "pois-germany.sqlite"
-
-        /** The region id the bundled seed installs as (see [Region.SEED_REGION_ID]). */
-        private const val SEED_REGION_ID = Region.SEED_REGION_ID
+        // The bundled seed asset + which regions it provides come from the edition's
+        // [BundledSeed] (per-flavor BuildConfig): "usa", "core-europe", or empty (lean).
+        // Stored uncompressed: AGP's asset merger auto-inflates any *.gz asset and strips
+        // the suffix, so a gzipped seed would (a) end up under a different name than we open
+        // here and (b) save nothing — the APK zip DEFLATEs the entry regardless.
 
         // Version of the bundled asset. Bump in lockstep with `user_version` set by
         // the data pipeline whenever the schema/tags change, so existing installs
@@ -271,26 +268,51 @@ class PoiDatabase private constructor(private val dbFile: File) {
             }.getOrDefault(0)
 
         /**
-         * Seed the (freshly created, empty) live DB from the bundled Germany asset. The
-         * asset is an R*Tree-stripped region file (rows stamped `region_id = germany`); it's
-         * copied to a temp file and merged through the same path as a download. Stamps the
-         * DB version so re-seeds are gated by [installedVersion].
+         * Seed the (freshly created, empty) live DB from the edition's bundled asset. The
+         * asset is an R*Tree-stripped region file (rows already stamped with their
+         * `region_id`s); it's copied to a temp file and merged through the same path as a
+         * download. Stamps the DB version so re-seeds are gated by [installedVersion].
+         *
+         * On the **lean** edition there is no bundled asset — this is a no-op, leaving the
+         * empty schema in place (the rider downloads every region). The installed-region set
+         * is reconciled from the DB after this (see [installedRegionIdsFromDb] and the
+         * startup reconcile), so it always reflects what actually landed.
          */
         private fun seedFromAsset(context: Context, live: SQLiteDatabase) {
-            Timber.d("seeding POI DB from asset $SEED_ASSET")
             live.execSQL("PRAGMA user_version = $BUNDLED_DB_VERSION")
-            val tmp = File(context.cacheDir, "seed-$SEED_REGION_ID.sqlite")
+            if (BundledSeed.isLean) {
+                Timber.d("lean edition: no bundled seed, starting empty")
+                return
+            }
+            Timber.d("seeding POI DB from asset ${BundledSeed.asset}")
+            val tmp = File(context.cacheDir, "seed.sqlite")
             runCatching {
-                context.assets.open(SEED_ASSET).use { input ->
+                context.assets.open(BundledSeed.asset).use { input ->
                     tmp.outputStream().use { out -> input.copyTo(out) }
                 }
                 val inserted = mergeInto(context, tmp)
-                Timber.d("seeded $inserted POIs ($SEED_REGION_ID)")
+                Timber.d("seeded $inserted POIs (${BundledSeed.regionIds.joinToString(",")})")
             }.onFailure {
                 Timber.e(it, "failed to seed POI DB from asset")
                 // Leave the empty schema in place; the rider can download regions.
             }
             tmp.delete()
+        }
+
+        /**
+         * The distinct `region_id`s actually present in the live DB — the source of truth
+         * for what's installed. Used by the startup reconcile to rewrite the persisted
+         * installed-region set so config can never drift from the DB (after seeding, a
+         * version-bump reseed, or a crash mid-install). Excludes the empty default.
+         */
+        fun installedRegionIdsFromDb(context: Context): Set<String> {
+            val live = get(context.applicationContext).writableDatabase()
+            val out = mutableSetOf<String>()
+            live.rawQuery("SELECT DISTINCT region_id FROM poi WHERE region_id <> ''", null)
+                .use { c ->
+                    while (c.moveToNext()) c.getString(0)?.let(out::add)
+                }
+            return out
         }
     }
 }

@@ -37,6 +37,39 @@ android {
         buildConfigField("String", "PLACES_API_KEY", "\"$placesKey\"")
     }
 
+    // Editions: same app, different bundled POI data. Each flavor sets the seed asset it
+    // ships (in its own source set, e.g. src/usa/assets/) and the region ids that data
+    // provides — persisted as installed on first run (see BundledSeed / the startup
+    // reconcile). `lean` bundles nothing; the rider downloads every region on demand.
+    flavorDimensions += "edition"
+    productFlavors {
+        create("lean") {
+            dimension = "edition"
+            applicationIdSuffix = ".lean"
+            versionNameSuffix = "-lean"
+            buildConfigField("String", "SEED_ASSET", "\"\"")
+            buildConfigField("String", "SEED_REGION_IDS", "\"\"")
+        }
+        create("coreEurope") {
+            dimension = "edition"
+            applicationIdSuffix = ".europe"
+            versionNameSuffix = "-europe"
+            buildConfigField("String", "SEED_ASSET", "\"pois-core-europe.sqlite\"")
+            buildConfigField(
+                "String",
+                "SEED_REGION_IDS",
+                "\"germany,france,italy,belgium,netherlands,luxembourg\"",
+            )
+        }
+        create("usa") {
+            dimension = "edition"
+            applicationIdSuffix = ".usa"
+            versionNameSuffix = "-usa"
+            buildConfigField("String", "SEED_ASSET", "\"pois-usa.sqlite\"")
+            buildConfigField("String", "SEED_REGION_IDS", "\"usa\"")
+        }
+    }
+
     // Release signing key. In CI the keystore is a base64 secret decoded to a temp file;
     // locally there's usually no key, so `release` falls back to debug signing below and
     // sideloaded dev builds keep installing without a keystore. Store-distributed builds

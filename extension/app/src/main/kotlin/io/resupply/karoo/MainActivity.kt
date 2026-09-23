@@ -66,6 +66,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import timber.log.Timber
 
 /** In-app screens. No nav framework — a small sealed state the host switches on. */
 private sealed interface Screen {
@@ -119,9 +120,15 @@ class MainActivity : ComponentActivity() {
         configStore = ConfigStore(applicationContext)
         repository = ResupplyRepository.get(applicationContext)
         roadbookCache = RoadbookCache.get(applicationContext)
-        // Seeding the ~310k-row Germany DB on first launch is too slow for the main thread;
-        // build the query off-thread and await it where a build actually needs it.
+        // Seeding the bundled DB on first launch is too slow for the main thread; build the
+        // query off-thread and await it where a build actually needs it. The same async
+        // opens (and, first run / after a version bump, seeds) the DB, so we reconcile the
+        // installed-region set from it once it's ready — see reconcileInstalledRegions.
         query = lifecycleScope.async(Dispatchers.IO) { PoiQuery(PoiDatabase.get(applicationContext)) }
+        lifecycleScope.launch(Dispatchers.IO) {
+            query.await() // ensure the DB is opened + seeded before reading its region_ids
+            reconcileInstalledRegions()
+        }
 
         // Follow live route progress for the overview. One connection for the activity's
         // lifetime; the stream feeds toDestMeters, which the Waybook screen turns into a
@@ -334,9 +341,9 @@ class MainActivity : ComponentActivity() {
                 RegionsScreen(
                     regions = regionCatalog,
                     manifest = regionManifest.value,
-                    // A fresh install has the Germany seed but an empty set (no download
-                    // written); show the seed as installed without a first-run write.
-                    installedRegions = installed.ifEmpty { setOf(Region.SEED_REGION_ID) },
+                    // The installed set is reconciled from the DB at startup, so it already
+                    // reflects the bundled seed (or empty, on the lean edition).
+                    installedRegions = installed,
                     state = downloadState.value,
                     onDownload = ::downloadRegion,
                     onRemove = ::removeRegion,
@@ -494,17 +501,32 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * A short "what's installed" line for the Settings → Data row. Empty means the
-     * untouched bundled seed (Germany), same as the picker's empty-set handling. One or
-     * two labels are spelled out; more collapse to "Germany +N".
+     * A short "what's installed" line for the Settings → Data row. The set is reconciled
+     * from the DB, so it's exactly what's installed — empty only on the lean edition before
+     * any download. One or two labels are spelled out; more collapse to "France +N".
      */
     private fun installedSummary(installed: Set<String>): String {
-        val ids = installed.ifEmpty { setOf(Region.SEED_REGION_ID) }
-        val labels = ids.mapNotNull { id -> regionCatalog.firstOrNull { it.id == id }?.label }
-            .ifEmpty { listOf("Germany") }
+        if (installed.isEmpty()) return "No regions yet — download one"
+        val labels = installed.mapNotNull { id -> regionCatalog.firstOrNull { it.id == id }?.label }
+        if (labels.isEmpty()) return "No regions yet — download one"
         return when {
-            labels.size <= 2 -> labels.joinToString(", ")
-            else -> "${labels.first()} +${labels.size - 1}"
+            labels.size <= 2 -> labels.sorted().joinToString(", ")
+            else -> "${labels.sorted().first()} +${labels.size - 1}"
+        }
+    }
+
+    /**
+     * Make the persisted installed-region set exactly match the live DB (the source of
+     * truth). Run once at startup after the DB is opened/seeded, this subsumes: the
+     * first-run record of the bundled seed's regions, the reset after a version-bump reseed
+     * (which drops downloaded regions), and recovery from a crash mid-install. Without it,
+     * config could claim regions the DB no longer has, or miss the bundled ones.
+     */
+    private suspend fun reconcileInstalledRegions() {
+        val dbRegions = PoiDatabase.installedRegionIdsFromDb(applicationContext)
+        if (dbRegions != configStore.installedRegions.first()) {
+            Timber.d("reconciling installed regions to DB: $dbRegions")
+            configStore.setInstalledRegions(dbRegions)
         }
     }
 
@@ -552,12 +574,9 @@ class MainActivity : ComponentActivity() {
             }
             downloadState.value = when (result) {
                 is RegionCatalogClient.Result.Installed -> {
-                    // Additive: record the region alongside any already installed. If this
-                    // is the first explicit download on a seed-only install, also record the
-                    // seed so removing this region doesn't hide the still-present Germany.
-                    if (configStore.installedRegions.first().isEmpty()) {
-                        configStore.addInstalledRegion(Region.SEED_REGION_ID)
-                    }
+                    // Additive: record the region alongside any already installed. The
+                    // bundled seed's regions are already in the set (reconciled at startup),
+                    // so no special first-download handling is needed.
                     configStore.addInstalledRegion(region.id)
                     RegionDownloadState.Done(region.id, result.poiCount)
                 }

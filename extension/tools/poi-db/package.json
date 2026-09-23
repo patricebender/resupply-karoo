@@ -11,6 +11,8 @@
     "build:region": "bash build-region-file.sh",
     "build:regions": "bash build-all-regions.sh",
     "build:seed": "bash build-seed.sh",
+    "build:seed:usa": "bash build-seed-set.sh pois-usa usa",
+    "build:seed:core-europe": "bash build-seed-set.sh pois-core-europe germany france italy belgium netherlands luxembourg",
     "build:manifest": "tsx build-manifest.ts",
     "gen:regions-json": "tsx regions.ts app-json",
     "typecheck": "tsc -p tsconfig.json"

@@ -164,10 +164,11 @@ class ConfigStore(private val context: Context) {
     }
 
     /**
-     * The set of installed region ids. Installs are additive, so this grows as the rider
-     * downloads regions and shrinks on removal. Empty means the DB is still the untouched
-     * bundled seed (Germany); the picker treats empty as `{germany}` so the seed shows as
-     * installed without a first-run write (see [Region.SEED_REGION_ID]).
+     * The set of installed region ids — the regions whose POIs are in the live DB. Kept in
+     * lockstep with the DB by the startup reconcile ([setInstalledRegions] from the DB's
+     * distinct `region_id`s), then grown/shrunk as the rider downloads/removes regions. On a
+     * seeded edition the bundled countries are written here on first run; on lean it starts
+     * empty.
      */
     val installedRegions: Flow<Set<String>> =
         context.dataStore.data.map { it[REGIONS_KEY] ?: emptySet() }
@@ -176,6 +177,15 @@ class ConfigStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[REGIONS_KEY] = (prefs[REGIONS_KEY] ?: emptySet()) + regionId
         }
+    }
+
+    /**
+     * Overwrite the installed-region set atomically. Used by the startup reconcile to make
+     * the persisted set exactly match what's in the DB (the source of truth), so config
+     * can't drift from the data after seeding, a version-bump reseed, or a crash mid-install.
+     */
+    suspend fun setInstalledRegions(ids: Set<String>) {
+        context.dataStore.edit { prefs -> prefs[REGIONS_KEY] = ids }
     }
 
     suspend fun removeInstalledRegion(regionId: String) {

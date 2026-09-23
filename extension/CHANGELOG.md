@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/patricebender/resupply-karoo/compare/v1.1.0...v1.2.0) (2026-09-23)
+
+
+### Features
+
+* three APK editions (lean / core-europe / usa) via product flavors ([#65](https://github.com/patricebender/resupply-karoo/issues/65)) ([1dd2d84](https://github.com/patricebender/resupply-karoo/commit/1dd2d848bb72b75f3f9e4c3a5d04dc8b6fd52ab6))
+
 ## [1.1.0](https://github.com/patricebender/resupply-karoo/compare/v1.0.0...v1.1.0) (2026-09-23)
 
 

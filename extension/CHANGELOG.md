@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/patricebender/resupply-karoo/compare/v1.2.0...v1.3.0) (2026-09-23)
+
+
+### Features
+
+* fast, robust region downloads over WiFi + first-run onboarding ([#67](https://github.com/patricebender/resupply-karoo/issues/67)) ([ee43fad](https://github.com/patricebender/resupply-karoo/commit/ee43fadde2c43d674f66e24860ff6418d702d4e3))
+
 ## [1.2.0](https://github.com/patricebender/resupply-karoo/compare/v1.1.0...v1.2.0) (2026-09-23)
 
 

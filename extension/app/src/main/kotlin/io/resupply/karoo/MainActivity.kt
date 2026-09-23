@@ -25,6 +25,7 @@ import io.hammerhead.karooext.models.StreamState
 import io.resupply.karoo.build.BuildController
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
+import io.resupply.karoo.data.BundledSeed
 import io.resupply.karoo.data.ConfigStore
 import io.resupply.karoo.data.CorridorTuning
 import io.resupply.karoo.data.PlacesClient
@@ -34,6 +35,7 @@ import io.resupply.karoo.data.PoiQuery
 import io.resupply.karoo.data.Region
 import io.resupply.karoo.data.RegionCatalog
 import io.resupply.karoo.data.RegionCatalogClient
+import io.resupply.karoo.data.RegionDownloadStatus
 import io.resupply.karoo.data.RegionManifestEntry
 import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.ResupplyRepository
@@ -42,12 +44,14 @@ import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.WikipediaClient
 import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.extension.toSymbol
+import io.resupply.karoo.service.RegionDownloadService
 import io.resupply.karoo.ui.SettingsScreen
 import io.resupply.karoo.ui.theme.ResupplyTheme
 import io.resupply.karoo.ui.PoiDetailScreen
-import io.resupply.karoo.ui.RegionDownloadState
 import io.resupply.karoo.ui.RegionsScreen
 import io.resupply.karoo.ui.WaybookScreen
+import io.resupply.karoo.ui.WelcomeScreen
+import io.resupply.karoo.util.Connectivity
 import io.resupply.karoo.ui.field.ACTION_BUILD
 import io.resupply.karoo.ui.field.EXTRA_ACTION
 import io.resupply.karoo.ui.hoursFor
@@ -73,6 +77,7 @@ private sealed interface Screen {
     data object Waybook : Screen
     data object Settings : Screen
     data object Regions : Screen
+    data object Welcome : Screen
     data class Detail(val poiId: String) : Screen
 }
 
@@ -103,11 +108,12 @@ class MainActivity : ComponentActivity() {
     private val riderLocation = MutableStateFlow<LatLng?>(null)
     private val regionCatalog: List<Region> by lazy { RegionCatalog.load(applicationContext) }
 
-    // Region download state, hoisted so it survives navigation between screens.
-    private val downloadState =
-        androidx.compose.runtime.mutableStateOf<RegionDownloadState>(RegionDownloadState.Idle)
+    // Region manifest (sizes/counts) + its fetch state. The download itself lives in the
+    // foreground RegionDownloadService, observed via its liveDownload flow + persisted status.
     private val regionManifest =
         androidx.compose.runtime.mutableStateOf<Map<String, RegionManifestEntry>>(emptyMap())
+    private val manifestLoading = androidx.compose.runtime.mutableStateOf(false)
+    private val manifestFailed = androidx.compose.runtime.mutableStateOf(false)
 
     // Bumped on every fresh entry from the data field (onCreate + onNewIntent). The app is
     // singleTop, so a re-tap re-uses this Activity and the composition survives — observing
@@ -216,6 +222,21 @@ class MainActivity : ComponentActivity() {
         }
 
         var screen: Screen by remember { mutableStateOf(initialScreen) }
+
+        // First-run onboarding (lean edition only): if nothing is installed and the welcome
+        // hasn't been shown, land on it once. Gated on a persisted flag, not just emptiness, so
+        // it never reappears after the rider removes all their regions. Seeded editions
+        // (usa/coreEurope) always have data, so this never fires for them.
+        if (BundledSeed.isLean) {
+            val onboardingSeen by configStore.onboardingSeen.collectAsStateWithLifecycle(initialValue = true)
+            val installedForOnboarding by configStore.installedRegions.collectAsStateWithLifecycle(initialValue = emptySet())
+            LaunchedEffect(onboardingSeen, installedForOnboarding) {
+                if (!onboardingSeen && installedForOnboarding.isEmpty()) {
+                    screen = Screen.Welcome
+                }
+            }
+        }
+
         // Hoisted here so the list scroll position is preserved across navigation to
         // the detail/filter screens and back.
         val waybookListState = rememberLazyListState()
@@ -327,24 +348,42 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            is Screen.Welcome -> WelcomeScreen(
+                onChooseRegion = {
+                    lifecycleScope.launch { configStore.setOnboardingSeen() }
+                    screen = Screen.Regions
+                },
+                onSkip = {
+                    lifecycleScope.launch { configStore.setOnboardingSeen() }
+                    screen = Screen.Waybook
+                },
+            )
+
             is Screen.Regions -> {
                 val installed by configStore.installedRegions
                     .collectAsStateWithLifecycle(initialValue = emptySet())
-                // Fetch the manifest once on entry (unless a download is mid-flight).
+                val onWifi by Connectivity.wifiFlow(applicationContext)
+                    .collectAsStateWithLifecycle(initialValue = Connectivity.isOnWifi(applicationContext))
+                val live by RegionDownloadService.liveDownload.collectAsStateWithLifecycle()
+                val statuses by configStore.downloadStatuses.collectAsStateWithLifecycle(initialValue = emptyList())
+                val failed = remember(statuses) {
+                    statuses.filter { it.phase == RegionDownloadStatus.Phase.FAILED }
+                        .associate { it.regionId to (it.reason ?: "Download failed") }
+                }
+                // Fetch the manifest once on entry (for sizes/counts) if we don't have it.
                 LaunchedEffect(Unit) {
-                    if (regionManifest.value.isEmpty() &&
-                        downloadState.value !is RegionDownloadState.Downloading
-                    ) {
-                        loadManifest()
-                    }
+                    if (regionManifest.value.isEmpty()) loadManifest()
                 }
                 RegionsScreen(
                     regions = regionCatalog,
                     manifest = regionManifest.value,
-                    // The installed set is reconciled from the DB at startup, so it already
-                    // reflects the bundled seed (or empty, on the lean edition).
                     installedRegions = installed,
-                    state = downloadState.value,
+                    onWifi = onWifi,
+                    manifestLoading = manifestLoading.value,
+                    manifestFailed = manifestFailed.value,
+                    live = live,
+                    failedRegionIds = failed,
+                    removingRegionId = removingRegion.value,
                     onDownload = ::downloadRegion,
                     onRemove = ::removeRegion,
                     onBack = { screen = Screen.Waybook },
@@ -530,76 +569,46 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Fetch the region manifest for download sizes; updates [regionManifest]/[downloadState]. */
+    /** Fetch the region manifest for per-region download sizes/place counts (bridge, small). */
     private fun loadManifest() {
-        downloadState.value = RegionDownloadState.LoadingManifest
+        manifestLoading.value = true
+        manifestFailed.value = false
         lifecycleScope.launch {
             val manifest = withKarooConnection(applicationContext) { system ->
                 RegionCatalogClient(system).fetchManifest()
             }
+            manifestLoading.value = false
             if (manifest == null) {
-                downloadState.value = RegionDownloadState.ManifestFailed
+                manifestFailed.value = true
             } else {
                 regionManifest.value = manifest.regions.associateBy { it.id }
-                downloadState.value = RegionDownloadState.Idle
-                // Stash the full manifest (baseUrl) for the download step.
-                lastManifest = manifest
             }
         }
     }
 
-    private var lastManifest: io.resupply.karoo.data.RegionManifest? = null
-
-    /** Download + install [region], driving [downloadState] through progress → done/failed. */
+    /**
+     * Start downloading [region] in the foreground [RegionDownloadService] (direct WiFi
+     * transport). The service owns progress/state — it survives the picker closing and the
+     * screen sleeping — and the UI observes its live flow + the persisted status.
+     */
     private fun downloadRegion(region: Region) {
-        val manifest = lastManifest ?: return
-        val entry = manifest.regions.firstOrNull { it.id == region.id } ?: return
-        downloadState.value = RegionDownloadState.Downloading(region.id, 0f)
-        lifecycleScope.launch {
-            val result = withKarooConnection(applicationContext) { system ->
-                RegionCatalogClient(system).downloadAndInstall(
-                    context = applicationContext,
-                    manifest = manifest,
-                    entry = entry,
-                    scratchDir = cacheDir,
-                    onProgress = { p ->
-                        // Full progress covers the download; install is the short tail.
-                        downloadState.value = if (p.done >= p.total && p.total > 0) {
-                            RegionDownloadState.Installing(region.id)
-                        } else {
-                            RegionDownloadState.Downloading(region.id, p.fraction)
-                        }
-                    },
-                )
-            }
-            downloadState.value = when (result) {
-                is RegionCatalogClient.Result.Installed -> {
-                    // Additive: record the region alongside any already installed. The
-                    // bundled seed's regions are already in the set (reconciled at startup),
-                    // so no special first-download handling is needed.
-                    configStore.addInstalledRegion(region.id)
-                    RegionDownloadState.Done(region.id, result.poiCount)
-                }
-                is RegionCatalogClient.Result.SchemaMismatch ->
-                    RegionDownloadState.Failed(region.id, "Update the app to download regions")
-                is RegionCatalogClient.Result.Failed ->
-                    RegionDownloadState.Failed(region.id, result.reason)
-                null -> RegionDownloadState.Failed(region.id, "No connection")
-            }
-        }
+        RegionDownloadService.start(applicationContext, region.id, region.label)
     }
 
     /** Remove an installed region's POIs, then drop it from the installed set. */
     private fun removeRegion(region: Region) {
-        downloadState.value = RegionDownloadState.Installing(region.id)
+        removingRegion.value = region.id
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 PoiDatabase.removeRegion(applicationContext, region.id)
             }
             configStore.removeInstalledRegion(region.id)
-            downloadState.value = RegionDownloadState.Idle
+            configStore.clearDownloadStatus(region.id)
+            removingRegion.value = null
         }
     }
+
+    private val removingRegion = androidx.compose.runtime.mutableStateOf<String?>(null)
 
     private companion object {
         // Bounded wait for the nav/location state on a field-tap build decision, so a tap

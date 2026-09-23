@@ -194,6 +194,47 @@ class ConfigStore(private val context: Context) {
         }
     }
 
+    // --- Region download state (durable across process death) --------------------
+    // Only the coarse phase (active/failed) is persisted; live progress/rate is in the
+    // download service's memory. On launch, an ACTIVE entry with no running service means a
+    // download was interrupted → surface it as resumable/retryable.
+
+    val downloadStatuses: Flow<List<RegionDownloadStatus>> =
+        context.dataStore.data.map { decodeDownloadStatuses(it[DOWNLOAD_STATUS_KEY]) }
+
+    /** Mark a region's download active/failed (or clear it by passing null). */
+    suspend fun setDownloadStatus(regionId: String, status: RegionDownloadStatus?) {
+        context.dataStore.edit { prefs ->
+            val current = decodeDownloadStatuses(prefs[DOWNLOAD_STATUS_KEY])
+                .filterNot { it.regionId == regionId }
+            val next = if (status == null) current else current + status
+            prefs[DOWNLOAD_STATUS_KEY] = encodeDownloadStatuses(next)
+        }
+    }
+
+    /** Clear a region's download status entirely (on success or when dismissed). */
+    suspend fun clearDownloadStatus(regionId: String) = setDownloadStatus(regionId, null)
+
+    private fun decodeDownloadStatuses(raw: String?): List<RegionDownloadStatus> {
+        if (raw.isNullOrEmpty()) return emptyList()
+        return runCatching { json.decodeFromString(downloadStatusSerializer, raw) }
+            .onFailure { Timber.w(it, "failed to decode download statuses") }
+            .getOrDefault(emptyList())
+    }
+
+    private fun encodeDownloadStatuses(entries: List<RegionDownloadStatus>): String =
+        json.encodeToString(downloadStatusSerializer, entries)
+
+    // --- First-run onboarding (lean edition) ------------------------------------
+
+    /** Whether the rider has seen the first-run "set up your homebase" welcome. */
+    val onboardingSeen: Flow<Boolean> =
+        context.dataStore.data.map { it[ONBOARDING_SEEN_KEY] ?: false }
+
+    suspend fun setOnboardingSeen() {
+        context.dataStore.edit { prefs -> prefs[ONBOARDING_SEEN_KEY] = true }
+    }
+
     /** One route's cached favorites: the route key, its starred POI ids, and last-touch time (LRU). */
     @Serializable
     private data class RouteFavorites(val key: String, val ids: List<String>, val atMs: Long)
@@ -218,8 +259,11 @@ class ConfigStore(private val context: Context) {
         val FAVORITES_ONLY_KEY = booleanPreferencesKey("favorites_only")
         val FAVORITES_BY_ROUTE_KEY = stringPreferencesKey("favorites_by_route")
         val CURRENT_ROUTE_KEY = stringPreferencesKey("current_route_key")
+        val DOWNLOAD_STATUS_KEY = stringPreferencesKey("region_download_status")
+        val ONBOARDING_SEEN_KEY = booleanPreferencesKey("onboarding_seen")
 
         private val json = Json { ignoreUnknownKeys = true }
         private val routeFavoritesSerializer = ListSerializer(RouteFavorites.serializer())
+        private val downloadStatusSerializer = ListSerializer(RegionDownloadStatus.serializer())
     }
 }

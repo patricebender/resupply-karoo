@@ -36,7 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.resupply.karoo.data.Region.Companion.SEED_REGION_ID
 import io.resupply.karoo.data.Region
 import io.resupply.karoo.data.RegionManifestEntry
 
@@ -149,10 +148,12 @@ fun RegionsScreen(
         LaunchedEffect(activeRegionId) {
             val g = regions.firstOrNull { it.id == activeRegionId }?.group ?: return@LaunchedEffect
             expanded[g] = true
-            if (activeRegionId == SEED_REGION_ID ||
-                activeRegionId?.startsWith("$SEED_REGION_ID-") == true
-            ) {
-                expanded[SEED_REGION_ID] = true
+            // If the active region is a child (`<parent>-<sub>`), open its parent node too so
+            // the active row is visible. Works for any country with children, not just Germany.
+            activeRegionId?.substringBefore('-')?.let { parent ->
+                if (parent != activeRegionId && regions.any { it.id == parent }) {
+                    expanded[parent] = true
+                }
             }
         }
 
@@ -251,19 +252,33 @@ private data class CountryNode(val region: Region, val children: List<Region>)
 private data class GroupNode(val id: String, val title: String, val countries: List<CountryNode>)
 
 /**
- * Fold the flat catalog into the display tree. Germany's `germany-*` Bundesländer become
- * children of the `germany` node; every other region is a childless country. Within a
- * group, Germany leads (it's the seed/home country), then the rest in catalog order.
+ * Fold the flat catalog into the display tree. A country whose id is the prefix of other
+ * ids (germany → `germany-*`, usa → `usa-*`, canada → `canada-*`) becomes an expandable
+ * parent carrying those `<id>-<sub>` entries as children; every other region is a childless
+ * country. Nesting is derived from the ids, not a hardcoded country. Within a group, the
+ * expandable parents lead, then the leaf countries in catalog order.
  */
-private fun buildRegionTree(regions: List<Region>): List<GroupNode> =
-    regions.groupBy { it.group }.map { (group, inGroup) ->
-        val children = inGroup.filter { it.id.startsWith("$SEED_REGION_ID-") }
+private fun buildRegionTree(regions: List<Region>): List<GroupNode> {
+    // A region is a parent if some *other* region's id starts with "<its id>-".
+    val parentIds = regions
+        .filter { p -> regions.any { it.id != p.id && it.id.startsWith("${p.id}-") } }
+        .map { it.id }
+        .toSet()
+    // A region is a child if its id's prefix-before-'-' is a parent id.
+    fun parentOf(id: String): String? =
+        id.substringBefore('-').takeIf { it != id && it in parentIds }
+
+    return regions.groupBy { it.group }.map { (group, inGroup) ->
         val countries = inGroup
-            .filter { !it.id.startsWith("$SEED_REGION_ID-") }
-            .map { CountryNode(it, if (it.id == SEED_REGION_ID) children else emptyList()) }
-            .sortedByDescending { it.region.id == SEED_REGION_ID }
+            .filter { parentOf(it.id) == null } // drop children from the top level
+            .map { country ->
+                val children = inGroup.filter { it.id.startsWith("${country.id}-") }
+                CountryNode(country, children)
+            }
+            .sortedByDescending { it.region.id in parentIds } // expandable parents first
         GroupNode(id = group, title = group, countries = countries)
     }
+}
 
 /** Top section header: `>` collapsed / `v` open, name, and an "N/M" installed counter. */
 @Composable

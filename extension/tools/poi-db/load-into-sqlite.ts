@@ -83,7 +83,6 @@ const TAG_ALLOWLIST = [
   "contact:website",
   "phone",
   "contact:phone",
-  "wheelchair",
   // Street address, shown on the detail view for places that have one (cafés,
   // shops, fuel — water/toilets rarely do). Kept as bare addr:* keys.
   "addr:street",

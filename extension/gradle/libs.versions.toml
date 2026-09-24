@@ -43,7 +43,7 @@ junit = { module = "junit:junit", version = "4.13.2" }
 # Compose-native QR code rendering for the detail screen website. Pinned to 1.0.1:
 # 1.1.0+ is compiled with Kotlin 2.3.0, whose metadata the project's 2.0.0 compiler
 # can't read.
-qrose = { module = "io.github.alexzhirkevich:qrose", version = "1.0.1" }
+qrose = { module = "io.github.alexzhirkevich:qrose", version = "1.3.0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.4.0](https://github.com/patricebender/resupply-karoo/compare/v1.3.0...v1.4.0) (2026-09-24)
+
+
+### Features
+
+* update installed regions to fresher POI data ([#70](https://github.com/patricebender/resupply-karoo/issues/70)) ([74f6be9](https://github.com/patricebender/resupply-karoo/commit/74f6be93d55e01f9368a4789336caec32f43efa3))
+
+
+### Bug Fixes
+
+* bump region dataVersion each build so updates are offered ([#79](https://github.com/patricebender/resupply-karoo/issues/79)) ([40e21bc](https://github.com/patricebender/resupply-karoo/commit/40e21bc81309cb5ae2a28ff91a4228d61bb8942e))
+* re-fetch the region manifest on each Regions-screen entry ([#80](https://github.com/patricebender/resupply-karoo/issues/80)) ([a105367](https://github.com/patricebender/resupply-karoo/commit/a105367d76a2eabb888c1d235d919c21d6ad24c7))
+
+
+### Performance Improvements
+
+* drop the per-candidate TreeSet from route projection ([#77](https://github.com/patricebender/resupply-karoo/issues/77)) ([18a9314](https://github.com/patricebender/resupply-karoo/commit/18a9314d40294bc78d6ac37fccb37dd723cb6a23))
+* parallelize corridor projection + trim campsite clutter ([#76](https://github.com/patricebender/resupply-karoo/issues/76)) ([3b272cb](https://github.com/patricebender/resupply-karoo/commit/3b272cb36b2bcb7038cf055219b684fcc746097c))
+
 ## [1.3.0](https://github.com/patricebender/resupply-karoo/compare/v1.2.0...v1.3.0) (2026-09-23)
 
 

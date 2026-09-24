@@ -1,0 +1,42 @@
+name: Unit tests
+
+# Runs the extension's JVM unit tests on every PR and main push. These guard the corridor
+# selection logic — correctness (per-category isolation, cap/spread, index↔linear equivalence)
+# and the performance shape (RouteIndex projects only a local neighbourhood, never the whole
+# route). Nothing else in CI runs these; without this job a regression only surfaces locally.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Deny-all by default; this job opts into only what it needs.
+permissions: {}
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read   # read karoo-ext from GitHub Packages via GITHUB_TOKEN
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Run unit tests
+        working-directory: extension
+        env:
+          GPR_USER: ${{ github.actor }}
+          GPR_KEY: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew :app:testDebugUnitTest --no-daemon

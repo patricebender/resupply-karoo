@@ -1,5 +1,6 @@
 package io.resupply.karoo.util
 
+import java.util.SortedSet
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -140,20 +141,30 @@ class RouteIndex(
 
     /** Same result as the linear [distanceToRoute], over only the segments near [p]. */
     fun project(p: LatLng): RouteProjection {
-        val li = floorCell(p.lat, cellLat)
-        val gi = floorCell(p.lng, cellLng)
-        // Gather the point's neighbourhood; dedup segment indices (a segment spanning several
-        // cells appears in more than one). The window is ±SEARCH_CELLS: with a cell of one reach,
-        // a point anywhere in its cell is still guaranteed ≥ reach of clearance in every
-        // direction, so the true nearest segment (≤ reach away) is always inside the window.
-        val segs = sortedSetOf<Int>()
-        for (dl in -SEARCH_CELLS..SEARCH_CELLS) for (dg in -SEARCH_CELLS..SEARCH_CELLS) {
-            cells[key(li + dl, gi + dg)]?.let { segs.addAll(it) }
-        }
+        val segs = segmentsNear(p)
         if (segs.isEmpty()) return RouteProjection(Double.POSITIVE_INFINITY, 0.0, 0)
         // Ascending segment order so ties (a point equidistant from two segments) break to the
         // same winner as the linear scan — otherwise `along`/`side` could differ on near-ties.
         return projectOntoSegments(route, cumulative, p, segs)
+    }
+
+    /**
+     * The route segments the index would test for [p] — its neighbourhood window, deduped and in
+     * ascending order. This is exactly the work [project] does, exposed so a regression test can
+     * assert the per-candidate cost stays O(nearby) rather than O(all segments): a linear-scan
+     * reintroduction would blow this count up to ~`route.size`. Dedups segment indices (a segment
+     * spanning several cells appears in more than one). The window is ±[SEARCH_CELLS]: with a cell
+     * of one reach, a point anywhere in its cell still has ≥ reach of clearance in every direction,
+     * so the true nearest segment (≤ reach away) is always inside the window.
+     */
+    fun segmentsNear(p: LatLng): SortedSet<Int> {
+        val li = floorCell(p.lat, cellLat)
+        val gi = floorCell(p.lng, cellLng)
+        val segs = sortedSetOf<Int>()
+        for (dl in -SEARCH_CELLS..SEARCH_CELLS) for (dg in -SEARCH_CELLS..SEARCH_CELLS) {
+            cells[key(li + dl, gi + dg)]?.let { segs.addAll(it) }
+        }
+        return segs
     }
 
     private fun key(latIdx: Int, lngIdx: Int): Long =

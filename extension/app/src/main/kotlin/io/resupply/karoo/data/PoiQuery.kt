@@ -5,6 +5,10 @@ import io.resupply.karoo.util.METERS_PER_DEG_LAT
 import io.resupply.karoo.util.RouteIndex
 import io.resupply.karoo.util.cumulativeDistances
 import io.resupply.karoo.util.haversine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -25,7 +29,7 @@ class PoiQuery(private val database: PoiDatabase) {
      * unit-tested off-device against a real route + real POIs. See [selectAlongRoute]
      * for the tunables and the density model.
      */
-    fun queryCorridor(
+    suspend fun queryCorridor(
         route: List<LatLng>,
         radiusMeters: Int,
         smart: Boolean = false,
@@ -321,7 +325,7 @@ private fun detourCost(distanceToRoute: Double): Double = 2.0 * distanceToRoute
  * its own local density (the band-expansion model, see [CorridorTuning]) — so in one segment an
  * abundant category stays within the narrow band while a scarce one reaches further.
  */
-fun selectAlongRoute(
+suspend fun selectAlongRoute(
     route: List<LatLng>,
     candidates: List<CandidateInput>,
     radiusMeters: Int,
@@ -335,13 +339,20 @@ fun selectAlongRoute(
     // nearest is always in the searched cells → same result as the linear scan).
     val cumulative = cumulativeDistances(route)
     val index = RouteIndex(route, cumulative, maxRadius.toDouble())
+
+    // The per-candidate projection is the build's hot loop (thousands of candidates × the
+    // hundreds of route segments genuinely within reach on a dense, folding route). It's a pure
+    // map over the shared read-only [index], so fan it out across CPU cores: split candidates
+    // into per-core slices projected in parallel on Dispatchers.Default. Bucketing (below) stays
+    // single-threaded — it's O(candidates) and cheap, and a serial merge over slices IN INPUT
+    // ORDER keeps the result identical to the sequential scan (the segment tie-break and per-osm
+    // category lookup both depend on candidate order), which the PoiQueryTest guards prove.
+    val projected: List<SelectedPoi?> = projectCandidates(index, candidates, maxRadius)
     val bySegment = HashMap<Int, MutableList<SelectedPoi>>()
-    for (c in candidates) {
-        val proj = index.project(LatLng(c.lat, c.lng))
-        if (proj.distance > maxRadius) continue
-        val seg = (proj.along / CorridorTuning.SEGMENT_METERS).toInt()
-        bySegment.getOrPut(seg) { ArrayList() }
-            .add(SelectedPoi(c.osmId, proj.distance, proj.along, proj.side))
+    for (sel in projected) {
+        if (sel == null) continue // out of reach — dropped, same as the sequential filter
+        val seg = (sel.distanceAlong / CorridorTuning.SEGMENT_METERS).toInt()
+        bySegment.getOrPut(seg) { ArrayList() }.add(sel)
     }
     // Category lookup by osmId (candidates carry the raw type).
     val catOf = candidates.associate { it.osmId to Category.ofType(it.type) }
@@ -380,6 +391,41 @@ fun selectAlongRoute(
     }
     return out
 }
+
+/**
+ * Project every candidate onto the route in parallel, one entry per input candidate IN ORDER
+ * (`null` where the candidate is beyond [maxRadius], so the caller drops it exactly as the
+ * sequential distance filter did). Splits the candidates into one slice per CPU core and projects
+ * each slice on [Dispatchers.Default]; [RouteIndex.project] only reads shared state, so the slices
+ * are independent. Preserving input order keeps the downstream bucketing identical to a sequential
+ * scan. A tiny candidate set isn't worth the fan-out — project it inline on the caller's thread.
+ */
+private suspend fun projectCandidates(
+    index: RouteIndex,
+    candidates: List<CandidateInput>,
+    maxRadius: Int,
+): List<SelectedPoi?> {
+    fun project(c: CandidateInput): SelectedPoi? {
+        val proj = index.project(LatLng(c.lat, c.lng))
+        if (proj.distance > maxRadius) return null
+        return SelectedPoi(c.osmId, proj.distance, proj.along, proj.side)
+    }
+
+    val cores = Runtime.getRuntime().availableProcessors()
+    if (cores < 2 || candidates.size < PARALLEL_PROJECT_MIN) {
+        return candidates.map(::project)
+    }
+    val sliceSize = (candidates.size + cores - 1) / cores
+    return coroutineScope {
+        candidates.chunked(sliceSize)
+            .map { slice -> async(Dispatchers.Default) { slice.map(::project) } }
+            .awaitAll()
+            .flatten()
+    }
+}
+
+/** Below this candidate count the parallel fan-out costs more than it saves. */
+private const val PARALLEL_PROJECT_MIN = 256
 
 /**
  * Cap a category's eligible POIs to [cap], spreading the kept set across the segment's

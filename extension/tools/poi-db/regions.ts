@@ -250,10 +250,58 @@ export function geofabrikPaths(r: Region): string[] {
   return Array.isArray(r.geofabrik) ? r.geofabrik : [r.geofabrik];
 }
 
+// Composite vs leaf, for the parallel build. A COMPOSITE is a whole-country node whose
+// extracts are ALSO published as their own regions (germany→germany-*, usa→usa-*,
+// canada→canada-*): it can be assembled by merging those already-built member files instead
+// of re-downloading the extracts. A LEAF is everything else — every single-extract region,
+// plus multi-extract regions whose parts are NOT separate regions (e.g. the United Kingdom,
+// merged from england/scotland/wales which aren't standalone ids). Leaves each download +
+// build independently; composites are merged from leaves after.
+//
+// Derived, not hardcoded: a region is a composite iff every one of its extract paths is the
+// sole extract of some OTHER region. That map from extract-path → owning leaf id also tells
+// the merge job which leaf files to combine.
+
+/** Extract path → the leaf region id whose single extract it is. */
+function singleExtractOwners(): Map<string, string> {
+  const owners = new Map<string, string>();
+  for (const r of REGIONS) {
+    const paths = geofabrikPaths(r);
+    if (paths.length === 1) owners.set(paths[0]!, r.id);
+  }
+  return owners;
+}
+
+/** True if [r] is a composite: multi-extract, and every extract is some leaf's sole extract. */
+export function isComposite(r: Region): boolean {
+  const paths = geofabrikPaths(r);
+  if (paths.length < 2) return false;
+  const owners = singleExtractOwners();
+  return paths.every((p) => owners.has(p));
+}
+
+/** The leaf region ids a composite is assembled from, in catalog order. */
+export function memberLeafIds(r: Region): string[] {
+  const owners = singleExtractOwners();
+  return geofabrikPaths(r).map((p) => {
+    const id = owners.get(p);
+    if (!id) throw new Error(`region "${r.id}" is not a composite: extract ${p} has no leaf`);
+    return id;
+  });
+}
+
+export const LEAF_REGIONS = REGIONS.filter((r) => !isComposite(r));
+export const COMPOSITE_REGIONS = REGIONS.filter(isComposite);
+
 // CLI: `npx tsx regions.ts <command> [id]`
 //   ids                 → print all region ids, one per line
 //   paths <id>          → print the region's Geofabrik path(s), space-separated
 //   app-json            → print the app-facing regions.json ({id,label,group}[])
+//   leaves              → leaf region ids (built independently, in parallel), one per line
+//   composites          → composite region ids (merged from leaves), one per line
+//   members <id>        → the leaf ids a composite is assembled from, space-separated
+//   shards <n>          → JSON [[id,…],…]: leaf ids split into <n> round-robin shards, for
+//                         the build matrix (round-robin so a big region doesn't stack a shard)
 // Kept tiny so the bash builder can shell out for exactly what it needs.
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [cmd, arg] = process.argv.slice(2);
@@ -274,7 +322,27 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         ),
       );
       break;
+    case "leaves":
+      console.log(LEAF_REGIONS.map((r) => r.id).join("\n"));
+      break;
+    case "composites":
+      console.log(COMPOSITE_REGIONS.map((r) => r.id).join("\n"));
+      break;
+    case "members":
+      if (!arg) throw new Error("usage: regions.ts members <compositeId>");
+      console.log(memberLeafIds(regionById(arg)).join(" "));
+      break;
+    case "shards": {
+      const n = Number(arg);
+      if (!Number.isInteger(n) || n < 1) throw new Error("usage: regions.ts shards <n>");
+      const shards: string[][] = Array.from({ length: n }, () => []);
+      LEAF_REGIONS.forEach((r, i) => shards[i % n]!.push(r.id));
+      console.log(JSON.stringify(shards.filter((s) => s.length > 0)));
+      break;
+    }
     default:
-      throw new Error("usage: regions.ts <ids|paths <id>|app-json>");
+      throw new Error(
+        "usage: regions.ts <ids|paths <id>|app-json|leaves|composites|members <id>|shards <n>>",
+      );
   }
 }

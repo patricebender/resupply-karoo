@@ -1,9 +1,11 @@
 package io.resupply.karoo.data
 
+import io.resupply.karoo.data.selectAlongRoute as selectAlongRouteSuspend
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.RouteIndex
 import io.resupply.karoo.util.cumulativeDistances
 import io.resupply.karoo.util.distanceToRoute
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -56,6 +58,17 @@ class PoiQueryTest {
         val json = Json { ignoreUnknownKeys = true }
         return json.decodeFromString<List<FixturePoi>>(resource(path))
             .map { CandidateInput(it.osmId, it.lat, it.lng, it.type) }
+    }
+
+    /** [selectAlongRoute] is now suspend (parallel projection); run it blocking for these
+     *  synchronous JUnit tests. Same signature/defaults, so call sites are unchanged. */
+    private fun selectAlongRoute(
+        route: List<LatLng>,
+        candidates: List<CandidateInput>,
+        radiusMeters: Int,
+        smart: Boolean = false,
+    ): List<SelectedPoi> = runBlocking {
+        selectAlongRouteSuspend(route, candidates, radiusMeters, smart)
     }
 
     private fun categoryOf(osmId: String): Category? {
@@ -294,5 +307,50 @@ class PoiQueryTest {
         val maxRadius = CorridorTuning.maxReachMeters(radius, smart = true).toDouble()
         assertTrue("selects some POIs", out.isNotEmpty())
         assertTrue("all within max reach", out.all { it.distanceToRoute <= maxRadius })
+    }
+
+    // --- Long-route performance guard ---------------------------------------------------
+
+    /**
+     * Regression guard for the build-time blow-up on long, dense routes (the 225 km Schwarzwald
+     * traverse: 7,096 vertices, folding through the mountains). The blow-up was per-candidate
+     * projection cost: the fast path tests only the route segments in a candidate's neighbourhood
+     * ([RouteIndex.segmentsNear]), while a linear scan tests *every* segment. That's the exact
+     * quantity that regressed — so assert it directly, machine-independently, rather than a
+     * wall-clock threshold (which flakes on shared CI and, tellingly, wouldn't have caught this one:
+     * the indexed path was already sub-second on a desktop and only blew up on the slow Karoo CPU).
+     *
+     * The bound: on this route the worst-case in-reach neighbourhood is ~550 segments (folds
+     * stack several passes of the route within one 2 km reach); a linear scan would test all
+     * ~7,096. Assert the worst-case candidate stays under route.size / 5 (~1,419) — comfortably
+     * above the real neighbourhood so a fold-heavy route won't flake, and unambiguously below a
+     * full scan so a reintroduced linear scan (≈ route.size) fails loudly.
+     */
+    @Test
+    fun `long dense route projects only a local neighbourhood, not the whole route`() {
+        val longRoute = loadRoute("routes/schwarzwald-traverse.gpx")
+        assertTrue("long route loaded", longRoute.size > 5_000)
+
+        val reach = CorridorTuning.maxReachMeters(radius, smart = true).toDouble()
+        val cumulative = cumulativeDistances(longRoute)
+        val index = RouteIndex(longRoute, cumulative, reach)
+
+        // Sample points along the route (offset slightly off-line, as real POIs are) and measure the
+        // segment-count the index tests for each — the per-candidate work selectAlongRoute does.
+        var worst = 0
+        var sampled = 0
+        for (i in longRoute.indices step 7) {
+            val v = longRoute[i]
+            val p = LatLng(v.lat + 30.0 / 111_320.0, v.lng) // ~30 m off the line
+            worst = maxOf(worst, index.segmentsNear(p).size)
+            sampled++
+        }
+        assertTrue("sampled a meaningful number of points", sampled > 500)
+        // A linear scan would be ~route.size here; the local index must stay far below that.
+        assertTrue(
+            "worst-case candidate tested $worst of ${longRoute.size} segments — a linear-scan " +
+                "regression? (guard: < route.size / 5)",
+            worst < longRoute.size / 5,
+        )
     }
 }

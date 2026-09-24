@@ -6,10 +6,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,9 +26,12 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,10 +45,12 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.resupply.karoo.data.Region
 import io.resupply.karoo.data.RegionManifestEntry
@@ -181,7 +188,38 @@ fun RegionsScreen(
             }
         }
 
+        // Installed, directly-removable regions surfaced to the top so a rider manages what they
+        // have without hunting the tree. Derived purely from installedRegions — the same regions
+        // still appear (installed) in Browse below, so the two never desync.
+        val yourRegions = remember(regions, installedRegions) {
+            regions.filter { it.id in installedRegions }.sortedBy { it.label }
+        }
+
         LazyColumn(modifier = Modifier.weight(1f)) {
+            if (yourRegions.isNotEmpty()) {
+                item(key = "sec-yours") { SectionLabel("Your regions") }
+                items(yourRegions, key = { "yours-${it.id}" }) { region ->
+                    RegionRow(
+                        region = region,
+                        entry = manifest[region.id],
+                        installed = true,
+                        removable = true,
+                        indent = Indent.COUNTRY,
+                        expandable = null,
+                        live = live?.takeIf { it.regionId == region.id },
+                        failedReason = failedRegionIds[region.id],
+                        removing = removingRegionId == region.id,
+                        updateAvailable = hasUpdate(region.id),
+                        enabled = !busy && manifest.containsKey(region.id),
+                        onDownload = { startDownload(region) },
+                        onUpdate = { onUpdate(region) },
+                        onRemove = { confirmRemove = region },
+                    )
+                    HorizontalDivider()
+                }
+                item(key = "sec-browse") { SectionLabel("Browse all") }
+            }
+
             tree.forEach { group ->
                 val groupOpen = expanded[group.id] ?: false
                 item(key = "grp-${group.id}") {
@@ -341,6 +379,18 @@ private fun buildRegionTree(regions: List<Region>): List<GroupNode> {
     }
 }
 
+/** A small all-caps section label ("YOUR REGIONS" / "BROWSE ALL") separating the screen's parts. */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
+    )
+}
+
 @Composable
 private fun GroupHeader(
     title: String,
@@ -398,80 +448,163 @@ private fun RegionRow(
     val installing = live?.phase == LivePhase.INSTALLING || removing
     val done = live?.phase == LivePhase.DONE
     val failed = live?.phase == LivePhase.FAILED || failedReason != null
+    val busyRow = downloading || installing
 
+    // An expandable row's chevron already provides the visual indent, so don't also pad it in —
+    // that double-cost is what squeezed "Germany" onto two lines. Non-expandable rows keep their
+    // catalog indent for the hierarchy. The whole row taps to expand a country.
+    val startPad = if (expandable != null) 4 else indent.start
+    val rowClick = if (expandable != null) Modifier.clickable(onClick = onExpandToggle) else Modifier
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = indent.start.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(rowClick)
+            .defaultMinSize(minHeight = 56.dp)
+            .padding(start = startPad.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         if (expandable != null) {
-            IconButton(onClick = onExpandToggle, modifier = Modifier.size(32.dp)) {
-                Icon(
-                    if (expandable) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = if (expandable) "Collapse ${region.label}" else "Expand ${region.label}",
-                )
-            }
-            Spacer(Modifier.size(8.dp))
+            Icon(
+                if (expandable) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp).padding(4.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(region.label, style = MaterialTheme.typography.bodyLarge)
-            val subtitle = when {
-                installing -> "Installing…"
-                installed && updateAvailable -> "Update available"
-                installed -> "Installed"
-                entry != null -> "${formatMb(entry.bytesGz)} · ${entry.poiCount} places"
-                else -> "Unavailable"
-            }
             Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (installed && updateAvailable && !installing) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                region.label,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-
-            if (downloading && live != null) {
-                Spacer(Modifier.height(4.dp))
-                LinearProgressIndicator(progress = { live.fraction }, modifier = Modifier.fillMaxWidth())
-                Text(downloadLine(live), style = MaterialTheme.typography.bodySmall)
-            }
-            if (failed) {
-                Text(
-                    live?.reason ?: failedReason ?: "Download failed",
+            Spacer(Modifier.height(2.dp))
+            when {
+                // Active work owns the second line: a determinate bar + phase, no clipped spinner.
+                busyRow -> {
+                    val fraction = if (installing && live == null) null else live?.fraction
+                    if (fraction != null) {
+                        LinearProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp))
+                    }
+                    Spacer(Modifier.height(3.dp))
+                    val phase = when {
+                        installing -> if (removing) "Removing…" else "Installing…"
+                        else -> "Downloading… ${downloadLine(live!!)}"
+                    }
+                    Text(phase, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                failed -> StatusChip(
+                    dot = MaterialTheme.colorScheme.error,
+                    text = live?.reason ?: failedReason ?: "Download failed",
                     color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
                 )
-            }
-            if (done && live != null) {
-                Text("Installed ${live.poiCount} places", style = MaterialTheme.typography.bodySmall)
+                installed && updateAvailable -> StatusChip(
+                    dot = MaterialTheme.colorScheme.primary,
+                    text = "Update available",
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                installed -> StatusChip(
+                    dot = StatusGreen,
+                    text = entry?.let { "Installed · ${formatPlaces(it.poiCount)} places" } ?: "Installed",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                entry != null -> StatusChip(
+                    dot = null,
+                    text = "${formatMb(entry.bytesGz)} · ${formatPlaces(entry.poiCount)} places",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> StatusChip(dot = null, text = "Unavailable", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         Spacer(Modifier.size(8.dp))
+        // Trailing action: nothing while busy (progress owns the row), an overflow menu for an
+        // installed region (Update / Remove), or a "Get" CTA to download.
         when {
-            downloading || installing ->
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-            installed -> Row(verticalAlignment = Alignment.CenterVertically) {
-                // Update is offered only on directly-installed rows (removable); reuses the
-                // download service via onUpdate (remove-then-refresh).
-                if (removable && updateAvailable) {
-                    Button(onClick = onUpdate, enabled = enabled) { Text("Update") }
-                    Spacer(Modifier.size(4.dp))
-                } else {
-                    Text("✓", style = MaterialTheme.typography.titleMedium)
-                }
-                if (removable) {
-                    IconButton(onClick = onRemove, enabled = enabled) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Remove ${region.label}")
-                    }
-                }
-            }
-            else -> Button(onClick = onDownload, enabled = enabled) {
-                Text(if (failed) "Retry" else "Get")
-            }
+            busyRow -> {}
+            installed && removable -> RegionOverflowMenu(
+                label = region.label,
+                canUpdate = updateAvailable,
+                enabled = enabled,
+                onUpdate = onUpdate,
+                onRemove = onRemove,
+            )
+            installed -> Icon(
+                Icons.Filled.CheckCircle,
+                contentDescription = "Installed",
+                tint = StatusGreen,
+                modifier = Modifier.size(20.dp),
+            )
+            else -> CompactActionButton(if (failed) "Retry" else "Get", onClick = onDownload, enabled = enabled)
         }
+    }
+}
+
+/** Warm status-green (matches the WifiBanner "connected" green) for an installed region. */
+private val StatusGreen = Color(0xFF2E7D32)
+
+/** A tiny colored dot + label line — the row's status at a glance. [dot] null → no dot. */
+@Composable
+private fun StatusChip(dot: Color?, text: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (dot != null) {
+            Box(modifier = Modifier.size(8.dp).background(dot, CircleShape))
+            Spacer(Modifier.size(6.dp))
+        }
+        Text(text, style = MaterialTheme.typography.bodySmall, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** The ⋮ overflow for an installed region: Update (when newer data exists) + Remove. */
+@Composable
+private fun RegionOverflowMenu(
+    label: String,
+    canUpdate: Boolean,
+    enabled: Boolean,
+    onUpdate: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "$label options")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (canUpdate) {
+                DropdownMenuItem(
+                    text = { Text("Update") },
+                    leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                    onClick = { open = false; onUpdate() },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Remove") },
+                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                onClick = { open = false; onRemove() },
+            )
+        }
+    }
+}
+
+/** Group thousands so "502805 places" reads as "502,805". */
+private fun formatPlaces(n: Int): String = "%,d".format(n)
+
+/** A slim pill button sized for the narrow Karoo region rows — trims the default Material
+ *  Button's min width + padding so the row's text label keeps its space. */
+@Composable
+private fun CompactActionButton(label: String, onClick: () -> Unit, enabled: Boolean) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 32.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
 }
 

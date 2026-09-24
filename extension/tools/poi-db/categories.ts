@@ -62,13 +62,23 @@ export const CATEGORY_RULES: Record<Category, TagRule[]> = {
     { key: "amenity", value: "atm", type: "ATM" },
     { key: "amenity", value: "bank", type: "ATM" },
   ],
-  // Campsites, backcountry huts, and shelters — the bikepacker's sleep spots.
+  // Campsites and backcountry huts — the bikepacker's sleep spots. `amenity=shelter` is
+  // included but heavily filtered in resolvePoi: raw, it's ~92% bus stops / picnic / weather
+  // shelters (map clutter, and wrong as a "campsite" pin), so only the sleep-in shelter_types
+  // survive (see SLEEPABLE_SHELTER_TYPES).
   campground: [
     { key: "tourism", value: "camp_site", type: "CAMPING" },
     { key: "tourism", value: "wilderness_hut", type: "CAMPING" },
     { key: "amenity", value: "shelter", type: "CAMPING" },
   ],
 };
+
+/**
+ * The only `amenity=shelter` subtypes kept as CAMPING: shelters you can actually sleep in.
+ * Everything else (public_transport bus stops, picnic_shelter, gazebo, sun_shelter, …) is
+ * dropped — it's the bulk of shelters and pure clutter for a resupply/overnight tool.
+ */
+const SLEEPABLE_SHELTER_TYPES = new Set(["lean_to", "basic_hut", "hut"]);
 
 /** All rules for the enabled categories, flattened. */
 export function rulesFor(categories: Category[]): TagRule[] {
@@ -105,6 +115,15 @@ export function resolvePoi(
         (tags.shop === "car" ||
           tags.shop === "car_repair" ||
           tags.shop === "no")
+      ) {
+        continue;
+      }
+      // amenity=shelter is mostly bus stops / picnic huts; keep only the sleep-in
+      // shelter_types (a bare shelter with no shelter_type is dropped too).
+      if (
+        r.key === "amenity" &&
+        r.value === "shelter" &&
+        !SLEEPABLE_SHELTER_TYPES.has(tags.shelter_type ?? "")
       ) {
         continue;
       }

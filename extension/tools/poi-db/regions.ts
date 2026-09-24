@@ -28,7 +28,23 @@ export interface Region {
   group: "Europe" | "North America";
   /** Geofabrik path(s) under download.geofabrik.de, minus `-latest.osm.pbf`. */
   geofabrik: string | string[];
+  /**
+   * Monotonic data version, bumped by hand each time this region is rebuilt with fresher
+   * OSM data. The app compares the manifest's number against the installed one to offer an
+   * "update available" affordance. Orthogonal to `schemaVersion` (which gates schema/tag
+   * changes). Defaults to 1 for regions not in [DATA_VERSIONS]; bump there when refreshing.
+   */
+  dataVersion: number;
 }
+
+/**
+ * Per-region data-version overrides. A region absent here is version 1. When you rebuild a
+ * region with fresh OSM data, bump its entry (add it at 2, then 3, …) so installed riders
+ * see the update. Keyed by [Region.id].
+ */
+const DATA_VERSIONS: Record<string, number> = {
+  // e.g. germany: 2,
+};
 
 /** The 16 German federal states, in the picker's display order (alphabetical by label). */
 const GERMANY_STATES: Array<{ id: string; label: string; slug: string }> = [
@@ -155,7 +171,9 @@ const CANADA_PROVINCES: Array<{ id: string; label: string; slug: string }> = [
   { id: "yukon", label: "Yukon", slug: "yukon" },
 ];
 
-export const REGIONS: Region[] = [
+// Raw catalog without data versions; [REGIONS] stamps each from [DATA_VERSIONS] below so
+// the version knob stays in one place instead of being sprinkled through the templates.
+const RAW_REGIONS: Array<Omit<Region, "dataVersion">> = [
   // Germany — whole country, merged from all 16 Bundesland extracts. Shown in the picker
   // as the expandable "Germany" node (getting it installs the whole country); the states
   // below are the finer-grained alternatives.
@@ -166,17 +184,17 @@ export const REGIONS: Region[] = [
     geofabrik: GERMANY_STATES.map((s) => `europe/germany/${s.slug}`),
   },
   // One entry per Bundesland.
-  ...GERMANY_STATES.map((s): Region => ({
+  ...GERMANY_STATES.map((s) => ({
     id: `germany-${s.id}`,
     label: s.label,
-    group: "Europe",
+    group: "Europe" as const,
     geofabrik: `europe/germany/${s.slug}`,
   })),
   // Whole countries.
-  ...COUNTRIES.map((c): Region => ({
+  ...COUNTRIES.map((c) => ({
     id: c.id,
     label: c.label,
-    group: "Europe",
+    group: "Europe" as const,
     geofabrik: c.geofabrik,
   })),
 
@@ -189,10 +207,10 @@ export const REGIONS: Region[] = [
     group: "North America",
     geofabrik: US_STATES.map((s) => `north-america/us/${s.slug}`),
   },
-  ...US_STATES.map((s): Region => ({
+  ...US_STATES.map((s) => ({
     id: `usa-${s.id}`,
     label: s.label,
-    group: "North America",
+    group: "North America" as const,
     geofabrik: `north-america/us/${s.slug}`,
   })),
 
@@ -203,13 +221,18 @@ export const REGIONS: Region[] = [
     group: "North America",
     geofabrik: CANADA_PROVINCES.map((p) => `north-america/canada/${p.slug}`),
   },
-  ...CANADA_PROVINCES.map((p): Region => ({
+  ...CANADA_PROVINCES.map((p) => ({
     id: `canada-${p.id}`,
     label: p.label,
-    group: "North America",
+    group: "North America" as const,
     geofabrik: `north-america/canada/${p.slug}`,
   })),
 ];
+
+export const REGIONS: Region[] = RAW_REGIONS.map((r) => ({
+  ...r,
+  dataVersion: DATA_VERSIONS[r.id] ?? 1,
+}));
 
 /** Look up a region by id, or throw a helpful error listing valid ids. */
 export function regionById(id: string): Region {

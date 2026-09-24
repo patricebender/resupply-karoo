@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import io.resupply.karoo.R
 import io.resupply.karoo.data.ConfigStore
+import io.resupply.karoo.data.PoiDatabase
 import io.resupply.karoo.data.RegionCatalogClient
 import io.resupply.karoo.data.RegionDownloadStatus
 import io.resupply.karoo.data.RegionDownloader
@@ -56,6 +57,7 @@ class RegionDownloadService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val regionId = intent?.getStringExtra(EXTRA_REGION_ID)
         val label = intent?.getStringExtra(EXTRA_REGION_LABEL) ?: regionId ?: "region"
+        val isUpdate = intent?.getBooleanExtra(EXTRA_IS_UPDATE, false) ?: false
         if (regionId == null) {
             stopSelf(startId)
             return START_NOT_STICKY
@@ -77,13 +79,13 @@ class RegionDownloadService : Service() {
                 regionId,
                 RegionDownloadStatus(regionId, RegionDownloadStatus.Phase.ACTIVE),
             )
-            runDownload(regionId, label)
+            runDownload(regionId, label, isUpdate)
             finishIfIdle(startId)
         }
         return START_NOT_STICKY
     }
 
-    private suspend fun runDownload(regionId: String, label: String) {
+    private suspend fun runDownload(regionId: String, label: String, isUpdate: Boolean) {
         // Direct download needs WiFi; refuse early with a clear reason if it's not there.
         if (!Connectivity.isOnWifi(applicationContext)) {
             fail(regionId, "Connect to Wi‑Fi to download this region")
@@ -103,6 +105,19 @@ class RegionDownloadService : Service() {
             return
         }
 
+        // An update is remove-then-install: the merge dedups by osm_id (INSERT OR IGNORE), so a
+        // plain re-download over existing rows would never refresh changed/removed POIs. Drop the
+        // old rows first, inside this same foreground unit of work. If the download then fails the
+        // region shows as not-installed + retryable via the standard FAILED path — acceptable for a
+        // rebuildable cache.
+        if (isUpdate) {
+            PoiDatabase.removeRegion(applicationContext, regionId)
+            configStore.removeInstalledRegion(regionId)
+            configStore.setInstalledRegionVersions(
+                PoiDatabase.installedRegionVersionsFromDb(applicationContext),
+            )
+        }
+
         val result = RegionDownloader().downloadAndInstall(
             context = applicationContext,
             manifest = manifest,
@@ -115,13 +130,25 @@ class RegionDownloadService : Service() {
                 )
                 updateNotification(label, (p.fraction * 100).toInt(), p.etaSeconds)
             },
+            onInstalling = {
+                // Bytes are in; the merge into the live DB runs now. Surface it so the row shows
+                // "Installing…" (not a stale 100% download bar) while it finishes.
+                _liveDownload.value = _liveDownload.value?.copy(
+                    phase = LivePhase.INSTALLING, fraction = 1f, bytesPerSec = 0L, etaSeconds = null,
+                )
+                updateInstallingNotification(label)
+            },
         )
 
         when (result) {
             is RegionDownloader.Result.Installed -> {
-                _liveDownload.value = _liveDownload.value?.copy(phase = LivePhase.INSTALLING)
                 // Record the region as installed and clear the durable download status.
                 configStore.addInstalledRegion(regionId)
+                // installFromFile already wrote the new data_version into the DB; project it
+                // into the observable map so the Update affordance clears without a restart.
+                configStore.setInstalledRegionVersions(
+                    PoiDatabase.installedRegionVersionsFromDb(applicationContext),
+                )
                 configStore.clearDownloadStatus(regionId)
                 _liveDownload.value = LiveDownload(
                     regionId, label, 1f, 0L, 0L, LivePhase.DONE, result.poiCount,
@@ -225,6 +252,24 @@ class RegionDownloadService : Service() {
         nm.notify(NOTIF_ID, buildNotification(label, percent, etaSeconds))
     }
 
+    /** Indeterminate "installing" notification once the download bytes are in. */
+    private fun updateInstallingNotification(label: String) {
+        @Suppress("DEPRECATION")
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            Notification.Builder(this)
+        }
+        val notif = builder
+            .setContentTitle("Installing $label")
+            .setContentText("Adding places to your map…")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setOngoing(true)
+            .setProgress(0, 0, true) // indeterminate
+            .build()
+        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notif)
+    }
+
     /** Live download state, process-wide (UI + service share the process). */
     enum class LivePhase { DOWNLOADING, INSTALLING, DONE, FAILED }
 
@@ -245,6 +290,7 @@ class RegionDownloadService : Service() {
         private const val WAKELOCK_TAG = "resupply:region-download"
         private const val EXTRA_REGION_ID = "region_id"
         private const val EXTRA_REGION_LABEL = "region_label"
+        private const val EXTRA_IS_UPDATE = "is_update"
 
         private val _liveDownload = MutableStateFlow<LiveDownload?>(null)
 
@@ -252,10 +298,22 @@ class RegionDownloadService : Service() {
         val liveDownload: StateFlow<LiveDownload?> = _liveDownload.asStateFlow()
 
         /** Kick off a download of [regionId]. Safe to call from the UI. */
-        fun start(context: Context, regionId: String, label: String) {
+        fun start(context: Context, regionId: String, label: String) =
+            launch(context, regionId, label, isUpdate = false)
+
+        /**
+         * Refresh an already-installed [regionId] to the latest data: same download path, but
+         * the service removes the region's existing rows first so the merge actually replaces
+         * stale/removed POIs (the merge dedups by osm_id, so a plain re-download wouldn't).
+         */
+        fun startUpdate(context: Context, regionId: String, label: String) =
+            launch(context, regionId, label, isUpdate = true)
+
+        private fun launch(context: Context, regionId: String, label: String, isUpdate: Boolean) {
             val intent = Intent(context, RegionDownloadService::class.java)
                 .putExtra(EXTRA_REGION_ID, regionId)
                 .putExtra(EXTRA_REGION_LABEL, label)
+                .putExtra(EXTRA_IS_UPDATE, isUpdate)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {

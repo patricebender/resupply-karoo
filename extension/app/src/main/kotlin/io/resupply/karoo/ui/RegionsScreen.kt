@@ -1,5 +1,9 @@
 package io.resupply.karoo.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,10 +20,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +50,7 @@ import io.resupply.karoo.data.RegionManifestEntry
 import io.resupply.karoo.service.RegionDownloadService.LiveDownload
 import io.resupply.karoo.service.RegionDownloadService.LivePhase
 import io.resupply.karoo.service.RegionDownloadService
+import kotlinx.coroutines.delay
 
 /** A region file bigger than this warrants a "this may be slow off Wi‑Fi" confirm. */
 private const val LARGE_REGION_BYTES = 5L * 1024 * 1024
@@ -66,6 +71,8 @@ fun RegionsScreen(
     regions: List<Region>,
     manifest: Map<String, RegionManifestEntry>,
     installedRegions: Set<String>,
+    /** Installed data version per region id; an update is offered when the manifest outranks it. */
+    installedVersions: Map<String, Int>,
     onWifi: Boolean,
     manifestLoading: Boolean,
     manifestFailed: Boolean,
@@ -76,6 +83,7 @@ fun RegionsScreen(
     /** Region id currently being removed (in-DB, fast), or null. */
     removingRegionId: String?,
     onDownload: (Region) -> Unit,
+    onUpdate: (Region) -> Unit,
     onRemove: (Region) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -105,21 +113,28 @@ fun RegionsScreen(
             icon = Icons.Filled.Download,
             accent = MaterialTheme.colorScheme.primary,
             title = "Download ${region.label}?",
-            message = if (onWifi) {
-                "This is $mb. On Wi‑Fi it's quick."
-            } else {
-                "This is $mb. Without Wi‑Fi it can take a long while — connecting to Wi‑Fi first is much faster."
-            },
+            // This dialog only opens off Wi‑Fi (on Wi‑Fi a large region downloads straight away).
+            message = "This is $mb. Without Wi‑Fi it can take a long while — connecting to Wi‑Fi first is much faster.",
             confirmLabel = "Download",
             onConfirm = { onDownload(region); confirmLarge = null },
             onDismiss = { confirmLarge = null },
         )
     }
 
-    // Decide download vs. confirm: large regions always confirm; small ones just go.
+    // Decide download vs. confirm. On Wi‑Fi even a large region is quick, so just go —
+    // the confirm exists only to warn about a slow off‑Wi‑Fi download. Off Wi‑Fi, a large
+    // region still confirms; small ones always go.
     val startDownload: (Region) -> Unit = { region ->
         val big = (manifest[region.id]?.bytesGz ?: 0L) >= LARGE_REGION_BYTES
-        if (big) confirmLarge = region else onDownload(region)
+        if (big && !onWifi) confirmLarge = region else onDownload(region)
+    }
+
+    // An update is offered only for a directly-installed region (one in [installedRegions],
+    // i.e. `removable`) whose manifest data version outranks the installed one — not for a
+    // state merely covered by an installed country.
+    val hasUpdate: (String) -> Boolean = { id ->
+        id in installedRegions &&
+            (manifest[id]?.dataVersion ?: 0) > (installedVersions[id] ?: 1)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -194,8 +209,10 @@ fun RegionsScreen(
                                 live = live?.takeIf { it.regionId == country.region.id },
                                 failedReason = failedRegionIds[country.region.id],
                                 removing = removingRegionId == country.region.id,
+                                updateAvailable = hasUpdate(country.region.id),
                                 enabled = !busy && manifest.containsKey(country.region.id),
                                 onDownload = { startDownload(country.region) },
+                                onUpdate = { onUpdate(country.region) },
                                 onRemove = { confirmRemove = country.region },
                             )
                             HorizontalDivider()
@@ -213,9 +230,11 @@ fun RegionsScreen(
                                 live = live?.takeIf { it.regionId == country.region.id },
                                 failedReason = failedRegionIds[country.region.id],
                                 removing = removingRegionId == country.region.id,
+                                updateAvailable = hasUpdate(country.region.id),
                                 enabled = !busy && manifest.containsKey(country.region.id),
                                 onExpandToggle = { expanded[country.region.id] = !countryOpen },
                                 onDownload = { startDownload(country.region) },
+                                onUpdate = { onUpdate(country.region) },
                                 onRemove = { confirmRemove = country.region },
                             )
                             HorizontalDivider()
@@ -232,8 +251,10 @@ fun RegionsScreen(
                                     live = live?.takeIf { it.regionId == child.id },
                                     failedReason = failedRegionIds[child.id],
                                     removing = removingRegionId == child.id,
+                                    updateAvailable = hasUpdate(child.id),
                                     enabled = !busy && manifest.containsKey(child.id),
                                     onDownload = { startDownload(child) },
+                                    onUpdate = { onUpdate(child) },
                                     onRemove = { confirmRemove = child },
                                 )
                                 HorizontalDivider()
@@ -246,29 +267,47 @@ fun RegionsScreen(
     }
 }
 
-/** Reactive Wi‑Fi advice — the biggest lever on download speed, so it leads the screen. */
+/**
+ * Reactive Wi‑Fi advice — the biggest lever on download speed. Off Wi‑Fi it shows a
+ * persistent red banner nudging the rider to connect. The moment Wi‑Fi comes on it flips
+ * to a brief green "connected" confirmation, then slides away — no permanent chrome once
+ * downloads are fast. Stays hidden while connected.
+ */
 @Composable
 private fun WifiBanner(onWifi: Boolean) {
-    val bg: Color
-    val fg: Color
-    val icon = if (onWifi) Icons.Filled.Wifi else Icons.Filled.WifiOff
-    val text: String
-    if (onWifi) {
-        bg = MaterialTheme.colorScheme.primaryContainer
-        fg = MaterialTheme.colorScheme.onPrimaryContainer
-        text = "Wi‑Fi connected — downloads are fast."
-    } else {
-        bg = MaterialTheme.colorScheme.errorContainer
-        fg = MaterialTheme.colorScheme.onErrorContainer
-        text = "Turn on Wi‑Fi to download much faster. Without it, a large region can take a long time."
+    // Show the green confirmation only for a short beat after a transition to Wi‑Fi.
+    var showConnected by remember { mutableStateOf(false) }
+    LaunchedEffect(onWifi) {
+        if (onWifi) {
+            showConnected = true
+            delay(2_000)
+            showConnected = false
+        } else {
+            showConnected = false
+        }
     }
-    Row(
-        modifier = Modifier.fillMaxWidth().background(bg).padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.size(10.dp))
-        Text(text, style = MaterialTheme.typography.bodySmall, color = fg)
+
+    // Off Wi‑Fi → red banner; just-connected → green banner; connected+settled → nothing.
+    val visible = !onWifi || showConnected
+    AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut() + shrinkVertically()) {
+        val green = Color(0xFF2E7D32)
+        val onGreen = Color.White
+        val bg = if (onWifi) green else MaterialTheme.colorScheme.errorContainer
+        val fg = if (onWifi) onGreen else MaterialTheme.colorScheme.onErrorContainer
+        val icon = if (onWifi) Icons.Filled.CheckCircle else Icons.Filled.WifiOff
+        val text = if (onWifi) {
+            "Wi‑Fi connected — downloads are fast."
+        } else {
+            "Turn on Wi‑Fi to download much faster. Without it, a large region can take a long time."
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().background(bg).padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(10.dp))
+            Text(text, style = MaterialTheme.typography.bodySmall, color = fg)
+        }
     }
 }
 
@@ -348,9 +387,11 @@ private fun RegionRow(
     live: LiveDownload?,
     failedReason: String?,
     removing: Boolean,
+    updateAvailable: Boolean,
     enabled: Boolean,
     onExpandToggle: () -> Unit = {},
     onDownload: () -> Unit,
+    onUpdate: () -> Unit,
     onRemove: () -> Unit,
 ) {
     val downloading = live?.phase == LivePhase.DOWNLOADING
@@ -376,11 +417,20 @@ private fun RegionRow(
             Text(region.label, style = MaterialTheme.typography.bodyLarge)
             val subtitle = when {
                 installing -> "Installing…"
+                installed && updateAvailable -> "Update available"
                 installed -> "Installed"
                 entry != null -> "${formatMb(entry.bytesGz)} · ${entry.poiCount} places"
                 else -> "Unavailable"
             }
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (installed && updateAvailable && !installing) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
 
             if (downloading && live != null) {
                 Spacer(Modifier.height(4.dp))
@@ -404,7 +454,14 @@ private fun RegionRow(
             downloading || installing ->
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             installed -> Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("✓", style = MaterialTheme.typography.titleMedium)
+                // Update is offered only on directly-installed rows (removable); reuses the
+                // download service via onUpdate (remove-then-refresh).
+                if (removable && updateAvailable) {
+                    Button(onClick = onUpdate, enabled = enabled) { Text("Update") }
+                    Spacer(Modifier.size(4.dp))
+                } else {
+                    Text("✓", style = MaterialTheme.typography.titleMedium)
+                }
                 if (removable) {
                     IconButton(onClick = onRemove, enabled = enabled) {
                         Icon(Icons.Filled.Delete, contentDescription = "Remove ${region.label}")

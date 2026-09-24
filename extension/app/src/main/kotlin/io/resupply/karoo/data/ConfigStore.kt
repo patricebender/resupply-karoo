@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import timber.log.Timber
 
@@ -194,6 +196,33 @@ class ConfigStore(private val context: Context) {
         }
     }
 
+    /**
+     * Installed data version per region id — the observable projection of the DB's
+     * `region_meta` the Regions screen collects to decide "update available"
+     * (manifest.dataVersion > this). The DB stays the source of truth; this map is
+     * rewritten to match it by the startup reconcile ([setInstalledRegionVersions]) and on
+     * each successful (re)install. A region absent from the map is treated as version 1.
+     */
+    val installedRegionVersions: Flow<Map<String, Int>> =
+        context.dataStore.data.map { decodeRegionVersions(it[REGION_VERSIONS_KEY]) }
+
+    /** Overwrite the installed-region-version map atomically (startup reconcile). */
+    suspend fun setInstalledRegionVersions(versions: Map<String, Int>) {
+        context.dataStore.edit { prefs ->
+            prefs[REGION_VERSIONS_KEY] = encodeRegionVersions(versions)
+        }
+    }
+
+    private fun decodeRegionVersions(raw: String?): Map<String, Int> {
+        if (raw.isNullOrEmpty()) return emptyMap()
+        return runCatching { json.decodeFromString(regionVersionsSerializer, raw) }
+            .onFailure { Timber.w(it, "failed to decode installed region versions") }
+            .getOrDefault(emptyMap())
+    }
+
+    private fun encodeRegionVersions(versions: Map<String, Int>): String =
+        json.encodeToString(regionVersionsSerializer, versions)
+
     // --- Region download state (durable across process death) --------------------
     // Only the coarse phase (active/failed) is persisted; live progress/rate is in the
     // download service's memory. On launch, an ACTIVE entry with no running service means a
@@ -256,6 +285,7 @@ class ConfigStore(private val context: Context) {
         val SMART_DISTANCE_KEY = booleanPreferencesKey("smart_distance")
         val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
         val REGIONS_KEY = stringSetPreferencesKey("installed_regions")
+        val REGION_VERSIONS_KEY = stringPreferencesKey("installed_region_versions")
         val FAVORITES_ONLY_KEY = booleanPreferencesKey("favorites_only")
         val FAVORITES_BY_ROUTE_KEY = stringPreferencesKey("favorites_by_route")
         val CURRENT_ROUTE_KEY = stringPreferencesKey("current_route_key")
@@ -265,5 +295,7 @@ class ConfigStore(private val context: Context) {
         private val json = Json { ignoreUnknownKeys = true }
         private val routeFavoritesSerializer = ListSerializer(RouteFavorites.serializer())
         private val downloadStatusSerializer = ListSerializer(RegionDownloadStatus.serializer())
+        private val regionVersionsSerializer =
+            MapSerializer(String.serializer(), Int.serializer())
     }
 }

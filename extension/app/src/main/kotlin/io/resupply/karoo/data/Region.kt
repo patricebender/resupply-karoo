@@ -67,6 +67,13 @@ data class RegionManifestEntry(
     val poiCount: Int,
     /** Lowercase hex SHA-256 of the gzipped file, verified after download. */
     val sha256: String,
+    /**
+     * Monotonic data version of this region file, bumped by the pipeline when it's rebuilt
+     * with fresher OSM data. The Regions screen offers an update when this outranks the
+     * installed version ([PoiDatabase.installedRegionVersionsFromDb]). Defaults to 1 so a
+     * manifest predating the field still parses.
+     */
+    val dataVersion: Int = 1,
 )
 
 /** Reads the bundled region catalog so the picker renders without a network call. */

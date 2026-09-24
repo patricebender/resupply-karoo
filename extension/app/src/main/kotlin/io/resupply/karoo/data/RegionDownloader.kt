@@ -59,6 +59,8 @@ class RegionDownloader {
         entry: RegionManifestEntry,
         scratchDir: File,
         onProgress: (Progress) -> Unit,
+        /** Fires once the bytes are in and the (verify → gunzip → merge) install begins. */
+        onInstalling: () -> Unit,
     ): Result {
         if (manifest.schemaVersion != PoiDatabase.BUNDLED_DB_VERSION) {
             return Result.SchemaMismatch(manifest.schemaVersion, PoiDatabase.BUNDLED_DB_VERSION)
@@ -77,6 +79,9 @@ class RegionDownloader {
             return Result.Failed("download failed")
         }
 
+        // Bytes are down; the rest (checksum, gunzip, DB merge) is the "installing" phase.
+        onInstalling()
+
         val actualSha = sha256Of(tmpGz)
         if (!actualSha.equals(entry.sha256, ignoreCase = true)) {
             Timber.e("sha256 mismatch for ${entry.file}: got $actualSha want ${entry.sha256}")
@@ -93,7 +98,7 @@ class RegionDownloader {
             return Result.Failed("decompression failed")
         }
 
-        val count = PoiDatabase.installFromFile(context, sqlite, entry.id)
+        val count = PoiDatabase.installFromFile(context, sqlite, entry.id, entry.dataVersion)
             ?: return Result.Failed("region file rejected on install")
         return Result.Installed(count)
     }

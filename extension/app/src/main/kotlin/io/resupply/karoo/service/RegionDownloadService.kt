@@ -130,11 +130,18 @@ class RegionDownloadService : Service() {
                 )
                 updateNotification(label, (p.fraction * 100).toInt(), p.etaSeconds)
             },
+            onInstalling = {
+                // Bytes are in; the merge into the live DB runs now. Surface it so the row shows
+                // "Installing…" (not a stale 100% download bar) while it finishes.
+                _liveDownload.value = _liveDownload.value?.copy(
+                    phase = LivePhase.INSTALLING, fraction = 1f, bytesPerSec = 0L, etaSeconds = null,
+                )
+                updateInstallingNotification(label)
+            },
         )
 
         when (result) {
             is RegionDownloader.Result.Installed -> {
-                _liveDownload.value = _liveDownload.value?.copy(phase = LivePhase.INSTALLING)
                 // Record the region as installed and clear the durable download status.
                 configStore.addInstalledRegion(regionId)
                 // installFromFile already wrote the new data_version into the DB; project it
@@ -243,6 +250,24 @@ class RegionDownloadService : Service() {
     private fun updateNotification(label: String, percent: Int, etaSeconds: Long?) {
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIF_ID, buildNotification(label, percent, etaSeconds))
+    }
+
+    /** Indeterminate "installing" notification once the download bytes are in. */
+    private fun updateInstallingNotification(label: String) {
+        @Suppress("DEPRECATION")
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            Notification.Builder(this)
+        }
+        val notif = builder
+            .setContentTitle("Installing $label")
+            .setContentText("Adding places to your map…")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setOngoing(true)
+            .setProgress(0, 0, true) // indeterminate
+            .build()
+        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notif)
     }
 
     /** Live download state, process-wide (UI + service share the process). */

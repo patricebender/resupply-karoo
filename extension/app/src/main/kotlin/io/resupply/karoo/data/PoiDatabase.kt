@@ -197,7 +197,13 @@ class PoiDatabase private constructor(private val dbFile: File) {
             }
         }
 
-        /** Validate a region file's schema version, integrity and non-emptiness. */
+        /**
+         * Validate a region file's schema version and non-emptiness. No `integrity_check`:
+         * a download is already verified byte-for-byte by sha256 against the manifest before
+         * gunzip (see [RegionDownloader]), and the bundled seed rides the APK's own integrity,
+         * so a full-page integrity scan of every row here is redundant. The schema/version and
+         * empty-file cases sha256 does *not* cover are kept (both cheap).
+         */
         private fun validateRegionFile(file: File) {
             val d = SQLiteDatabase.openDatabase(
                 file.absolutePath, null, SQLiteDatabase.OPEN_READONLY,
@@ -209,10 +215,6 @@ class PoiDatabase private constructor(private val dbFile: File) {
                 require(version == BUNDLED_DB_VERSION) {
                     "region file schema v$version != app v$BUNDLED_DB_VERSION"
                 }
-                val integrity = d.rawQuery("PRAGMA integrity_check", null).use { c ->
-                    if (c.moveToFirst()) c.getString(0) else "unknown"
-                }
-                require(integrity == "ok") { "integrity_check: $integrity" }
                 val count = countRows(d)
                 require(count > 0) { "region file has no POIs" }
             } finally {

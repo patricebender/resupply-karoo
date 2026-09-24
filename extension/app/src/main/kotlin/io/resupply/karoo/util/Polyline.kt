@@ -1,6 +1,5 @@
 package io.resupply.karoo.util
 
-import java.util.SortedSet
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -60,15 +59,23 @@ fun distanceToRoute(
     route: List<LatLng>,
     cumulative: DoubleArray,
     p: LatLng,
-): RouteProjection = projectOntoSegments(route, cumulative, p, segments = 1 until route.size)
+): RouteProjection {
+    // Every segment 1..size-1, in order. One-off call (no index), so building the index array
+    // here is fine — the hot per-candidate path goes through RouteIndex instead.
+    val all = IntArray(route.size - 1) { it + 1 }
+    return projectOntoSegments(route, cumulative, p, all, all.size)
+}
 
-/** Shared projection kernel: exact nearest-segment projection of [p] over the given segment
- *  indices (each `i` is the segment from vertex `i-1` to `i`). */
+/** Shared projection kernel: exact nearest-segment projection of [p] over the [count] segment
+ *  indices in [segs] (each is a segment from vertex `i-1` to `i`). Takes a primitive `IntArray`
+ *  (not a boxed `Iterable`) because this is the per-candidate hot loop — the caller reuses one
+ *  buffer across candidates, so no allocation or Integer boxing happens here. */
 private fun projectOntoSegments(
     route: List<LatLng>,
     cumulative: DoubleArray,
     p: LatLng,
-    segments: Iterable<Int>,
+    segs: IntArray,
+    count: Int,
 ): RouteProjection {
     val mPerDegLat = METERS_PER_DEG_LAT
     val mPerDegLng = METERS_PER_DEG_LAT * cos(Math.toRadians(p.lat))
@@ -78,7 +85,8 @@ private fun projectOntoSegments(
     var best = Double.POSITIVE_INFINITY
     var bestAlong = 0.0
     var bestSide = 0
-    for (i in segments) {
+    for (k in 0 until count) {
+        val i = segs[k]
         val a = route[i - 1]
         val b = route[i]
         val ax = a.lng * mPerDegLng; val ay = a.lat * mPerDegLat
@@ -139,33 +147,65 @@ class RouteIndex(
         }
     }
 
-    /** Same result as the linear [distanceToRoute], over only the segments near [p]. */
-    fun project(p: LatLng): RouteProjection {
-        val segs = segmentsNear(p)
-        if (segs.isEmpty()) return RouteProjection(Double.POSITIVE_INFINITY, 0.0, 0)
-        // Ascending segment order so ties (a point equidistant from two segments) break to the
-        // same winner as the linear scan — otherwise `along`/`side` could differ on near-ties.
-        return projectOntoSegments(route, cumulative, p, segs)
+    /**
+     * Reusable per-thread scratch for [project]. Gathering a point's neighbourhood segments was the
+     * hot loop's dominant cost when done with a `sortedSetOf<Int>()` per call — a red-black tree of
+     * ~hundreds of *boxed* Integers, allocated and thrown away for every candidate. This holds a
+     * generation-stamped visited array (dedup without clearing between calls: bump [gen], a segment
+     * is "seen this call" iff `seen[i] == gen`) plus a flat [buf] to collect into. Sized to the
+     * route once and reused across all candidates in a slice. NOT thread-safe — give each parallel
+     * worker its own via [newScratch].
+     */
+    class Scratch(routeSize: Int) {
+        val seen = IntArray(routeSize)      // 0 == "never seen"; gen starts at 1 so the init is valid
+        val buf = IntArray(routeSize)
+        var gen = 0
+    }
+
+    /** A [Scratch] sized for this index's route. One per thread. */
+    fun newScratch() = Scratch(route.size)
+
+    /** Same result as the linear [distanceToRoute], over only the segments near [p]. Allocates a
+     *  one-shot [Scratch]; the per-candidate hot path should reuse one via [project] + [newScratch]. */
+    fun project(p: LatLng): RouteProjection = project(p, newScratch())
+
+    /**
+     * Same result as the linear [distanceToRoute], over only the segments near [p], reusing [s] so
+     * the neighbourhood gather is allocation-free. Fill [s.buf] with the deduped neighbourhood in
+     * ascending order (order matters: ties — a point equidistant from two segments — must break to
+     * the same winner as the linear scan, else `along`/`side` could differ on near-ties).
+     */
+    fun project(p: LatLng, s: Scratch): RouteProjection {
+        val count = gatherNear(p, s)
+        if (count == 0) return RouteProjection(Double.POSITIVE_INFINITY, 0.0, 0)
+        return projectOntoSegments(route, cumulative, p, s.buf, count)
+    }
+
+    /** Fill [s.buf] with the deduped segment indices near [p], ascending, and return the count.
+     *  Dedup uses the generation stamp; sort once at the end for the tie-break invariant. */
+    private fun gatherNear(p: LatLng, s: Scratch): Int {
+        val li = floorCell(p.lat, cellLat)
+        val gi = floorCell(p.lng, cellLng)
+        val gen = ++s.gen
+        var n = 0
+        for (dl in -SEARCH_CELLS..SEARCH_CELLS) for (dg in -SEARCH_CELLS..SEARCH_CELLS) {
+            val list = cells[key(li + dl, gi + dg)] ?: continue
+            for (i in list) {
+                if (s.seen[i] != gen) { s.seen[i] = gen; s.buf[n++] = i }
+            }
+        }
+        if (n > 1) java.util.Arrays.sort(s.buf, 0, n)
+        return n
     }
 
     /**
-     * The route segments the index would test for [p] — its neighbourhood window, deduped and in
-     * ascending order. This is exactly the work [project] does, exposed so a regression test can
-     * assert the per-candidate cost stays O(nearby) rather than O(all segments): a linear-scan
-     * reintroduction would blow this count up to ~`route.size`. Dedups segment indices (a segment
-     * spanning several cells appears in more than one). The window is ±[SEARCH_CELLS]: with a cell
-     * of one reach, a point anywhere in its cell still has ≥ reach of clearance in every direction,
-     * so the true nearest segment (≤ reach away) is always inside the window.
+     * The number of route segments the index would test for [p] — the size of its neighbourhood
+     * window. Exposed so a regression test can assert per-candidate cost stays O(nearby), not
+     * O(all segments): a linear-scan reintroduction blows this up to ~`route.size`. Same window as
+     * [project] (±[SEARCH_CELLS]: with a cell of one reach, a point anywhere in its cell still has
+     * ≥ reach of clearance in every direction, so the true nearest segment ≤ reach away is inside).
      */
-    fun segmentsNear(p: LatLng): SortedSet<Int> {
-        val li = floorCell(p.lat, cellLat)
-        val gi = floorCell(p.lng, cellLng)
-        val segs = sortedSetOf<Int>()
-        for (dl in -SEARCH_CELLS..SEARCH_CELLS) for (dg in -SEARCH_CELLS..SEARCH_CELLS) {
-            cells[key(li + dl, gi + dg)]?.let { segs.addAll(it) }
-        }
-        return segs
-    }
+    fun segmentsNear(p: LatLng): Int = gatherNear(p, newScratch())
 
     private fun key(latIdx: Int, lngIdx: Int): Long =
         (latIdx.toLong() shl 32) xor (lngIdx.toLong() and 0xffffffffL)

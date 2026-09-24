@@ -342,7 +342,7 @@ class PoiQueryTest {
         for (i in longRoute.indices step 7) {
             val v = longRoute[i]
             val p = LatLng(v.lat + 30.0 / 111_320.0, v.lng) // ~30 m off the line
-            worst = maxOf(worst, index.segmentsNear(p).size)
+            worst = maxOf(worst, index.segmentsNear(p))
             sampled++
         }
         assertTrue("sampled a meaningful number of points", sampled > 500)

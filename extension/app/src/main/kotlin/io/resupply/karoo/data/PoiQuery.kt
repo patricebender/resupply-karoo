@@ -405,20 +405,25 @@ private suspend fun projectCandidates(
     candidates: List<CandidateInput>,
     maxRadius: Int,
 ): List<SelectedPoi?> {
-    fun project(c: CandidateInput): SelectedPoi? {
-        val proj = index.project(LatLng(c.lat, c.lng))
-        if (proj.distance > maxRadius) return null
-        return SelectedPoi(c.osmId, proj.distance, proj.along, proj.side)
+    // One reusable Scratch per worker (never shared across threads): the neighbourhood gather
+    // reuses it so projecting a whole slice allocates nothing per candidate.
+    fun projectSlice(slice: List<CandidateInput>): List<SelectedPoi?> {
+        val scratch = index.newScratch()
+        return slice.map { c ->
+            val proj = index.project(LatLng(c.lat, c.lng), scratch)
+            if (proj.distance > maxRadius) null
+            else SelectedPoi(c.osmId, proj.distance, proj.along, proj.side)
+        }
     }
 
     val cores = Runtime.getRuntime().availableProcessors()
     if (cores < 2 || candidates.size < PARALLEL_PROJECT_MIN) {
-        return candidates.map(::project)
+        return projectSlice(candidates)
     }
     val sliceSize = (candidates.size + cores - 1) / cores
     return coroutineScope {
         candidates.chunked(sliceSize)
-            .map { slice -> async(Dispatchers.Default) { slice.map(::project) } }
+            .map { slice -> async(Dispatchers.Default) { projectSlice(slice) } }
             .awaitAll()
             .flatten()
     }

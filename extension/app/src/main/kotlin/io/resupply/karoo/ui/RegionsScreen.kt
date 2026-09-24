@@ -8,8 +8,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -399,10 +401,13 @@ private fun RegionRow(
     val done = live?.phase == LivePhase.DONE
     val failed = live?.phase == LivePhase.FAILED || failedReason != null
 
+    // An expandable row's chevron already provides the visual indent, so don't also pad it in —
+    // that double-cost is what squeezed "Germany" onto two lines. Non-expandable rows keep their
+    // catalog indent for the hierarchy.
+    val startPad = if (expandable != null) 4 else indent.start
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = indent.start.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = startPad.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         if (expandable != null) {
             IconButton(onClick = onExpandToggle, modifier = Modifier.size(32.dp)) {
@@ -411,7 +416,6 @@ private fun RegionRow(
                     contentDescription = if (expandable) "Collapse ${region.label}" else "Expand ${region.label}",
                 )
             }
-            Spacer(Modifier.size(8.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(region.label, style = MaterialTheme.typography.bodyLarge)
@@ -450,28 +454,49 @@ private fun RegionRow(
         }
 
         Spacer(Modifier.size(8.dp))
+        // Trailing actions never shrink the label: the Column above owns the flexible width
+        // (weight 1f) and this cluster wraps to its own content. Keep the buttons compact so a
+        // narrow Karoo row still fits "Germany" + "Update" + the trash on one line.
         when {
             downloading || installing ->
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-            installed -> Row(verticalAlignment = Alignment.CenterVertically) {
+            installed -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 // Update is offered only on directly-installed rows (removable); reuses the
                 // download service via onUpdate (remove-then-refresh).
                 if (removable && updateAvailable) {
-                    Button(onClick = onUpdate, enabled = enabled) { Text("Update") }
-                    Spacer(Modifier.size(4.dp))
+                    CompactActionButton("Update", onClick = onUpdate, enabled = enabled)
                 } else {
                     Text("✓", style = MaterialTheme.typography.titleMedium)
                 }
                 if (removable) {
-                    IconButton(onClick = onRemove, enabled = enabled) {
+                    IconButton(onClick = onRemove, enabled = enabled, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Filled.Delete, contentDescription = "Remove ${region.label}")
                     }
                 }
             }
-            else -> Button(onClick = onDownload, enabled = enabled) {
-                Text(if (failed) "Retry" else "Get")
-            }
+            else -> CompactActionButton(
+                if (failed) "Retry" else "Get",
+                onClick = onDownload,
+                enabled = enabled,
+            )
         }
+    }
+}
+
+/** A slim pill button sized for the narrow Karoo region rows — trims the default Material
+ *  Button's min width + padding so the row's text label keeps its space. */
+@Composable
+private fun CompactActionButton(label: String, onClick: () -> Unit, enabled: Boolean) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 32.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
 }
 

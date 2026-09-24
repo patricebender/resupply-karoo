@@ -368,9 +368,14 @@ class MainActivity : ComponentActivity() {
                     statuses.filter { it.phase == RegionDownloadStatus.Phase.FAILED }
                         .associate { it.regionId to (it.reason ?: "Download failed") }
                 }
-                // Fetch the manifest once on entry (for sizes/counts) if we don't have it.
+                // Re-fetch the manifest on every entry into the Regions screen, not just when
+                // empty: it's how the app learns a region has a newer dataVersion (→ "Update
+                // available"). Caching it for the process lifetime meant a rebuild published after
+                // first open was never seen. The file is tiny (~40 KB, one bridge request) and
+                // loadManifest keeps the last good value on a failed refresh, so this is cheap and
+                // safe. The spinner only shows on the very first (empty) load.
                 LaunchedEffect(Unit) {
-                    if (regionManifest.value.isEmpty()) loadManifest()
+                    loadManifest(showSpinner = regionManifest.value.isEmpty())
                 }
                 RegionsScreen(
                     regions = regionCatalog,
@@ -574,9 +579,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Fetch the region manifest for per-region download sizes/place counts (bridge, small). */
-    private fun loadManifest() {
-        manifestLoading.value = true
+    /**
+     * Fetch the region manifest (per-region sizes/counts + dataVersion for "update available").
+     * Called on every entry into the Regions screen so a newly-published rebuild is seen. Keeps
+     * the last good value on failure. [showSpinner] gates the loading row — false for a silent
+     * background refresh when we already have a manifest to display.
+     */
+    private fun loadManifest(showSpinner: Boolean = true) {
+        if (showSpinner) manifestLoading.value = true
         manifestFailed.value = false
         lifecycleScope.launch {
             val manifest = withKarooConnection(applicationContext) { system ->
@@ -584,7 +594,9 @@ class MainActivity : ComponentActivity() {
             }
             manifestLoading.value = false
             if (manifest == null) {
-                manifestFailed.value = true
+                // Only surface a failure when we have nothing to show; a failed background refresh
+                // silently keeps the last good manifest.
+                if (regionManifest.value.isEmpty()) manifestFailed.value = true
             } else {
                 regionManifest.value = manifest.regions.associateBy { it.id }
             }

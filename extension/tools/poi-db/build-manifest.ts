@@ -31,6 +31,22 @@ import { REGIONS, regionById } from "./regions.js";
 const HERE = new URL(".", import.meta.url).pathname;
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
 
+// Every full CI rebuild ships fresher OSM-derived data, so the manifest's per-region
+// dataVersion must strictly increase for the app to offer "Update available". The workflow
+// always rebuilds the whole catalog, so a single monotonic number for the run is correct for
+// every region — REGION_DATA_VERSION is set to the GitHub run number. Absent (local builds) we
+// fall back to the hand-maintained regions.ts dataVersion, so a local dry run doesn't pretend to
+// be a new release. Must be a positive integer if set.
+const runDataVersion: number | null = (() => {
+  const raw = process.env.REGION_DATA_VERSION;
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`REGION_DATA_VERSION must be a positive integer, got "${raw}"`);
+  }
+  return n;
+})();
+
 const DEFAULT_BASE_URL =
   "https://github.com/patricebender/resupply-karoo/releases/download/regions-latest/";
 const baseUrl = (process.env.REGIONS_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/?$/, "/");
@@ -128,7 +144,7 @@ function main(): void {
       bytesRaw: raw.length,
       poiCount: poiCountOf(raw),
       sha256: createHash("sha256").update(gz).digest("hex"),
-      dataVersion: region.dataVersion,
+      dataVersion: runDataVersion ?? region.dataVersion,
     });
   }
 

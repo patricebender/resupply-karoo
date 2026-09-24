@@ -38,7 +38,7 @@ sqlite-android = { module = "com.github.requery:sqlite-android", version = "3.49
 timber = { module = "com.jakewharton.timber:timber", version = "5.0.1" }
 # Direct HTTP for region downloads over WiFi (streamed, uncapped) — bypasses the
 # Karoo bridge's 100 KB per-request limit. Bridge stays for small mid-ride lookups.
-okhttp = { module = "com.squareup.okhttp3:okhttp", version = "4.12.0" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version = "5.5.0" }
 junit = { module = "junit:junit", version = "4.13.2" }
 # Compose-native QR code rendering for the detail screen website. Pinned to 1.0.1:
 # 1.1.0+ is compiled with Kotlin 2.3.0, whose metadata the project's 2.0.0 compiler

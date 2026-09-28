@@ -10,6 +10,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
+import timber.log.Timber
 import kotlin.math.cos
 import kotlin.math.roundToInt
 
@@ -152,23 +153,20 @@ class PoiQuery(private val database: PoiDatabase) {
         return ArrayList(byId.values)
     }
 
-    /** R*Tree range-scan within a bbox, across all categories. */
+    /** Lat/lng index range-scan within a bbox, across all categories. */
     private fun candidatesInBox(
         minLat: Double, maxLat: Double, minLng: Double, maxLng: Double,
     ): List<Row> {
-        // R*Tree constraints need numeric literals; the bbox values are our own
-        // computed doubles (no user input → no injection). All categories are fetched;
-        // the enabled-category filter is applied downstream at render time, so a rider
-        // can toggle a category on/off without rebuilding.
-        val sql = """
-            SELECT p.osm_id, p.lat, p.lng, p.type, p.name, p.tags
-            FROM poi_rtree r
-            JOIN poi p ON p.id = r.id
-            WHERE r.maxLat >= $minLat AND r.minLat <= $maxLat
-              AND r.maxLng >= $minLng AND r.minLng <= $maxLng
-        """.trimIndent()
+        val t0 = System.currentTimeMillis()
         val rows = ArrayList<Row>()
-        database.writableDatabase().rawQuery(sql, null).use { c ->
+        database.writableDatabase().rawQuery(
+            """
+            SELECT osm_id, lat, lng, type, name, tags
+            FROM poi
+            WHERE lat >= ? AND lat <= ? AND lng >= ? AND lng <= ?
+            """.trimIndent(),
+            arrayOf(minLat.toString(), maxLat.toString(), minLng.toString(), maxLng.toString()),
+        ).use { c ->
             while (c.moveToNext()) {
                 rows.add(
                     Row(
@@ -182,6 +180,7 @@ class PoiQuery(private val database: PoiDatabase) {
                 )
             }
         }
+        Timber.d("candidatesInBox: ${rows.size} rows in ${System.currentTimeMillis() - t0} ms")
         return rows
     }
 

@@ -121,7 +121,7 @@ fun RegionsScreen(
             accent = MaterialTheme.colorScheme.primary,
             title = "Download ${region.label}?",
             // This dialog only opens off Wi‑Fi (on Wi‑Fi a large region downloads straight away).
-            message = "This is $mb. Without Wi‑Fi it can take a long while — connecting to Wi‑Fi first is much faster.",
+            message = "This is $mb. Without Wi‑Fi it can take a long while. Connect to Wi‑Fi first for a much faster download.",
             confirmLabel = "Download",
             onConfirm = { onDownload(region); confirmLarge = null },
             onDismiss = { confirmLarge = null },
@@ -334,7 +334,7 @@ private fun WifiBanner(onWifi: Boolean) {
         val fg = if (onWifi) onGreen else MaterialTheme.colorScheme.onErrorContainer
         val icon = if (onWifi) Icons.Filled.CheckCircle else Icons.Filled.WifiOff
         val text = if (onWifi) {
-            "Wi‑Fi connected — downloads are fast."
+            "Wi‑Fi connected. Downloads are fast."
         } else {
             "Turn on Wi‑Fi to download much faster. Without it, a large region can take a long time."
         }

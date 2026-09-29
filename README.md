@@ -5,12 +5,12 @@
   <img src="extension/app/brand/resupply-wordmark-light.svg" alt="Resupply" width="420">
 </picture>
 
-**for Karoo — offline POIs along your route, no signal needed**
+**for Karoo. Offline POIs along your route, no signal needed.**
 
 </div>
 
 A [Hammerhead Karoo](https://www.hammerhead.io/) extension that turns a loaded route into an
-offline roadbook of resupply stops along the way — food, water, coffee, bike shops, fuel — so
+offline roadbook of resupply stops along the way (food, water, coffee, bike shops, fuel), so
 you can plan refuels without cellular signal. No route loaded? It finds resupply around you,
 live.
 
@@ -21,7 +21,7 @@ live.
 ## Features
 
 - **Offline resupply along a route.** Finds resupply stops along the route you're riding, no
-  signal needed — the whole POI database rides along inside the app. The build runs on-device
+  signal needed. The whole POI database rides along inside the app, so the build runs on-device
   and returns in a second or two.
 
   <img src="docs/media/01-instant-build.gif" alt="Building the roadbook in seconds" width="280">
@@ -37,8 +37,8 @@ live.
   <img src="docs/media/04-live-mode.gif" alt="Live mode showing resupply around your location" width="280">
 
 - **12 categories.** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops, Fuel
-  stations, Ice Cream, Hotels, Pharmacies, ATMs, and Campgrounds — toggle any of them on or off,
-  on the fly. Pins on the map always match your active filter.
+  stations, Ice Cream, Hotels, Pharmacies, ATMs, and Campgrounds. Toggle any of them on or off
+  on the fly; pins on the map always match your active filter.
 
   <img src="docs/media/categories.png" alt="Category toggles with per-category counts" width="280">
 
@@ -47,13 +47,13 @@ live.
 
   <img src="docs/media/water.png" alt="Water source detail marked safe to refill" width="280">
 
-- **Downloadable regions.** Ships with a bundled seed and downloads more in-app — a single
+- **Downloadable regions.** Ships with a bundled seed and downloads more in-app: a single
   Bundesland, or whole countries across Europe and North America.
 
   <img src="docs/media/02-regions-download.gif" alt="Browsing and downloading a region in-app" width="280">
 
 - **Data fields for the ride view.** Put upcoming resupply, your favorites, or any single
-  category straight on your data pages — distance ahead, detour, and the next stops.
+  category straight on your data pages: distance ahead, detour, and the next stops.
 
   <img src="docs/media/datafield.png" alt="In-ride data field showing upcoming water" width="280">
 
@@ -74,25 +74,25 @@ live.
 
 ## How it works
 
-The **`extension/`** directory is the whole app — an on-device Karoo app (Kotlin,
+The **`extension/`** directory is the whole app: an on-device Karoo app (Kotlin,
 [karoo-ext](https://github.com/hammerheadnav/karoo-ext) SDK). It reads the loaded route, lets
 you set a detour radius and category toggles, and queries the **spatial SQLite database
 bundled with the app** (an R*Tree corridor search refined against the route line) to find
-POIs — no server, fully offline. With no route loaded, the same search runs around your
+POIs. No server, fully offline. With no route loaded, the same search runs around your
 current location instead. Results render as typed map pins and in the Waybook list, ordered by
 distance along the route.
 
 A rider can pick a detour distance from tight 100/250 m up to 5 km, and rebuild either from an
 in-app Build button or an in-ride `BonusAction`. Density is capped adaptively so a city doesn't
 flood the map while a quiet stretch still shows what's there. The only network calls are the
-optional, on-demand Google Places and Wikipedia lookups; they route device→provider through the
-Karoo HTTP bridge, so they work over a paired phone, not just WiFi.
+optional, on-demand Google Places and Wikipedia lookups; they route device to provider through
+the Karoo HTTP bridge, so they work over a paired phone, not just WiFi.
 
 POI data comes from [OpenStreetMap](https://www.openstreetmap.org/). The bundled database is
 generated offline by **`extension/tools/poi-db/`** (downloads a regional extract, filters to
 our POI tags, loads a spatial SQLite) and baked into the app as an asset the extension seeds
 on first run. The bundled seed ships **all of Germany**; riders can download other regions
-in-app (a single Bundesland, or other countries) from the region picker — the app fetches a
+in-app (a single Bundesland, or other countries) from the region picker, which fetches a
 compact per-region file and installs it on-device.
 
 See [FOUNDATION.md](FOUNDATION.md) for the full architecture and design.
@@ -108,7 +108,7 @@ via the Hammerhead Companion app (paste the release APK URL). For development, u
 ### Extension
 
 Requires JDK 17 and the Android SDK. karoo-ext is on GitHub Packages (auth required even
-though it's public) — put credentials in `~/.gradle/gradle.properties`:
+though it's public). Put credentials in `~/.gradle/gradle.properties`:
 
 ```properties
 gpr.user=<your-github-username>
@@ -144,7 +144,7 @@ See [`extension/tools/poi-db/README.md`](extension/tools/poi-db/README.md) for o
 
 The extension is versioned with [release-please](https://github.com/googleapis/release-please)
 and Conventional Commits. `feat:`/`fix:` commits touching `extension/**` on `main` keep a
-Release PR updated; merging it cuts the release — tag `extension-vX.Y.Z`, a GitHub Release,
+Release PR updated; merging it cuts the release: tag `extension-vX.Y.Z`, a GitHub Release,
 and a CI-built APK attached as a release asset. Normal pushes don't publish an APK. See
 [docs/releasing.md](docs/releasing.md).
 
@@ -155,7 +155,7 @@ POI data from OpenStreetMap contributors, © OpenStreetMap contributors, availab
 
 Opening hours and contact details for a POI can be filled in on demand from **Google Maps**
 (Places API) when OpenStreetMap has none. That content is shown live with a Google Maps
-attribution and is not stored on the device — only the resolved Place ID is cached, which
+attribution and is not stored on the device. Only the resolved Place ID is cached, which
 the Places policy permits.
 
 ## License

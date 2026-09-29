@@ -1,15 +1,15 @@
-# Resupply for Karoo 3 — Foundation
+# Resupply for Karoo 3: Foundation
 
 A Karoo 3 extension that turns a loaded route into an offline roadbook of resupply stops
 along the way (food, water, coffee, bike shops, fuel), so a rider can plan refuels without
 cellular signal. With no route loaded it finds resupply around the rider's current location
 instead. What sets it apart:
 
-- **Configurable detour distance** — how far off the route to search for POIs.
-- **Category toggles** — twelve POI categories, switched on/off live without rebuilding.
-- **Favorites** — star the stops you're planning for; refine the roadbook down to just those.
-- **Safe-water filter** — drinkable water only by default.
-- **Ride-view data fields** — upcoming resupply, favorites, or a single category on a data page.
+- **Configurable detour distance:** how far off the route to search for POIs.
+- **Category toggles:** twelve POI categories, switched on/off live without rebuilding.
+- **Favorites:** star the stops you're planning for; refine the roadbook down to just those.
+- **Safe-water filter:** drinkable water only by default.
+- **Ride-view data fields:** upcoming resupply, favorites, or a single category on a data page.
 
 This document describes the architecture and design as they stand. Some earlier design
 rationale (rejected data sources, an abandoned backend) is kept at the end for context.
@@ -27,7 +27,7 @@ rationale (rejected data sources, an abandoned backend) is kept at the end for c
 
 ## Architecture
 
-One part: the **`extension/`** Kotlin/Android app. Everything runs on the device — there is
+One part: the **`extension/`** Kotlin/Android app. Everything runs on the device; there is
 no backend and no live third-party query dependency at build time.
 
 ```
@@ -57,7 +57,7 @@ no backend and no live third-party query dependency at build time.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Both build triggers — the in-app "Build" button and the in-ride `BonusAction` — call the
+Both build triggers (the in-app "Build" button and the in-ride `BonusAction`) call the
 same `BuildController.runBuild()`, serialized by a process-wide mutex so overlapping
 triggers can't race. The controller resolves the route (or, with no route, the current
 location), runs the spatial query, and publishes the result through `ResupplyRepository`.
@@ -75,7 +75,7 @@ POIs live in a spatial SQLite database:
   (`pois-germany.sqlite`, with a `regions.json` catalog of downloadable regions). On first
   run the app copies the asset into its files dir. When the bundled asset's version
   (`BUNDLED_DB_VERSION` in `data/PoiDatabase.kt`, matched to the DB's `PRAGMA user_version`)
-  is newer than the installed copy, the app re-seeds — so schema/tag changes reach existing
+  is newer than the installed copy, the app re-seeds, so schema/tag changes reach existing
   installs. A stale copy is a rebuildable read-only cache, safe to overwrite.
 - **Multiple regions:** rows carry a `region_id`, and the rider can download and install
   additional per-region files in-app (`ui/RegionsScreen.kt`) beyond the bundled Germany seed.
@@ -101,7 +101,7 @@ POIs live in a spatial SQLite database:
 - **Categories:** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops, Fuel
   stations, Ice Cream, Hotels. Default enabled: **Water + Bike**. Each maps to a set of OSM
   tags and to a `Symbol.POI` type for the map pin (table below). Toggling a category is a
-  **render-time filter over the already-built set** — no rebuild.
+  **render-time filter over the already-built set**, no rebuild.
 - **Safe-water filter (`safeWaterOnly`, default on):** water POIs are narrowed to drinkable
   sources; unnamed/untagged fountains, springs and wells of unknown potability are hidden
   until the rider opts in. Also a render-time filter, and only bites while Water is enabled.
@@ -117,11 +117,11 @@ Config is persisted with Jetpack DataStore (`data/ConfigStore.kt`).
 The extension registers karoo-ext data types (`extension/*DataType.kt`) so a rider can put
 resupply on a data page, updated live as the ride progresses:
 
-- **Upcoming POIs** (`UpcomingPoisDataType`) — the next stops ahead across all enabled
+- **Upcoming POIs** (`UpcomingPoisDataType`): the next stops ahead across all enabled
   categories, rotating through them in a small slot.
-- **Favorites** (`FavoritePoisDataType`) — the same layout narrowed to starred POIs; with no
+- **Favorites** (`FavoritePoisDataType`): the same layout narrowed to starred POIs; with no
   route loaded it falls back to nearby POIs, so it stays useful in live mode.
-- **Per-category** (`CategoryPoiDataType`, one per `Category`) — pinned to a single amenity;
+- **Per-category** (`CategoryPoiDataType`, one per `Category`): pinned to a single amenity;
   shows an "Enable <Category>" prompt when that category is off.
 
 All three share `UpcomingPoisBaseDataType` for streaming, route-progress and the
@@ -132,15 +132,15 @@ no-roadbook/off-route states.
 This is a glanceable device, often used mid-ride with gloves. The UI must always answer
 "what is happening and what can I do?" without the user guessing.
 
-- **Every async action has visible state.** A build is a state machine —
-  `Idle → Building → Success(count, per-category breakdown, timestamp) | Error(message)` —
+- **Every async action has visible state.** A build is a state machine
+  (`Idle → Building → Success(count, per-category breakdown, timestamp) | Error(message)`)
   and the UI is a function of that state. Source of truth: `BuildState` in
   `ResupplyRepository` (a `StateFlow` the UI collects).
 - **Controls disable while busy.** Build and config inputs disable during a build; the
   process-wide mutex in `BuildController` prevents concurrent builds regardless of trigger.
 - **Confirm success glanceably.** Success shows the POI count with a relative timestamp and
   a per-category breakdown; the button becomes "Rebuild". Errors are shown in red with a
-  clear message (e.g. "No POIs here — download this region?" when the route leaves the
+  clear message (e.g. "No POIs here. Download this region?" when the route leaves the
   installed coverage).
 - **Fail loud, never hang.** Route/location reads are bounded by a timeout; a stuck read
   surfaces as an Error state, not a frozen screen.
@@ -152,20 +152,20 @@ This is a glanceable device, often used mid-ride with gloves. The UI must always
 
 ## Screens (Compose, `MainActivity` + `ui/`)
 
-No navigation framework — a small `sealed interface Screen` the host switches on, so list
+No navigation framework, just a small `sealed interface Screen` the host switches on, so list
 scroll state is preserved across navigation.
 
-- **Waybook** (`ui/WaybookScreen.kt`) — the route view: a header with build/clear/settings
+- **Waybook** (`ui/WaybookScreen.kt`) is the route view: a header with build/clear/settings
   shortcuts, a "favorites only" star, and a live build-status line; a route distance strip
   with POI dots (`ui/RouteStrip.kt`), and a scrollable list of POIs along the route ordered
   by distance-along-route. Rows show an open/closed badge when hours are known and a star to
   favorite the stop.
-- **Settings** (`ui/SettingsScreen.kt`) — build settings: the Build action in the top bar
+- **Settings** (`ui/SettingsScreen.kt`) holds build settings: the Build action in the top bar
   (always visible) with build status below it, the detour-radius slider, category toggles
   (`ui/CategoryChipGrid.kt`), the safe-water switch, and Clear at the bottom.
-- **Regions** (`ui/RegionsScreen.kt`) — the region picker: installed vs downloadable regions,
+- **Regions** (`ui/RegionsScreen.kt`) is the region picker: installed vs downloadable regions,
   with an in-app download that fetches and installs a per-region POI file.
-- **Detail** (`ui/PoiDetailScreen.kt`) — a centered hero (category disc, name, type) then
+- **Detail** (`ui/PoiDetailScreen.kt`) is a centered hero (category disc, name, type) then
   grouped cards: open/closed status pill + route context (distance-along / detour), the
   weekday opening-hours table, contact (address + phone), a scannable website QR, and an
   on-demand description. Data is from the DB tags; hours and description have optional
@@ -176,20 +176,20 @@ scroll state is preserved across navigation.
 All POI data is offline. Two per-POI enrichments make on-demand network calls, routed
 through the **Karoo HTTP bridge** (so they work over the paired phone, not just WiFi):
 
-- **Wikipedia description** (`data/WikipediaClient.kt`) — fetched when a POI has a
+- **Wikipedia description** (`data/WikipediaClient.kt`): fetched when a POI has a
   `wikipedia`/`wikidata` tag, cached in memory for the session. Falls back to the OSM
   `description` tag when there's no Wikipedia link.
-- **Google Places opening hours** (`data/PlacesClient.kt`) — offered only when OSM has no
+- **Google Places opening hours** (`data/PlacesClient.kt`): offered only when OSM has no
   `opening_hours`, the category is one where hours matter (`GOOGLE_HOURS_CATEGORIES`:
   Supermarkets, Café & Bar, Restaurants, Fuel, Ice Cream, Hotels, Bike shops), and a
   `PLACES_API_KEY` is configured at build time. The
   resolved **Place ID** is persisted (Maps ToS permits caching Place IDs indefinitely); the
-  **hours themselves are never persisted** — kept in memory with a short TTL and re-fetched,
+  **hours themselves are never persisted**, kept in memory with a short TTL and re-fetched,
   per Maps ToS. Opening-hours parsing of the OSM `opening_hours` string lives in
   `data/OpeningHours.kt` (a pragmatic subset: weekday table, 24/7, "opens at", seasonal
   fallback). Whenever a Places lookup supplied any field shown on the detail screen (hours,
   address, website, phone), the **Google Maps wordmark** is rendered once at the bottom of
-  that screen (`drawable/ic_google_maps_wordmark.xml`, tinted to the surface) — the Places
+  that screen (`drawable/ic_google_maps_wordmark.xml`, tinted to the surface); the Places
   policy requires the attribution to name "Google Maps" and stay visible alongside its
   content.
 
@@ -203,7 +203,7 @@ regional Geofabrik extract → `osmium tags-filter` to just our POI tags → exp
 → load the `poi` table + R*Tree with an allowlisted set of tags (`opening_hours`, `website`,
 `phone`, `addr:*`, `wikipedia`, …). The **bundled seed ships all of Germany**
 (`pois-germany.sqlite`); riders can download other regions in-app from the region picker
-(`ui/RegionsScreen.kt`) — a per-region file fetched and installed on-device, keyed by
+(`ui/RegionsScreen.kt`): a per-region file fetched and installed on-device, keyed by
 `region_id`. Coverage and the region list are an `OSM_REGION` / `regions.ts` change (see
 `extension/tools/poi-db/README.md`).
 
@@ -233,15 +233,15 @@ The category set must stay in sync across three places: the Kotlin `Category` en
 ## karoo-ext facts we rely on (verified in source)
 
 - `OnNavigationState → NavigatingRoute.routePolyline` (Google encoded polyline, precision 5).
-- `MakeHttpRequest` / `OnHttpResponse.Complete` — HTTP via the Karoo (WiFi or paired phone),
+- `MakeHttpRequest` / `OnHttpResponse.Complete`: HTTP via the Karoo (WiFi or paired phone),
   used only for the optional enrichments.
-- `ShowSymbols` / `HideSymbols` + `Symbol.POI(type=…)` — map effects; a POI type string that
+- `ShowSymbols` / `HideSymbols` + `Symbol.POI(type=…)`: map effects; a POI type string that
   doesn't match a `Symbol.POI.Types` constant renders the generic pin.
-- `BonusAction` (declared in `extension_info.xml`) + `onBonusAction(actionId)` — in-ride
+- `BonusAction` (declared in `extension_info.xml`) + `onBonusAction(actionId)`: in-ride
   trigger.
-- `DataTypeImpl` + `startView(ViewConfig)` + `GlanceRemoteViews` — custom data fields
+- `DataTypeImpl` + `startView(ViewConfig)` + `GlanceRemoteViews`: custom data fields
   (upcoming, favorites, per-category) registered by `ResupplyExtension`, rendered with Glance.
-- **`startMap` fires only while navigating a route** — it is not a settings toggle. Pins
+- **`startMap` fires only while navigating a route.** It is not a settings toggle. Pins
   appear once a route is being navigated; leaving the route clears them.
 
 ## Releasing
@@ -250,7 +250,7 @@ The extension is versioned with semantic versioning driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional Commits.
 `feat:`/`fix:` commits touching `extension/**` on `main` keep a Release PR updated (bumping
 `versionName` in `extension/app/build.gradle.kts` and `extension/CHANGELOG.md`); merging that
-PR cuts the release — tag `extension-vX.Y.Z`, GitHub Release, and a CI-built APK attached as
+PR cuts the release: tag `extension-vX.Y.Z`, GitHub Release, and a CI-built APK attached as
 a release asset. Normal pushes do not publish an APK. Full detail in
 [docs/releasing.md](docs/releasing.md).
 
@@ -258,7 +258,7 @@ a release asset. Normal pushes do not publish an APK. Full detail in
 
 - **Fast loop:** USB + `adb`, `./gradlew :app:installDebug` onto the real Karoo
   (Android 12 / API 32). `startMap` activates once you navigate a route; use a continuous
-  `adb logcat` capture — timed captures miss the trigger.
+  `adb logcat` capture; timed captures miss the trigger.
 - **Distribution:** install the release APK by pasting its URL into the Hammerhead Companion
   app.
 
@@ -291,7 +291,7 @@ resupply-karoo/
 
 ## Appendix: earlier design decisions (superseded)
 
-For context — none of this is in the current app.
+For context only; none of this is in the current app.
 
 **Data source.** Google Maps was ruled out (Places ToS forbids the offline caching a
 roadbook needs; Nearby Search is per-point priced, which multiplies badly over a route).

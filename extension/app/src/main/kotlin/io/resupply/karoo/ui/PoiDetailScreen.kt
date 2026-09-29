@@ -330,14 +330,14 @@ private fun DrinkingWaterSection(subtype: String, potability: String) {
         "yes" -> State("Drinking water", openGreen, Icons.Filled.WaterDrop, "Safe to refill here.")
         "no" -> State(
             "Not drinking water", closedRed, Icons.Filled.DoNotDisturbOn,
-            "Marked as non-potable — don't drink.",
+            "Marked as non-potable. Don't drink.",
         )
         else -> State(
             "Potability unknown", seasonalGrey, Icons.AutoMirrored.Filled.HelpOutline,
             if (subtype == "graveyard") {
-                "Cemeteries almost always have a tap, but it isn't mapped — not confirmed."
+                "Cemeteries almost always have a tap, but it isn't mapped. Not confirmed."
             } else {
-                "Not tagged as potable — treat before drinking if unsure."
+                "Not tagged as potable. Treat before drinking if unsure."
             },
         )
     }

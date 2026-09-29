@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -142,10 +143,14 @@ fun WaybookScreen(
     // filter is on. Route-mode only — both are ignored/hidden when there's no route.
     favoritePoiIds: Set<String>,
     favoritesOnly: Boolean,
+    // Installed region ids — used by the empty state to gate the Find button and surface a hint
+    // when no data is available to search against.
+    installedRegions: Set<String>,
     onToggleFavorite: (Poi, Boolean) -> Unit,
     onToggleFavoritesFilter: () -> Unit,
     onBuild: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenRegions: () -> Unit,
     onOpenPoi: (Poi) -> Unit,
     // Resolves a POI's hours (OSM, or a Google result already fetched this session) so
     // the list badge shows for both sources once known.
@@ -241,7 +246,9 @@ fun WaybookScreen(
                 buildState,
                 hasFix = riderLocation != null,
                 paused = nearbyPaused,
+                hasData = installedRegions.isNotEmpty(),
                 onBuild = onBuild,
+                onOpenRegions = onOpenRegions,
             )
             return@Column
         }
@@ -954,7 +961,11 @@ private fun EmptyState(
     hasFix: Boolean,
     // Rider paused live search → the nearby face shows the invitation instead of "No places nearby".
     paused: Boolean,
+    // Whether any region data is installed. With no data, the route face disables Find and shows a
+    // hint pointing the rider to Settings → Data.
+    hasData: Boolean,
     onBuild: () -> Unit,
+    onOpenRegions: () -> Unit,
 ) {
     val loaded = routeState as? RouteState.Loaded
     // Pick the face by whether a ROUTE is loaded, not by whether a build is running: a nearby
@@ -962,7 +973,7 @@ private fun EmptyState(
     // vanish and be replaced by the route-oriented "Tracing your route…" copy — an abrupt swap
     // between two different layouts. Each face animates its own mark while building.
     if (loaded != null) {
-        RouteReadyState(loaded, buildState, onBuild)
+        RouteReadyState(loaded, buildState, hasData, onBuild, onOpenRegions)
     } else {
         NearbyReadyState(buildState, hasFix, paused, onBuild)
     }
@@ -974,10 +985,18 @@ private fun EmptyState(
  * animates in place (route traced, waypoints lighting up), the title swaps to the live build
  * phase, the distance line stays put, and the button dims + goes inert. [route] may be null only
  * transiently while a build runs before the signal has settled.
+ *
+ * [hasData] gates the Find button: with nothing installed the button is disabled and a subdued
+ * hint points the rider to Settings → Data rather than letting them kick off a search that
+ * returns nothing. After a search that returned no results ([BuildState.Error] after a real
+ * attempt) a similar hint suggests the route may be outside an installed region.
  */
 @Composable
-private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, onBuild: () -> Unit) {
+private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, hasData: Boolean, onBuild: () -> Unit, onOpenRegions: () -> Unit) {
     val building = buildState is BuildState.Building
+    // A route search ran and returned nothing because the corridor is outside an installed region.
+    // Only true for that specific error — not for connectivity failures or GPS timeouts.
+    val searchedEmpty = !building && (buildState as? BuildState.Error)?.regionMissing == true
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1017,11 +1036,38 @@ private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, o
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(16.dp))
-        // The primary action: find places along the loaded route. Same dark pill as the nearby
-        // CTA; while building it dims + goes inert (the title above carries the phase), matching
-        // the nearby face.
-        FindPlacesButton(onClick = onBuild, enabled = !building)
+        // Feedback below the subtitle, then the primary action.
+        when {
+            !hasData && !building -> {
+                // No data installed: short label + direct Download button. Skip Find entirely —
+                // a search would return nothing.
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "No region data yet",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(12.dp))
+                DownloadNowButton(onClick = onOpenRegions)
+            }
+            searchedEmpty -> {
+                // Search ran, found nothing — hint that a region may be missing, but keep Find.
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Nothing found — try downloading the region for this route",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(12.dp))
+                FindPlacesButton(onClick = onBuild, enabled = true)
+            }
+            else -> {
+                Spacer(Modifier.height(16.dp))
+                FindPlacesButton(onClick = onBuild, enabled = !building)
+            }
+        }
     }
 }
 
@@ -1180,5 +1226,13 @@ private fun FindLiveResupplyButton(onClick: () -> Unit, enabled: Boolean = true)
 private fun FindPlacesButton(onClick: () -> Unit, enabled: Boolean = true) {
     DarkPillButton(onClick = onClick, enabled = enabled) {
         Text("Find places", style = MaterialTheme.typography.titleSmall, color = ButtonCream)
+    }
+}
+
+/** No-data CTA: same dark pill, takes the rider straight to the Regions download screen. */
+@Composable
+private fun DownloadNowButton(onClick: () -> Unit) {
+    DarkPillButton(onClick = onClick, icon = Icons.Filled.Download) {
+        Text("Download now", style = MaterialTheme.typography.titleSmall, color = ButtonCream)
     }
 }

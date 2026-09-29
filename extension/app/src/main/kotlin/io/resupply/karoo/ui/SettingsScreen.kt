@@ -635,8 +635,8 @@ private fun BuildErrorLine(state: BuildState, modifier: Modifier = Modifier) {
     if (state is BuildState.Error) {
         Text(
             state.message,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
             modifier = modifier.padding(bottom = 8.dp),
         )
     }

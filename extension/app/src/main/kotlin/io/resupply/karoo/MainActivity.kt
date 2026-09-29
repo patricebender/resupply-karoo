@@ -226,13 +226,12 @@ class MainActivity : ComponentActivity() {
         // on it once. Gated on a persisted flag, not just emptiness, so it never reappears after
         // the rider removes all their regions.
         val onboardingSeen by configStore.onboardingSeen.collectAsStateWithLifecycle(initialValue = true)
-        val installedForOnboarding by configStore.installedRegions.collectAsStateWithLifecycle(initialValue = emptySet())
-        LaunchedEffect(onboardingSeen, installedForOnboarding) {
-            if (!onboardingSeen && installedForOnboarding.isEmpty()) {
+        val installedRegions by configStore.installedRegions.collectAsStateWithLifecycle(initialValue = emptySet())
+        LaunchedEffect(onboardingSeen, installedRegions) {
+            if (!onboardingSeen && installedRegions.isEmpty()) {
                 screen = Screen.Welcome
             }
         }
-
         // Hoisted here so the list scroll position is preserved across navigation to
         // the detail/filter screens and back.
         val waybookListState = rememberLazyListState()
@@ -266,6 +265,7 @@ class MainActivity : ComponentActivity() {
                 nearbyPaused = nearbyPaused,
                 nearbyRadiusMeters = nearbyRadiusMeters,
                 buildState = buildState,
+                installedRegions = installedRegions,
                 favoritePoiIds = config.favoritePoiIds,
                 favoritesOnly = config.favoritesOnly,
                 onToggleFavorite = { poi, fav ->
@@ -276,6 +276,7 @@ class MainActivity : ComponentActivity() {
                 },
                 onBuild = ::runBuild,
                 onOpenSettings = { screen = Screen.Settings },
+                onOpenRegions = { screen = Screen.Regions },
                 onOpenPoi = { screen = Screen.Detail(it.id) },
                 following = followPosition,
                 onUserScrolled = { followPosition = false },
@@ -285,8 +286,6 @@ class MainActivity : ComponentActivity() {
             )
 
             is Screen.Settings -> {
-                val installed by configStore.installedRegions
-                    .collectAsStateWithLifecycle(initialValue = emptySet())
                 SettingsScreen(
                     config = config,
                     buildState = buildState,
@@ -299,7 +298,7 @@ class MainActivity : ComponentActivity() {
                     liveOn = !nearbyPaused,
                     hasFix = rider != null,
                     pois = pois,
-                    installedSummary = installedSummary(installed),
+                    installedSummary = installedSummary(installedRegions),
                     onDetourChange = { m -> lifecycleScope.launch { configStore.setDetour(m) } },
                     onCategoryToggle = { c, on ->
                         lifecycleScope.launch { configStore.setCategoryEnabled(c, on) }

@@ -86,90 +86,97 @@ class RegionDownloadService : Service() {
     }
 
     private suspend fun runDownload(regionId: String, label: String, isUpdate: Boolean) {
-        // Direct download needs WiFi; refuse early with a clear reason if it's not there.
-        if (!Connectivity.isOnWifi(applicationContext)) {
-            fail(regionId, "Connect to Wi‑Fi to download this region")
-            return
-        }
+        // Hybrid transport: on WiFi the direct OkHttp path streams at line speed; off WiFi the
+        // download runs over the phone bridge (slower, but works with no WiFi). A download can
+        // always be started; WiFi is a speed optimization, not a gate. The bridge transport
+        // needs the KarooSystemService alive for the whole transfer, so the manifest fetch and
+        // the download share one connection.
+        val onWifi = Connectivity.isOnWifi(applicationContext)
 
-        val manifest = withKarooConnection(applicationContext) { system ->
-            RegionCatalogClient(system).fetchManifest()
-        }
-        if (manifest == null) {
-            fail(regionId, "Couldn't reach the region list")
-            return
-        }
-        val entry = manifest.regions.firstOrNull { it.id == regionId }
-        if (entry == null) {
-            fail(regionId, "Region not available")
-            return
-        }
+        val result = withKarooConnection(applicationContext) { system ->
+            // Patient here (not failFast): the rider explicitly asked to download, so let the
+            // bridge wake and queue the request rather than refusing while the phone link comes up.
+            val manifest = RegionCatalogClient(system).fetchManifest()
+                ?: return@withKarooConnection Outcome.Fail("No connection. Connect to WiFi or your phone, then retry")
+            val entry = manifest.regions.firstOrNull { it.id == regionId }
+                ?: return@withKarooConnection Outcome.Fail("Region not available")
 
-        // An update is remove-then-install: the merge dedups by osm_id (INSERT OR IGNORE), so a
-        // plain re-download over existing rows would never refresh changed/removed POIs. Drop the
-        // old rows first, inside this same foreground unit of work. If the download then fails the
-        // region shows as not-installed + retryable via the standard FAILED path — acceptable for a
-        // rebuildable cache.
-        if (isUpdate) {
-            PoiDatabase.removeRegion(applicationContext, regionId)
-            configStore.removeInstalledRegion(regionId)
-            configStore.setInstalledRegionVersions(
-                PoiDatabase.installedRegionVersionsFromDb(applicationContext),
-            )
-        }
-
-        val result = RegionDownloader().downloadAndInstall(
-            context = applicationContext,
-            manifest = manifest,
-            entry = entry,
-            scratchDir = cacheDir,
-            onProgress = { p ->
-                // Bail cleanly if WiFi drops mid-download rather than stalling on a dead socket.
-                _liveDownload.value = LiveDownload(
-                    regionId, label, p.fraction, p.bytesPerSec, p.etaSeconds, LivePhase.DOWNLOADING,
-                )
-                updateNotification(label, (p.fraction * 100).toInt(), p.etaSeconds)
-            },
-            onInstalling = {
-                // Bytes are in; the merge into the live DB runs now. Surface it so the row shows
-                // "Installing…" with a real progress bar while it finishes.
-                _liveDownload.value = _liveDownload.value?.copy(
-                    phase = LivePhase.INSTALLING, fraction = 0f, bytesPerSec = 0L, etaSeconds = null,
-                )
-                updateInstallingNotification(label)
-            },
-            onInstallProgress = { fraction ->
-                _liveDownload.value = _liveDownload.value?.copy(fraction = fraction)
-                updateNotification(label, (fraction * 100).toInt(), null)
-            },
-        )
-
-        when (result) {
-            is RegionDownloader.Result.Installed -> {
-                // Record the region as installed and clear the durable download status.
-                configStore.addInstalledRegion(regionId)
-                // installFromFile already wrote the new data_version into the DB; project it
-                // into the observable map so the Update affordance clears without a restart.
+            // An update is remove-then-install: the merge dedups by osm_id (INSERT OR IGNORE), so a
+            // plain re-download over existing rows would never refresh changed/removed POIs. Drop the
+            // old rows first, inside this same foreground unit of work. If the download then fails the
+            // region shows as not-installed + retryable via the standard FAILED path — acceptable for a
+            // rebuildable cache.
+            if (isUpdate) {
+                PoiDatabase.removeRegion(applicationContext, regionId)
+                configStore.removeInstalledRegion(regionId)
                 configStore.setInstalledRegionVersions(
                     PoiDatabase.installedRegionVersionsFromDb(applicationContext),
                 )
-                configStore.clearDownloadStatus(regionId)
-                _liveDownload.value = LiveDownload(
-                    regionId, label, 1f, 0L, 0L, LivePhase.DONE, result.poiCount,
-                )
             }
-            is RegionDownloader.Result.SchemaMismatch ->
-                fail(regionId, "Update the app to download regions")
-            is RegionDownloader.Result.Failed -> {
-                // A WiFi drop surfaces as a download failure — give the actionable reason.
-                val reason = if (!Connectivity.isOnWifi(applicationContext)) {
-                    "Wi‑Fi lost. Reconnect and try again"
-                } else {
-                    result.reason
+
+            val transport = if (onWifi) {
+                RegionDownloader.DirectTransport()
+            } else {
+                RegionDownloader.BridgeTransport(system)
+            }
+            Outcome.Done(
+                RegionDownloader().downloadAndInstall(
+                    context = applicationContext,
+                    manifest = manifest,
+                    entry = entry,
+                    transport = transport,
+                    scratchDir = cacheDir,
+                    onProgress = { p ->
+                        _liveDownload.value = LiveDownload(
+                            regionId, label, p.fraction, p.bytesPerSec, p.etaSeconds, LivePhase.DOWNLOADING,
+                        )
+                        updateNotification(label, (p.fraction * 100).toInt(), p.etaSeconds)
+                    },
+                    onInstalling = {
+                        // Bytes are in; the merge into the live DB runs now. Surface it so the row shows
+                        // "Installing…" with a real progress bar while it finishes.
+                        _liveDownload.value = _liveDownload.value?.copy(
+                            phase = LivePhase.INSTALLING, fraction = 0f, bytesPerSec = 0L, etaSeconds = null,
+                        )
+                        updateInstallingNotification(label)
+                    },
+                    onInstallProgress = { fraction ->
+                        _liveDownload.value = _liveDownload.value?.copy(fraction = fraction)
+                        updateNotification(label, (fraction * 100).toInt(), null)
+                    },
+                ),
+            )
+        } ?: Outcome.Fail("Couldn't reach the region list")
+
+        when (result) {
+            is Outcome.Fail -> fail(regionId, result.reason)
+            is Outcome.Done -> when (val r = result.result) {
+                is RegionDownloader.Result.Installed -> {
+                    // Record the region as installed and clear the durable download status.
+                    configStore.addInstalledRegion(regionId)
+                    // installFromFile already wrote the new data_version into the DB; project it
+                    // into the observable map so the Update affordance clears without a restart.
+                    configStore.setInstalledRegionVersions(
+                        PoiDatabase.installedRegionVersionsFromDb(applicationContext),
+                    )
+                    configStore.clearDownloadStatus(regionId)
+                    _liveDownload.value = LiveDownload(
+                        regionId, label, 1f, 0L, 0L, LivePhase.DONE, r.poiCount,
+                    )
                 }
-                fail(regionId, reason)
+                is RegionDownloader.Result.SchemaMismatch ->
+                    fail(regionId, "Update the app to download regions")
+                is RegionDownloader.Result.Failed ->
+                    fail(regionId, "Download failed. Check your connection and try again")
             }
         }
+    }
+
+    /** Wraps the connection-scoped work so a manifest/connection miss and a download result
+     *  flow back through one `when`. */
+    private sealed interface Outcome {
+        data class Done(val result: RegionDownloader.Result) : Outcome
+        data class Fail(val reason: String) : Outcome
     }
 
     private suspend fun fail(regionId: String, reason: String) {
@@ -233,8 +240,8 @@ class RegionDownloadService : Service() {
 
     private fun buildNotification(label: String, percent: Int, etaSeconds: Long?): Notification {
         val text = when {
-            etaSeconds != null && etaSeconds > 0 -> "$percent% · ${formatEta(etaSeconds)} left · keep Wi‑Fi on"
-            else -> "$percent% · keep Wi‑Fi on"
+            etaSeconds != null && etaSeconds > 0 -> "$percent% · ${formatEta(etaSeconds)} left"
+            else -> "$percent%"
         }
         @Suppress("DEPRECATION")
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

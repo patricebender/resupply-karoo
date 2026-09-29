@@ -629,8 +629,12 @@ class MainActivity : ComponentActivity() {
         if (showSpinner) manifestLoading.value = true
         manifestFailed.value = false
         lifecycleScope.launch {
+            // Always attempt the fetch: the phone bridge doesn't surface as an Android network,
+            // so the only way to know we can reach the internet through it is to try. failFast
+            // caps the wait (~12 s, not the full 30 s bridge timeout) so a truly-dead state
+            // surfaces the offline banner reasonably quickly without blocking a live bridge.
             val manifest = withKarooConnection(applicationContext) { system ->
-                RegionCatalogClient(system).fetchManifest()
+                RegionCatalogClient(system).fetchManifest(failFast = true)
             }
             manifestLoading.value = false
             if (manifest == null) {

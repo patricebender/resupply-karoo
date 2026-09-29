@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.5.0](https://github.com/patricebender/resupply-karoo/compare/v1.4.0...v1.5.0) (2026-09-29)
+
+
+### Features
+
+* download regions over the phone bridge when off WiFi ([#97](https://github.com/patricebender/resupply-karoo/issues/97)) ([2aaaa66](https://github.com/patricebender/resupply-karoo/commit/2aaaa66eb3290b61beec193186474a6918b2d6d8))
+* in-app update flow in Settings ([#93](https://github.com/patricebender/resupply-karoo/issues/93)) ([351793d](https://github.com/patricebender/resupply-karoo/commit/351793ddf7bce32a7e3c838ff44ab2f31d8d3e5d))
+
+
+### Bug Fixes
+
+* polish user-facing copy and drop em dashes from docs ([#91](https://github.com/patricebender/resupply-karoo/issues/91)) ([91a6724](https://github.com/patricebender/resupply-karoo/commit/91a6724caae8707a128b18c6094f0c64ddfbb84d))
+* remove all SystemNotification dispatches from BuildController ([#88](https://github.com/patricebender/resupply-karoo/issues/88)) ([e74784c](https://github.com/patricebender/resupply-karoo/commit/e74784cf7a951152e816c635da4875f3584a879d)), closes [#73](https://github.com/patricebender/resupply-karoo/issues/73)
+* replace build notifications with in-app feedback ([#90](https://github.com/patricebender/resupply-karoo/issues/90)) ([e3e0401](https://github.com/patricebender/resupply-karoo/commit/e3e040147b3f3f6fb4962a3dd37c5df8ba15b0a3))
+
+
+### Performance Improvements
+
+* cut region install time ~3x and add real install progress ([#86](https://github.com/patricebender/resupply-karoo/issues/86)) ([e486f1f](https://github.com/patricebender/resupply-karoo/commit/e486f1fb043a71e1c9cdb3a6e9326406eb2f6ed9))
+
 ## [1.4.0](https://github.com/patricebender/resupply-karoo/compare/v1.3.0...v1.4.0) (2026-09-24)
 
 

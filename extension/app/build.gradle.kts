@@ -1,20 +1,21 @@
 import java.util.Base64
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.jetbrains.kotlin.android)
     alias(libs.plugins.jetbrains.kotlin.serialization)
     alias(libs.plugins.jetbrains.kotlin.compose)
 }
 
 android {
     namespace = "io.resupply.karoo"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.resupply.karoo"
-        minSdk = 23
+        // Karoo hardware runs Android 12 (API 32); 24 is the floor a current qrose needs.
+        minSdk = 24
         targetSdk = 34
         // versionCode: CI injects the monotonic run number; defaults to 1 locally.
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
@@ -79,12 +80,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_1_8
     }
 }
 

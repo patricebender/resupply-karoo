@@ -11,6 +11,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Drive the OS installer from Settings to update the sideloaded app in place. Gated
+         per-app by the "install unknown apps" toggle; the UI sends the rider there first
+         when canRequestPackageInstalls() is false. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".ResupplyApplication"
@@ -49,6 +53,19 @@
             android:name=".service.RegionDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Downloads the latest release APK over WiFi and hands it to the OS installer,
+             so the rider can update the sideloaded app from Settings. -->
+        <service
+            android:name=".service.AppUpdateService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Receives the PackageInstaller commit result: launches the system confirm-install
+             dialog on STATUS_PENDING_USER_ACTION. -->
+        <receiver
+            android:name=".service.AppUpdateService$InstallReceiver"
+            android:exported="false" />
 
         <!-- Karoo Extensions library: where the on-device store fetches version/update
              info. $BASE_URL$ is substituted at build time by the generateManifest Gradle

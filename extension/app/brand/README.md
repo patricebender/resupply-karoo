@@ -3,7 +3,7 @@
 The complete set of Resupply icon/wordmark SVGs, kept under version control so the artwork
 has a source of record. C2PA metadata has been stripped from every file.
 
-**These are reference/source only** — they are not read at build time. The assets the app
+**These are reference/source only.** They are not read at build time. The assets the app
 actually ships are the VectorDrawables under `../src/main/res/drawable/` and the store icon
 that CI rasterizes from `../resupply-icon.svg`.
 
@@ -34,7 +34,7 @@ Copies of those three also live here so the full set is in one place.
 | `resupply-adaptive-foreground.svg` | Android adaptive-icon foreground (R + route + dots, no tile). |
 | `resupply-adaptive-background.svg` | Android adaptive-icon background (dark base + contours). |
 
-The app header does **not** use these wordmark SVGs — it renders "RESUPPLY" as themed
+The app header does **not** use these wordmark SVGs; it renders "RESUPPLY" as themed
 Compose text next to the squircle so it flips with the Karoo light/dark theme.
 
 ## Palette

@@ -2,7 +2,7 @@
 
 Builds the on-device POI database bundled with the extension
 (`app/src/main/assets/pois-germany.sqlite`) from OpenStreetMap extracts. The bundled
-seed is the full **Germany** region file — the same R\*Tree-stripped artifact the picker
+seed is the full **Germany** region file, the same R\*Tree-stripped artifact the picker
 downloads (the picker fetches it gzipped; the seed is stored uncompressed, see below). The
 app rebuilds the R\*Tree on first run, and re-seeds when its `PRAGMA user_version` increases.
 
@@ -31,25 +31,25 @@ tags such as `opening_hours`/`website`).
 
 ### Options
 
-- `OSM_REGION` — Geofabrik path, default `europe/germany/baden-wuerttemberg`. Change it
+- `OSM_REGION`: Geofabrik path, default `europe/germany/baden-wuerttemberg`. Change it
   to widen coverage, e.g. `OSM_REGION=europe/germany npm run build:poi-db`.
-- `FORCE_DOWNLOAD=1` — re-download the extract even if a cached `work/region.osm.pbf`
+- `FORCE_DOWNLOAD=1`: re-download the extract even if a cached `work/region.osm.pbf`
   exists (downloads are skipped by default to save the ~230 MB fetch).
-- `OUT_DB` — override the output path (defaults to the bundled asset).
+- `OUT_DB`: override the output path (defaults to the bundled asset).
 
 Intermediate files live in `work/` (gitignored scratch); safe to delete.
 
 ### The bundled seed (`build:seed`)
 
 `npm run build:seed` builds the full Germany region file (via `build-region-file.sh
-germany` — assemble all 16 Bundesländer, dedup boundary `osm_id`s, strip the R\*Tree) and
+germany`: assemble all 16 Bundesländer, dedup boundary `osm_id`s, strip the R\*Tree) and
 gunzips it into `app/src/main/assets/pois-germany.sqlite`. That's the whole seed pipeline;
 the app rebuilds the R\*Tree on first run. It's stored **uncompressed**: AGP's asset merger
 auto-inflates + renames any `*.gz` asset, and the APK zip DEFLATEs the entry anyway, so
 gzip would only break the asset name the app opens.
 
 `build-multi-region.sh` (`build:poi-db:multi`) is the older generic multi-region merge
-into a *raw* asset — no longer the seed path, kept for ad-hoc local DBs.
+into a *raw* asset, no longer the seed path, kept for ad-hoc local DBs.
 
 ## Downloadable regions (on-demand, in-app)
 
@@ -66,19 +66,19 @@ REGIONS_IDS="germany-bremen italy" npm run build:regions   # a subset
 `build-all-regions.sh` does three things:
 
 1. **Regenerates `app/src/main/assets/regions.json`** (the picker's catalog) from
-   `regions.ts` — the single source of truth for region id/label/group. Commit this.
+   `regions.ts`, the single source of truth for region id/label/group. Commit this.
 2. **Builds each region file** via `build-region-file.sh <id>`: runs the same pipeline
    (single extract, or a merge of all 16 Bundesländer for `germany`), then strips the
-   derivable R\*Tree + category index and `VACUUM`s (the app rebuilds them on install —
+   derivable R\*Tree + category index and `VACUUM`s (the app rebuilds them on install,
    this is the size lever), and `gzip -9`s to `dist/<id>-v<schema>.sqlite.gz`.
 3. **Emits `dist/manifest.json`** (`build-manifest.ts`): per-region file, gzipped/raw
-   sizes, POI count, and sha256 (verified on-device after download). **Cumulative** — if
+   sizes, POI count, and sha256 (verified on-device after download). **Cumulative:** if
    a `dist/manifest.json` already exists it carries those regions forward and overlays the
    ones built this run, so a subset build extends the manifest instead of replacing it
    (prior entries are dropped only on a schema mismatch). Pre-seed `dist/` with the
    published manifest to accumulate onto a release; the CI workflow does this automatically.
 
-`dist/` is gitignored — it's release output, not committed. See `docs/releasing.md` for
+`dist/` is gitignored; it's release output, not committed. See `docs/releasing.md` for
 the upload step (and the cumulative caveat for local subset builds). The manifest's `baseUrl` is env-overridable
 (`REGIONS_BASE_URL=... npm run build:manifest`) so a release retag doesn't need a code
 change; it defaults to the `regions-latest` release.
@@ -89,7 +89,7 @@ change; it defaults to the `regions-latest` release.
 ## Refreshing a region's data (dataVersion)
 
 `schemaVersion` gates *schema/tag* changes (forces a full reseed). To ship **fresher OSM
-data** for a region without a schema change, use its `dataVersion` instead — a monotonic
+data** for a region without a schema change, use its `dataVersion` instead: a monotonic
 per-region counter the app compares to offer an "Update" affordance in the Regions screen.
 
 1. Bump the region in `DATA_VERSIONS` in `regions.ts` (absent = 1, so add it at 2, then 3…).

@@ -56,8 +56,8 @@ fun WelcomeScreen(
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "Resupply maps the water, food and shops along your route — fully offline, no signal " +
-                "needed. Download the area you ride most, and it's ready whenever you are. " +
+            "Resupply maps the water, food and shops along your route. Fully offline, no signal " +
+                "needed. Download the area you ride most and it's ready whenever you are. " +
                 "Add more regions any time.",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,

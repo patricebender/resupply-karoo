@@ -9,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,20 +34,25 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,12 +68,38 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.ThemeMode
+import io.resupply.karoo.service.AppUpdateService
+import io.resupply.karoo.service.AppUpdateService.UpdatePhase
+import io.resupply.karoo.service.RegionDownloadService
 import kotlin.math.roundToInt
+
+/** A newer release the rider can install, surfaced in the Update section of Settings. */
+data class AppUpdateInfo(
+    /** e.g. "1.5.0" — the version being offered. */
+    val versionName: String,
+    /** First line of the release notes ("what's new"), or empty. */
+    val whatsNew: String,
+    /** All release-note bullets (plain prose), for the "Show changelog" dialog. */
+    val notes: List<String> = emptyList(),
+)
+
+/** The state of the app-update check, driving the always-present Update section. */
+sealed interface AppUpdateCheck {
+    /** The manifest fetch is in flight and there's no prior result to show. */
+    data object Checking : AppUpdateCheck
+    /** Checked: the running build is the latest. */
+    data object UpToDate : AppUpdateCheck
+    /** Checked: a newer release is available. */
+    data class Available(val info: AppUpdateInfo) : AppUpdateCheck
+    /** The check couldn't complete (offline / no phone link) and there's nothing to show. */
+    data object Failed : AppUpdateCheck
+}
 
 /**
  * Settings, reached from the Waybook header gear. One scrollable screen in sections:
@@ -100,6 +133,19 @@ fun SettingsScreen(
     onSmartDistanceToggle: (Boolean) -> Unit,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    // The app-update check result (checking / up-to-date / available / failed). Drives the
+    // always-present Update section. The check runs on entering Settings.
+    updateCheck: AppUpdateCheck,
+    // The running build's version name, shown on the up-to-date / failed lines.
+    currentVersion: String,
+    // The in-flight (or just-finished) update, mirrored from AppUpdateService; null when idle.
+    updateProgress: io.resupply.karoo.service.AppUpdateService.UpdateProgress?,
+    // Whether the OS "install unknown apps" permission is granted for us. When false the
+    // "Install now" button becomes "Allow installs", routing the rider to the system setting.
+    canInstallApp: Boolean,
+    onInstallUpdate: () -> Unit,
+    onAllowInstalls: () -> Unit,
+    onRetryCheck: () -> Unit,
     onBuild: () -> Unit,
     onClear: () -> Unit,
     // Toggle route-less live search. true = resume (a fresh search repopulates + tracking takes
@@ -259,6 +305,20 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
             SectionHeader("Appearance")
             AppearanceSection(mode = themeMode, onModeChange = onThemeModeChange)
+
+            // Always present, so the rider can always see "am I current?" — a stable anchor that
+            // distinguishes up-to-date from a check that hasn't landed or failed.
+            Spacer(Modifier.height(20.dp))
+            SectionHeader("Update")
+            UpdatesSection(
+                check = updateCheck,
+                currentVersion = currentVersion,
+                progress = updateProgress,
+                canInstall = canInstallApp,
+                onInstall = onInstallUpdate,
+                onAllowInstalls = onAllowInstalls,
+                onRetryCheck = onRetryCheck,
+            )
 
             Spacer(Modifier.height(20.dp))
             SectionHeader("Data")
@@ -625,6 +685,370 @@ private fun RegionsRow(summary: String, enabled: Boolean, onClick: () -> Unit) {
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private val UpdateStatusGreen = Color(0xFF2E7D32)
+
+/**
+ * The Update section: surfaces a newer release and drives the in-app install. Four faces,
+ * mutually exclusive. The live install [progress] takes precedence once a download is under
+ * way / just finished; otherwise the [check] result drives it:
+ *  - **Downloading / Installing** — a determinate bar + "46% · ~1 min left" then "Almost done…".
+ *  - **Install failed** — an error chip with the reason, and a Retry pill.
+ *  - **Install ready (DONE)** — a green chip ("confirm the install to finish"), Install-again pill.
+ *  - **Available** — version + what's-new line, and an "Install now" (or "Allow installs") pill.
+ *  - **Up to date** — a green check + "Up to date · vX.Y.Z", no action.
+ *  - **Checking** — a spinner + "Checking for updates…", no action.
+ *  - **Check failed** — a "Couldn't check for updates" line + "On vX.Y.Z", and a Retry pill.
+ */
+@Composable
+private fun UpdatesSection(
+    check: AppUpdateCheck,
+    currentVersion: String,
+    progress: AppUpdateService.UpdateProgress?,
+    canInstall: Boolean,
+    onInstall: () -> Unit,
+    onAllowInstalls: () -> Unit,
+    onRetryCheck: () -> Unit,
+) {
+    val running = progress?.phase == UpdatePhase.DOWNLOADING || progress?.phase == UpdatePhase.INSTALLING
+    val available = check as? AppUpdateCheck.Available
+    var showChangelog by remember { mutableStateOf(false) }
+
+    // Two visual registers: a quiet inline line for the no-action states (up-to-date / checking),
+    // and a lifted "release card" for everything actionable (available / downloading / installing /
+    // terminal / failed check) — so the section only draws attention when there's something to do.
+    val quiet = !running && progress == null &&
+        (check is AppUpdateCheck.UpToDate || check is AppUpdateCheck.Checking)
+
+    if (quiet) {
+        QuietUpdateLine(check, currentVersion)
+    } else {
+        UpdateCard(
+            check = check,
+            available = available,
+            currentVersion = currentVersion,
+            progress = progress,
+            running = running,
+            canInstall = canInstall,
+            onInstall = onInstall,
+            onAllowInstalls = onAllowInstalls,
+            onRetryCheck = onRetryCheck,
+            onShowChangelog = { showChangelog = true },
+        )
+    }
+
+    if (showChangelog && available != null) {
+        ChangelogDialog(
+            version = available.info.versionName,
+            notes = available.info.notes,
+            onDismiss = { showChangelog = false },
+        )
+    }
+}
+
+/** The minimal, no-action states: a single icon + line. No card — nothing to act on. */
+@Composable
+private fun QuietUpdateLine(check: AppUpdateCheck, currentVersion: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (check is AppUpdateCheck.Checking) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = UpdateStatusGreen)
+        }
+        Spacer(Modifier.size(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            if (check is AppUpdateCheck.Checking) {
+                Text("Checking for updates…", style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            } else {
+                Text("You're up to date", style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                UpdateSubtle("Version $currentVersion")
+            }
+        }
+    }
+}
+
+/**
+ * The lifted "release card" for actionable update states. A tinted panel (primaryContainer at low
+ * alpha, hairline border) with a small state overline, a hero version line that owns its own row
+ * (so it's never truncated), and a full-width action row. The version — the thing that must be
+ * readable — is the visual anchor.
+ */
+@Composable
+private fun UpdateCard(
+    check: AppUpdateCheck,
+    available: AppUpdateCheck.Available?,
+    currentVersion: String,
+    progress: AppUpdateService.UpdateProgress?,
+    running: Boolean,
+    canInstall: Boolean,
+    onInstall: () -> Unit,
+    onAllowInstalls: () -> Unit,
+    onRetryCheck: () -> Unit,
+    onShowChangelog: () -> Unit,
+) {
+    val accent = when {
+        progress?.phase == UpdatePhase.FAILED || check is AppUpdateCheck.Failed ->
+            MaterialTheme.colorScheme.error
+        progress?.phase == UpdatePhase.DONE -> UpdateStatusGreen
+        else -> MaterialTheme.colorScheme.primary
+    }
+    // Overline (small accent label) + hero (large headline) + optional detail (small subtitle),
+    // per state. Raw installer error strings go in the detail line, never the hero.
+    val installing = progress?.phase == UpdatePhase.INSTALLING
+    data class CardCopy(val overline: String, val hero: String, val detail: String? = null)
+    val copy = when {
+        running && installing -> CardCopy("INSTALLING", "Installing…")
+        running -> CardCopy("DOWNLOADING", "Downloading update")
+        progress?.phase == UpdatePhase.FAILED ->
+            CardCopy("UPDATE FAILED", "Couldn't install", humanInstallError(progress.reason))
+        progress?.phase == UpdatePhase.DONE -> CardCopy("READY", "Confirm to finish", "Approve the install prompt to update.")
+        available != null -> CardCopy("UPDATE AVAILABLE", "Version ${available.info.versionName}")
+        check is AppUpdateCheck.Failed -> CardCopy("COULDN'T CHECK", "You're on $currentVersion", "No connection to check for updates.")
+        else -> CardCopy("", "")
+    }
+    val overline = copy.overline
+    val hero = copy.hero
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(accent.copy(alpha = 0.10f))
+            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        // Overline: a small icon + accent label.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val icon = when {
+                progress?.phase == UpdatePhase.FAILED || check is AppUpdateCheck.Failed -> Icons.Filled.ErrorOutline
+                progress?.phase == UpdatePhase.DONE -> Icons.Filled.CheckCircle
+                else -> Icons.Filled.SystemUpdateAlt
+            }
+            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text(
+                overline,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+                color = accent,
+            )
+        }
+
+        Spacer(Modifier.height(6.dp))
+        // Hero line: the version (or state headline). Own row, full width — the thing that was
+        // getting truncated, so it gets the whole width and wraps rather than ellipsizing.
+        Text(
+            hero,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        // Optional detail line (e.g. a plain-English install error) under the hero.
+        copy.detail?.let {
+            Spacer(Modifier.height(4.dp))
+            UpdateSubtle(it, maxLines = 3)
+        }
+
+        // Live progress bar while downloading/installing.
+        if (running && progress != null) {
+            Spacer(Modifier.height(12.dp))
+            if (installing || progress.fraction <= 0f) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)),
+                )
+            } else {
+                LinearProgressIndicator(
+                    progress = { progress.fraction },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)),
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            UpdateSubtle(if (installing) "Finishing up" else downloadLine(progress))
+        }
+
+        // Actions: the primary pill gets its OWN full-width row (so its label never clips), with
+        // a quiet "What's new" text link above it when there are notes. No action while running.
+        val pill: Pair<String, () -> Unit>? = when {
+            running -> null
+            progress?.phase == UpdatePhase.FAILED -> "Retry" to onInstall
+            available != null || progress?.phase == UpdatePhase.DONE ->
+                if (canInstall) "Install now" to onInstall else "Allow installs" to onAllowInstalls
+            check is AppUpdateCheck.Failed -> "Retry" to onRetryCheck
+            else -> null
+        }
+        // Only in the idle "available" state — not mid-download or after a terminal result, where
+        // an orphaned link would float with no install button beside it.
+        val showChangelogAction = available != null && available.info.notes.isNotEmpty() &&
+            progress == null
+        if (showChangelogAction) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "What's new",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onShowChangelog)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        if (pill != null) {
+            Spacer(Modifier.height(12.dp))
+            UpdatePrimaryButton(
+                label = pill.first,
+                accent = accent,
+                onClick = pill.second,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/**
+ * A scrollable "what's new" dialog for the offered release: the accent disc + title vocabulary of
+ * [ConfirmDialog], but a left-aligned bulleted body (the notes can run long) and a single Close.
+ */
+@Composable
+private fun ChangelogDialog(version: String, notes: List<String>, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(20.dp),
+        icon = {
+            Box(
+                modifier = Modifier.size(48.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.SystemUpdateAlt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        },
+        title = {
+            Text(
+                "What's new in v$version",
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        text = {
+            // Cap the height so a long changelog scrolls inside the dialog rather than
+            // overflowing it; each note is a hanging-indent bullet.
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 260.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                notes.forEach { note ->
+                    Row(modifier = Modifier.padding(vertical = 4.dp)) {
+                        Text(
+                            "•  ",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            note,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun UpdateSubtle(text: String, maxLines: Int = 1) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/**
+ * Turn a raw PackageInstaller failure string into one plain-English sentence. The installer
+ * returns developer-facing codes like `INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package … signatures
+ * do not match …`; riders should never see those.
+ */
+private fun humanInstallError(reason: String?): String = when {
+    reason == null -> "Something went wrong. Try again."
+    reason.contains("SIGNATURE", true) || reason.contains("signatures do not match", true) ->
+        "This update is signed differently from the installed app. Uninstall the current app, then install the update."
+    reason.contains("INSUFFICIENT_STORAGE", true) || reason.contains("storage", true) ->
+        "Not enough storage to install the update. Free up some space and try again."
+    reason.contains("ABORTED", true) || reason.contains("USER", true) ->
+        "Install was cancelled."
+    reason.contains("INVALID", true) || reason.contains("checksum", true) ->
+        "The downloaded update looked corrupted. Try again."
+    else -> "Couldn't install the update. Try again."
+}
+
+/** "46% · ~1 min left · 1.4 MB/s" from the live update progress (mirrors the region picker). */
+private fun downloadLine(p: AppUpdateService.UpdateProgress): String {
+    val pct = (p.fraction * 100).toInt()
+    val eta = p.etaSeconds?.let { " · ${RegionDownloadService.formatEta(it)} left" } ?: ""
+    val rate = if (p.bytesPerSec > 0) " · ${formatUpdateRate(p.bytesPerSec)}" else ""
+    return "$pct%$eta$rate"
+}
+
+private fun formatUpdateRate(bytesPerSec: Long): String {
+    val mb = bytesPerSec / 1_000_000.0
+    return if (mb >= 1.0) "%.1f MB/s".format(mb) else "${bytesPerSec / 1000} KB/s"
+}
+
+/** The primary CTA inside the update card: an accent-filled pill with a centered label. */
+@Composable
+private fun UpdatePrimaryButton(
+    label: String,
+    accent: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // The primary accent (orange) pairs with the theme's onPrimary; the error/green accents pair
+    // with white. Choose by whether this is the brand primary.
+    val onAccent = if (accent == MaterialTheme.colorScheme.primary) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        Color.White
+    }
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(accent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = onAccent,
+            maxLines = 1,
+            softWrap = false, // never clip the CTA mid-word — the pill sizes to fit the label
         )
     }
 }

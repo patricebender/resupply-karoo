@@ -98,6 +98,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 startNearbyRefresher()
                 startRadiusChangeWatcher()
                 startNearbyTicker()
+                startRegionInstallWatcher()
             }
         }
     }
@@ -303,6 +304,26 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 val center = lastFetchCenter ?: continue
                 refreshNearbyAt(center, configStore.config.first())
             }
+        }
+    }
+
+    /**
+     * A newly installed region makes a previous "nothing found — download this region?" error
+     * stale. Clear it to Idle so the overview returns to the ready-to-search face without
+     * requiring a manual rebuild. Mirrors the GPS-fix clear in [startNearbyRefresher].
+     * Lives here (process lifetime) rather than in [MainActivity] so it fires even when the
+     * app is backgrounded and only the ride extension is running.
+     */
+    private fun startRegionInstallWatcher() {
+        scope.launch {
+            configStore.installedRegions
+                .drop(1) // initial value is current state, not a change
+                .distinctUntilChanged()
+                .collect {
+                    if (repository.buildState.value is BuildState.Error) {
+                        repository.setBuildState(BuildState.Idle)
+                    }
+                }
         }
     }
 

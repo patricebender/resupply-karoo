@@ -144,7 +144,7 @@ class BuildController(
             nearby -> BuildState.Success(0, emptyMap(), System.currentTimeMillis()).also { publish(it) }
             // Route: an empty result most likely means the route is outside an installed region —
             // that's actionable, so guide the user rather than a silent empty success.
-            else -> fail("No POIs here — download this region?")
+            else -> fail("No POIs here — download this region?", regionMissing = true)
         }
     }
 
@@ -157,8 +157,8 @@ class BuildController(
         return state
     }
 
-    private fun fail(message: String): BuildState {
-        val state = BuildState.Error(message)
+    private fun fail(message: String, regionMissing: Boolean = false): BuildState {
+        val state = BuildState.Error(message, regionMissing)
         publish(state)
         return state
     }

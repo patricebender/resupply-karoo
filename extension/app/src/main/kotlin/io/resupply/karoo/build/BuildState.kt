@@ -16,5 +16,10 @@ sealed interface BuildState {
         val atEpochMs: Long,
     ) : BuildState
 
-    data class Error(val message: String) : BuildState
+    /**
+     * [regionMissing] is true only when a route corridor query ran and found nothing because no
+     * installed region covers it — the rider should download one. False for connectivity failures,
+     * GPS timeouts, and other hard errors that aren't solved by downloading a region.
+     */
+    data class Error(val message: String, val regionMissing: Boolean = false) : BuildState
 }

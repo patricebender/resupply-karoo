@@ -14,18 +14,25 @@ offline roadbook of resupply stops along the way (food, water, coffee, bike shop
 you can plan refuels without cellular signal. No route loaded? It finds resupply around you,
 live.
 
-<div align="center">
-<img src="docs/media/map-pois.png" alt="Typed POI pins along the route on the Karoo map" width="320">
-</div>
-
 ## Features
 
-<table>
+<div align="center">
+<table width="100%">
   <tr>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/map-pois.png" alt="Typed POI pins along the route on the Karoo map" width="320">
+    </td>
+    <td width="50%" valign="top">
+      <h3>🗺️ Pins always in sync</h3>
+      Pins on the map always match your resupply selection — toggle categories or favorites to
+      focus the map on what's relevant to you.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/01-instant-build.gif" alt="Building the roadbook in seconds" width="280">
     </td>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>⚡ Offline resupply along a route</h3>
       Finds resupply stops along the route you're riding, no signal needed. The whole POI
       database rides along inside the app, so the build runs on-device and returns in a second
@@ -33,97 +40,98 @@ live.
     </td>
   </tr>
   <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>⭐ Favorites to plan ahead</h3>
       Star the stops you're aiming for to plan the ride, then refine your roadbook down to
       just those.
     </td>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/03-favorites.gif" alt="Starring favorites and filtering to them" width="280">
     </td>
   </tr>
   <tr>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/04-live-mode.gif" alt="Live mode showing resupply around your location" width="280">
     </td>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>📍 Live resupply around you</h3>
       No route loaded? Resupply finds places around you and keeps them fresh as you move.
     </td>
   </tr>
   <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>🗂️ 12 categories</h3>
       Restaurants, Supermarkets, Café&nbsp;&amp;&nbsp;Bar, Water, Toilets, Bike&nbsp;shops,
       Fuel&nbsp;stations, Ice&nbsp;Cream, Hotels, Pharmacies, ATMs, and Campgrounds. Toggle
-      any of them on or off on the fly; pins on the map always match your active filter.
+      any of them on or off on the fly.
     </td>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/categories.png" alt="Category toggles with per-category counts" width="280">
     </td>
   </tr>
   <tr>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/water.png" alt="Water source detail marked safe to refill" width="280">
     </td>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>💧 Safe water sources</h3>
       Shows drinkable water by default, hiding fountains and springs of unknown quality unless
       you want them.
     </td>
   </tr>
   <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>🌍 Downloadable regions</h3>
       Ships with a bundled seed and downloads more in-app: a single Bundesland, or whole
       countries across Europe and North America.
     </td>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/02-regions-download.gif" alt="Browsing and downloading a region in-app" width="280">
     </td>
   </tr>
   <tr>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/datafield.png" alt="In-ride data field showing upcoming water" width="280">
     </td>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>📊 Data fields for the ride view</h3>
       Put upcoming resupply, your favorites, or any single category straight on your data
       pages: distance ahead, detour, and the next stops.
     </td>
   </tr>
   <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>🔎 Place detail at a glance</h3>
       Opening hours, distance and detour, address and phone, a scannable Google&nbsp;Maps /
       website QR, and a short description for each stop.
     </td>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/details.png" alt="Place detail with opening hours" width="140">
       <img src="docs/media/qr.png" alt="Scannable QR to open the place on your phone" width="140">
     </td>
   </tr>
   <tr>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/settings.png" alt="Settings: safe water, smart radius, appearance" width="280">
     </td>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>🎯 Smart search radius &amp; themes</h3>
       Searches tight in busy areas and reaches further where places are sparse (or set a fixed
       radius yourself), plus light&nbsp;/&nbsp;dark&nbsp;/&nbsp;auto appearance.
     </td>
   </tr>
   <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>🗺️ Google Maps for live data</h3>
       Fills in opening hours and contact details on demand when OpenStreetMap doesn't have
       them.
     </td>
-    <td width="300" valign="top" align="center">
+    <td width="50%" valign="top" align="center">
       <img src="docs/media/regions.png" alt="Regions screen with installed regions and place counts" width="280">
     </td>
   </tr>
 </table>
+</div>
 
 ## How it works
 

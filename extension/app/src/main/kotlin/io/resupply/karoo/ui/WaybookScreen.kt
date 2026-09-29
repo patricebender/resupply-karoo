@@ -1142,7 +1142,7 @@ private fun NearbyReadyState(buildState: BuildState, hasFix: Boolean, paused: Bo
         if (noneNearby) {
             Spacer(Modifier.height(6.dp))
             Text(
-                "Nothing within range here — we'll keep looking as you ride.",
+                "Nothing within range here. We'll keep looking as you ride.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

@@ -163,7 +163,7 @@ class RegionDownloadService : Service() {
             is RegionDownloader.Result.Failed -> {
                 // A WiFi drop surfaces as a download failure — give the actionable reason.
                 val reason = if (!Connectivity.isOnWifi(applicationContext)) {
-                    "Wi‑Fi lost — reconnect and try again"
+                    "Wi‑Fi lost. Reconnect and try again"
                 } else {
                     result.reason
                 }

@@ -549,9 +549,9 @@ class MainActivity : ComponentActivity() {
      * any download. One or two labels are spelled out; more collapse to "France +N".
      */
     private fun installedSummary(installed: Set<String>): String {
-        if (installed.isEmpty()) return "No regions yet — download one"
+        if (installed.isEmpty()) return "No regions yet: download one"
         val labels = installed.mapNotNull { id -> regionCatalog.firstOrNull { it.id == id }?.label }
-        if (labels.isEmpty()) return "No regions yet — download one"
+        if (labels.isEmpty()) return "No regions yet: download one"
         return when {
             labels.size <= 2 -> labels.sorted().joinToString(", ")
             else -> "${labels.sorted().first()} +${labels.size - 1}"

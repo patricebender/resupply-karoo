@@ -23,14 +23,14 @@ The extension is versioned with **semantic versioning** driven by
 
 ## Notes
 
-- Normal pushes do **not** publish an APK — only merging the Release PR does.
+- Normal pushes do **not** publish an APK; only merging the Release PR does.
 - `versionCode` is the CI run number: monotonic (Android requires it to increase) but not
   tied to the semver number. That's fine and intentional.
 - The version of record is the annotated `versionName` line in `build.gradle.kts`. The
   annotation is a **trailing comment on the same line**:
   `versionName = "X.Y.Z" // x-release-please-version`. release-please replaces the
-  semver string on that exact line — don't move the comment to its own line or reformat it.
-- The bundled POI database is not versioned this way — it's rebuilt on demand via
+  semver string on that exact line; don't move the comment to its own line or reformat it.
+- The bundled POI database is not versioned this way. It's rebuilt on demand via
   `extension/tools/poi-db/`, and its own `PRAGMA user_version` drives app re-seeding.
 
 ## Releasing downloadable region files
@@ -38,7 +38,7 @@ The extension is versioned with **semantic versioning** driven by
 Separate from the APK release. The in-app region picker downloads POI files (Germany
 Complete + each Bundesland, plus countries) from a **dedicated GitHub Release**, not the
 APK release. These are large binaries rebuilt from OSM on demand, so they get their own
-tag and are re-uploaded only when coverage or the DB schema changes — not every app
+tag and are re-uploaded only when coverage or the DB schema changes, not every app
 release.
 
 ### Preferred: the `Build region files` workflow
@@ -46,13 +46,13 @@ release.
 Full coverage downloads many GB of OSM extracts, so build on the runner's bandwidth, not
 a laptop. Trigger **Actions → Build region files** (`.github/workflows/regions.yml`) with:
 
-- `regions` — a space-separated list of region ids (see `tools/poi-db/regions.ts ids`), or
+- `regions`: a space-separated list of region ids (see `tools/poi-db/regions.ts ids`), or
   `all` for the whole catalog. Default is a small smoke-test set.
-- `tag` — the release tag, default `regions-latest` (what the app points at).
+- `tag`: the release tag, default `regions-latest` (what the app points at).
 
 The workflow is **cumulative**: it downloads the release's current `manifest.json` first,
 so building a subset **adds/refreshes only those regions** and keeps the rest. New files
-are uploaded, rebuilt ones overwrite their asset, untouched ones stay — the release
+are uploaded, rebuilt ones overwrite their asset, untouched ones stay, so the release
 accumulates coverage across runs instead of last-run-wins. Build the whole catalog by
 running once with `all`, or grow it region by region.
 
@@ -64,7 +64,7 @@ README).
 
 ### Manual (local) build
 
-Possible but not the happy path — mind the cumulative caveat below.
+Possible but not the happy path; mind the cumulative caveat below.
 
 ```bash
 cd extension/tools/poi-db && npm install
@@ -90,7 +90,7 @@ so the app treats every other region as unavailable. Building `all` needs no pre
 
 If you version the tag instead (e.g. `regions-v2`), rebuild the manifest with
 `REGIONS_BASE_URL=".../releases/download/regions-v2/" npm run build:manifest` so its
-`baseUrl` matches, and update `MANIFEST_URL` in the app — the stable `regions-latest` tag
+`baseUrl` matches, and update `MANIFEST_URL` in the app; the stable `regions-latest` tag
 avoids that code change.
 
 Automated Geofabrik refresh (rebuilding region files on a schedule as OSM data ages) is

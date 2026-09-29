@@ -157,11 +157,21 @@ compact per-region file and installs it on-device.
 
 See [FOUNDATION.md](FOUNDATION.md) for the full architecture and design.
 
-## Installing on a Karoo 3
+## Installing
 
-Extensions are sideloaded. Grab the latest APK from [Releases](../../releases) and install it
-via the Hammerhead Companion app (paste the release APK URL). For development, use USB:
-`adb install` or `./gradlew :app:installDebug`.
+### Karoo 3
+
+Grab the latest APK from [Releases](../../releases) and install it via the Hammerhead Companion
+app (paste the release APK URL). For development, use USB: `adb install` or
+`./gradlew :app:installDebug`.
+
+### Karoo 2
+
+The app runs on a Karoo 2 (it targets the karoo-ext SDK, which Hammerhead supports on both the
+Karoo 2 and Karoo 3), but the Companion-app install path is Karoo 3 only. On a Karoo 2, sideload
+the APK over USB with `adb install path/to/resupply-vX.Y.Z.apk` (download it from
+[Releases](../../releases)). The Extensions library folder only appears once a third-party app
+is installed.
 
 ## Building
 

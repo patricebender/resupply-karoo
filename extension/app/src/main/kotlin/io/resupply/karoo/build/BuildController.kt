@@ -3,7 +3,6 @@ package io.resupply.karoo.build
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnNavigationState
-import io.hammerhead.karooext.models.SystemNotification
 import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.ConfigStore
 import io.resupply.karoo.data.Poi
@@ -22,7 +21,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
-import java.util.UUID
 
 /**
  * Orchestrates a roadbook build, shared by both triggers (in-app button and the
@@ -156,24 +154,16 @@ class BuildController(
     private fun succeed(count: Int, byCategory: Map<Category, Int>): BuildState {
         val state = BuildState.Success(count, byCategory, System.currentTimeMillis())
         publish(state)
-        notify("Resupply: $count POIs found")
         return state
     }
 
     private fun fail(message: String): BuildState {
         val state = BuildState.Error(message)
         publish(state)
-        notify("Resupply: $message")
         return state
     }
 
     private fun publish(state: BuildState) = repository.setBuildState(state)
-
-    private fun notify(message: String) {
-        system.dispatch(
-            SystemNotification(id = UUID.randomUUID().toString(), message = message),
-        )
-    }
 
     private companion object {
         const val NAV_READ_TIMEOUT_MS = 5_000L

@@ -59,19 +59,17 @@ import io.resupply.karoo.service.RegionDownloadService.LivePhase
 import io.resupply.karoo.service.RegionDownloadService
 import kotlinx.coroutines.delay
 
-/** A region file bigger than this warrants a "this may be slow off Wi‑Fi" confirm. */
-private const val LARGE_REGION_BYTES = 5L * 1024 * 1024
-
 /**
  * Region picker, a collapsible tree from the bundled `regions.json`: a top section per
  * [Region.group] → the countries in it. A country whose id prefixes others (germany/usa/
  * canada) is an expandable node whose row is the whole-country download and which expands to
  * its states; other countries are leaves. Per-region size/place count comes from [manifest].
  *
- * Downloads run in a foreground service (direct WiFi transport), so this screen only reflects
- * state: [live] is the in-flight/just-finished download (with a **measured** rate + ETA);
- * [failedRegionIds] carries persisted failures for a Retry affordance. A [onWifi] banner tells
- * the rider that Wi‑Fi makes downloads far faster, and a large region opens a confirm.
+ * Downloads run in a foreground service with a hybrid transport (direct on WiFi, phone bridge
+ * off WiFi), so this screen only reflects state: [live] is the in-flight/just-finished download
+ * (with a **measured** rate + ETA); [failedRegionIds] carries persisted failures for a Retry
+ * affordance. A [onWifi] banner tells the rider that Wi‑Fi makes downloads far faster; off
+ * WiFi they fall back to the phone bridge, if a phone is connected, which is slower.
  */
 @Composable
 fun RegionsScreen(
@@ -99,9 +97,8 @@ fun RegionsScreen(
     }?.regionId
     val busy = downloadingId != null || removingRegionId != null
 
-    // A region pending removal or a large-download confirm — each drives a dialog.
+    // A region pending removal drives a confirm dialog.
     var confirmRemove by remember { mutableStateOf<Region?>(null) }
-    var confirmLarge by remember { mutableStateOf<Region?>(null) }
 
     confirmRemove?.let { region ->
         ConfirmDialog(
@@ -114,27 +111,10 @@ fun RegionsScreen(
             onDismiss = { confirmRemove = null },
         )
     }
-    confirmLarge?.let { region ->
-        val mb = manifest[region.id]?.let { formatMb(it.bytesGz) } ?: "a large file"
-        ConfirmDialog(
-            icon = Icons.Filled.Download,
-            accent = MaterialTheme.colorScheme.primary,
-            title = "Download ${region.label}?",
-            // This dialog only opens off Wi‑Fi (on Wi‑Fi a large region downloads straight away).
-            message = "This is $mb. Without Wi‑Fi it can take a long while. Connect to Wi‑Fi first for a much faster download.",
-            confirmLabel = "Download",
-            onConfirm = { onDownload(region); confirmLarge = null },
-            onDismiss = { confirmLarge = null },
-        )
-    }
 
-    // Decide download vs. confirm. On Wi‑Fi even a large region is quick, so just go —
-    // the confirm exists only to warn about a slow off‑Wi‑Fi download. Off Wi‑Fi, a large
-    // region still confirms; small ones always go.
-    val startDownload: (Region) -> Unit = { region ->
-        val big = (manifest[region.id]?.bytesGz ?: 0L) >= LARGE_REGION_BYTES
-        if (big && !onWifi) confirmLarge = region else onDownload(region)
-    }
+    // Downloads always start immediately: on WiFi the direct transport is fast, off WiFi the
+    // service falls back to the phone bridge (slower, but no confirm needed; the banner and the
+    // live ETA already communicate that it's slower off WiFi).
 
     // An update is offered only for a directly-installed region (one in [installedRegions],
     // i.e. `removable`) whose manifest data version outranks the installed one — not for a
@@ -156,8 +136,9 @@ fun RegionsScreen(
         }
         HorizontalDivider()
 
-        // Wi‑Fi guidance banner — the single biggest lever on download speed.
-        WifiBanner(onWifi)
+        // One banner carries connectivity state: an offline error (can't load the list) takes
+        // priority, else the Wi‑Fi speed hint.
+        WifiBanner(onWifi = onWifi, offline = manifestFailed)
 
         if (manifestLoading) {
             Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -165,14 +146,6 @@ fun RegionsScreen(
                 Spacer(Modifier.size(8.dp))
                 Text("Loading region list…", style = MaterialTheme.typography.bodyMedium)
             }
-        }
-        if (manifestFailed) {
-            Text(
-                "Couldn't reach the region list. Check your connection and try again.",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(16.dp),
-            )
         }
 
         val tree = remember(regions) { buildRegionTree(regions) }
@@ -211,7 +184,7 @@ fun RegionsScreen(
                         removing = removingRegionId == region.id,
                         updateAvailable = hasUpdate(region.id),
                         enabled = !busy && manifest.containsKey(region.id),
-                        onDownload = { startDownload(region) },
+                        onDownload = { onDownload(region) },
                         onUpdate = { onUpdate(region) },
                         onRemove = { confirmRemove = region },
                     )
@@ -249,7 +222,7 @@ fun RegionsScreen(
                                 removing = removingRegionId == country.region.id,
                                 updateAvailable = hasUpdate(country.region.id),
                                 enabled = !busy && manifest.containsKey(country.region.id),
-                                onDownload = { startDownload(country.region) },
+                                onDownload = { onDownload(country.region) },
                                 onUpdate = { onUpdate(country.region) },
                                 onRemove = { confirmRemove = country.region },
                             )
@@ -271,7 +244,7 @@ fun RegionsScreen(
                                 updateAvailable = hasUpdate(country.region.id),
                                 enabled = !busy && manifest.containsKey(country.region.id),
                                 onExpandToggle = { expanded[country.region.id] = !countryOpen },
-                                onDownload = { startDownload(country.region) },
+                                onDownload = { onDownload(country.region) },
                                 onUpdate = { onUpdate(country.region) },
                                 onRemove = { confirmRemove = country.region },
                             )
@@ -291,7 +264,7 @@ fun RegionsScreen(
                                     removing = removingRegionId == child.id,
                                     updateAvailable = hasUpdate(child.id),
                                     enabled = !busy && manifest.containsKey(child.id),
-                                    onDownload = { startDownload(child) },
+                                    onDownload = { onDownload(child) },
                                     onUpdate = { onUpdate(child) },
                                     onRemove = { confirmRemove = child },
                                 )
@@ -306,37 +279,44 @@ fun RegionsScreen(
 }
 
 /**
- * Reactive Wi‑Fi advice — the biggest lever on download speed. Off Wi‑Fi it shows a
- * persistent red banner nudging the rider to connect. The moment Wi‑Fi comes on it flips
- * to a brief green "connected" confirmation, then slides away — no permanent chrome once
- * downloads are fast. Stays hidden while connected.
+ * One connectivity banner, priority-ordered:
+ *  - [offline]: red, the region list couldn't load (no connection). Persistent.
+ *  - off Wi‑Fi (but online): a persistent "slower" nudge so the rider stays motivated to
+ *    switch to Wi‑Fi for a faster download.
+ *  - on Wi‑Fi: a green "connected" beat, then it slides away (no permanent chrome once fast).
  */
 @Composable
-private fun WifiBanner(onWifi: Boolean) {
-    // Show the green confirmation only for a short beat after a transition to Wi‑Fi.
-    var showConnected by remember { mutableStateOf(false) }
+private fun WifiBanner(onWifi: Boolean, offline: Boolean) {
+    // Only the green "connected" confirmation is transient; the offline and off-Wi‑Fi states
+    // stay put — they're the states we want the rider to notice and act on.
+    var showConnectedBeat by remember { mutableStateOf(false) }
     LaunchedEffect(onWifi) {
-        if (onWifi) {
-            showConnected = true
-            delay(2_000)
-            showConnected = false
-        } else {
-            showConnected = false
-        }
+        if (onWifi) { showConnectedBeat = true; delay(4_000); showConnectedBeat = false }
+        else showConnectedBeat = false
     }
 
-    // Off Wi‑Fi → red banner; just-connected → green banner; connected+settled → nothing.
-    val visible = !onWifi || showConnected
+    val visible = offline || !onWifi || showConnectedBeat
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut() + shrinkVertically()) {
         val green = Color(0xFF2E7D32)
-        val onGreen = Color.White
-        val bg = if (onWifi) green else MaterialTheme.colorScheme.errorContainer
-        val fg = if (onWifi) onGreen else MaterialTheme.colorScheme.onErrorContainer
-        val icon = if (onWifi) Icons.Filled.CheckCircle else Icons.Filled.WifiOff
-        val text = if (onWifi) {
-            "Wi‑Fi connected. Downloads are fast."
-        } else {
-            "Turn on Wi‑Fi to download much faster. Without it, a large region can take a long time."
+        val bg: Color
+        val fg: Color
+        val icon = if (onWifi && !offline) Icons.Filled.CheckCircle else Icons.Filled.WifiOff
+        val text: String
+        when {
+            offline -> {
+                bg = MaterialTheme.colorScheme.errorContainer
+                fg = MaterialTheme.colorScheme.onErrorContainer
+                text = "No connection. Connect to Wi‑Fi or your phone."
+            }
+            onWifi -> {
+                bg = green; fg = Color.White
+                text = "Wi‑Fi connected. Downloads are fast."
+            }
+            else -> {
+                bg = MaterialTheme.colorScheme.surfaceVariant
+                fg = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "Using phone. Turn on Wi‑Fi for a much faster download."
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth().background(bg).padding(horizontal = 16.dp, vertical = 10.dp),

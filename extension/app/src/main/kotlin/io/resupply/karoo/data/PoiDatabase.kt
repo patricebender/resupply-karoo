@@ -96,11 +96,9 @@ class PoiDatabase private constructor(private val dbFile: File) {
                 )
                 """.trimIndent(),
             )
-            d.execSQL(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS poi_rtree USING rtree(id, minLat, maxLat, minLng, maxLng)",
-            )
             d.execSQL("CREATE INDEX IF NOT EXISTS idx_poi_category ON poi(category)")
             d.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_poi_osm ON poi(osm_id)")
+            d.execSQL("CREATE INDEX IF NOT EXISTS idx_poi_latlon ON poi(lat, lng)")
             // Per-region installed data version (see RegionManifestEntry.dataVersion). Additive
             // and `IF NOT EXISTS` — no BUNDLED_DB_VERSION bump: an install predating this table
             // simply has no rows, so its regions read as version 1 (the correct floor).
@@ -133,8 +131,9 @@ class PoiDatabase private constructor(private val dbFile: File) {
             gunzippedDb: File,
             regionId: String,
             dataVersion: Int,
+            onProgress: ((fraction: Float) -> Unit)? = null,
         ): Int? {
-            val inserted = runCatching { mergeInto(context, gunzippedDb) }
+            val inserted = runCatching { mergeInto(context, gunzippedDb, onProgress) }
                 .onFailure { Timber.e(it, "region $regionId failed validation/merge") }
                 .getOrNull()
             gunzippedDb.delete()
@@ -156,44 +155,68 @@ class PoiDatabase private constructor(private val dbFile: File) {
 
         /**
          * Seed/merge helper shared by [installFromFile] and [seedFromAsset]. Validates the
-         * region file, attaches it to the live DB, appends rows with `INSERT OR IGNORE`,
-         * and rebuilds the R*Tree. Throws if the file is unusable (caller cleans up).
+         * region file, attaches it to the live DB, appends rows with `INSERT OR IGNORE` in
+         * batches so [onProgress] can report a real fraction. Throws if the file is unusable.
          * Returns the rows inserted.
          */
-        private fun mergeInto(context: Context, regionFile: File): Int {
+        private fun mergeInto(
+            context: Context,
+            regionFile: File,
+            onProgress: ((Float) -> Unit)? = null,
+        ): Int {
+            val t0 = System.currentTimeMillis()
             validateRegionFile(regionFile)
             val appCtx = context.applicationContext
             synchronized(this) {
                 val live = get(appCtx).writableDatabase()
                 val before = countRows(live)
-                val maxIdBefore = maxId(live)
+                Timber.d("merge: validated + counted in ${System.currentTimeMillis() - t0} ms")
+
                 live.execSQL("ATTACH DATABASE ? AS src", arrayOf<Any?>(regionFile.absolutePath))
                 try {
-                    live.beginTransaction()
-                    try {
-                        live.execSQL(
-                            "INSERT OR IGNORE INTO poi " +
-                                "(osm_id, lat, lng, type, category, name, tags, region_id) " +
-                                "SELECT osm_id, lat, lng, type, category, name, tags, region_id " +
-                                "FROM src.poi",
-                        )
-                        // Index only the rows just inserted. `poi.id` is autoincrementing
-                        // rowid, so every new row has id > maxIdBefore; INSERT OR IGNORE
-                        // skipped the dupes, so this is exactly the coverage delta — O(delta)
-                        // instead of rebuilding the whole R*Tree on every install.
-                        live.execSQL(
-                            "INSERT INTO poi_rtree (id, minLat, maxLat, minLng, maxLng) " +
-                                "SELECT id, lat, lat, lng, lng FROM poi WHERE id > ?",
-                            arrayOf<Any?>(maxIdBefore),
-                        )
-                        live.setTransactionSuccessful()
-                    } finally {
-                        live.endTransaction()
+                    live.execSQL("PRAGMA synchronous=OFF")
+                    live.execSQL("PRAGMA temp_store=MEMORY")
+
+                    // Batch the INSERT by src rowid range so we can emit progress. Each batch is
+                    // its own transaction; the extra commit overhead is small vs giving the user
+                    // a real fraction instead of a stuck indeterminate bar.
+                    val maxSrcId = live.rawQuery("SELECT COALESCE(MAX(id),0) FROM src.poi", null)
+                        .use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+                    val batchSize = 50_000L
+                    val totalBatches = ((maxSrcId + batchSize - 1) / batchSize).coerceAtLeast(1)
+                    var cursor = 0L
+                    var batchesDone = 0L
+                    val tInsert = System.currentTimeMillis()
+
+                    while (cursor < maxSrcId) {
+                        val batchEnd = (cursor + batchSize).coerceAtMost(maxSrcId)
+                        live.beginTransaction()
+                        try {
+                            live.execSQL(
+                                "INSERT OR IGNORE INTO poi " +
+                                    "(osm_id, lat, lng, type, category, name, tags, region_id) " +
+                                    "SELECT osm_id, lat, lng, type, category, name, tags, region_id " +
+                                    "FROM src.poi WHERE id > ? AND id <= ?",
+                                arrayOf<Any?>(cursor, batchEnd),
+                            )
+                            live.setTransactionSuccessful()
+                        } finally {
+                            live.endTransaction()
+                        }
+                        cursor = batchEnd
+                        batchesDone++
+                        onProgress?.invoke((batchesDone.toFloat() / totalBatches).coerceIn(0f, 1f))
                     }
+                    onProgress?.invoke(1f)
+                    Timber.d("merge: INSERT done in ${System.currentTimeMillis() - tInsert} ms")
                 } finally {
+                    live.execSQL("PRAGMA synchronous=NORMAL")
+                    live.execSQL("PRAGMA temp_store=DEFAULT")
                     live.execSQL("DETACH DATABASE src")
                 }
-                return countRows(live) - before
+                val result = countRows(live) - before
+                Timber.d("merge: total ${System.currentTimeMillis() - t0} ms for $result rows")
+                return result
             }
         }
 
@@ -236,13 +259,6 @@ class PoiDatabase private constructor(private val dbFile: File) {
                 val before = countRows(live)
                 live.beginTransaction()
                 try {
-                    // Drop just this region's rtree entries (by the ids about to go), then
-                    // the poi rows — O(region) instead of rebuilding the whole R*Tree.
-                    live.execSQL(
-                        "DELETE FROM poi_rtree WHERE id IN " +
-                            "(SELECT id FROM poi WHERE region_id = ?)",
-                        arrayOf<Any?>(id),
-                    )
                     live.execSQL("DELETE FROM poi WHERE region_id = ?", arrayOf<Any?>(id))
                     live.execSQL("DELETE FROM region_meta WHERE region_id = ?", arrayOf<Any?>(id))
                     live.setTransactionSuccessful()
@@ -258,12 +274,6 @@ class PoiDatabase private constructor(private val dbFile: File) {
         private fun countRows(d: SQLiteDatabase): Int =
             d.rawQuery("SELECT COUNT(*) FROM poi", null).use { c ->
                 if (c.moveToFirst()) c.getInt(0) else 0
-            }
-
-        /** Highest `poi.id` currently in the DB (0 when empty). */
-        private fun maxId(d: SQLiteDatabase): Long =
-            d.rawQuery("SELECT COALESCE(MAX(id), 0) FROM poi", null).use { c ->
-                if (c.moveToFirst()) c.getLong(0) else 0L
             }
 
         private fun create(context: Context): PoiDatabase {

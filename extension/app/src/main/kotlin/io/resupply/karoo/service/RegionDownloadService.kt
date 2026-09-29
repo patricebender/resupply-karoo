@@ -132,11 +132,15 @@ class RegionDownloadService : Service() {
             },
             onInstalling = {
                 // Bytes are in; the merge into the live DB runs now. Surface it so the row shows
-                // "Installing…" (not a stale 100% download bar) while it finishes.
+                // "Installing…" with a real progress bar while it finishes.
                 _liveDownload.value = _liveDownload.value?.copy(
-                    phase = LivePhase.INSTALLING, fraction = 1f, bytesPerSec = 0L, etaSeconds = null,
+                    phase = LivePhase.INSTALLING, fraction = 0f, bytesPerSec = 0L, etaSeconds = null,
                 )
                 updateInstallingNotification(label)
+            },
+            onInstallProgress = { fraction ->
+                _liveDownload.value = _liveDownload.value?.copy(fraction = fraction)
+                updateNotification(label, (fraction * 100).toInt(), null)
             },
         )
 

@@ -20,16 +20,6 @@ live.
 <table width="100%">
   <tr>
     <td width="50%" valign="top" align="center">
-      <img src="docs/media/map-pois.png" alt="Typed POI pins along the route on the Karoo map" width="320">
-    </td>
-    <td width="50%" valign="top">
-      <h3>🗺️ Pins always in sync</h3>
-      Pins on the map always match your resupply selection — toggle categories or favorites to
-      focus the map on what's relevant to you.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top" align="center">
       <img src="docs/media/01-instant-build.gif" alt="Building the roadbook in seconds" width="280">
     </td>
     <td width="50%" valign="top">
@@ -47,6 +37,16 @@ live.
     </td>
     <td width="50%" valign="top" align="center">
       <img src="docs/media/03-favorites.gif" alt="Starring favorites and filtering to them" width="280">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/map-pois.png" alt="Typed POI pins along the route on the Karoo map" width="320">
+    </td>
+    <td width="50%" valign="top">
+      <h3>🗺️ Pins always in sync</h3>
+      Pins on the map always match your resupply selection — toggle categories or favorites to
+      focus the map on what's relevant to you.
     </td>
   </tr>
   <tr>
@@ -122,9 +122,8 @@ live.
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🗺️ Google Maps for live data</h3>
-      Fills in opening hours and contact details on demand when OpenStreetMap doesn't have
-      them.
+      <h3>🌍 Regional coverage</h3>
+      Download the regions you ride. Europe, the USA, and Canada are supported for now.
     </td>
     <td width="50%" valign="top" align="center">
       <img src="docs/media/regions.png" alt="Regions screen with installed regions and place counts" width="280">
@@ -221,4 +220,9 @@ the Places policy permits.
 
 ## License
 
-[Apache-2.0](LICENSE).
+Code is licensed under [GPL-3.0](LICENSE). You are free to use, study, share, and modify it;
+any distributed derivative must remain open under the same license.
+
+The **Resupply** name and logo are not covered by that license. They identify this project,
+so please don't use them for a fork or a repackaged build in a way that suggests it is the
+official app.

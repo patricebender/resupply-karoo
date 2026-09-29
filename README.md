@@ -14,24 +14,63 @@ offline roadbook of resupply stops along the way — food, water, coffee, bike s
 you can plan refuels without cellular signal. No route loaded? It finds resupply around you,
 live.
 
+<div align="center">
+<img src="docs/media/map-pois.png" alt="Typed POI pins along the route on the Karoo map" width="320">
+</div>
+
 ## Features
 
 - **Offline resupply along a route.** Finds resupply stops along the route you're riding, no
-  signal needed — the whole POI database rides along inside the app.
+  signal needed — the whole POI database rides along inside the app. The build runs on-device
+  and returns in a second or two.
+
+  <img src="docs/media/01-instant-build.gif" alt="Building the roadbook in seconds" width="280">
+
 - **Favorites to plan ahead.** Star the stops you're aiming for to plan the ride, then refine
   your roadbook down to just those.
+
+  <img src="docs/media/03-favorites.gif" alt="Starring favorites and filtering to them" width="280">
+
 - **Live resupply around you.** No route loaded? Resupply finds places around you and keeps
   them fresh as you move.
-- **9 categories.** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops, Fuel,
-  Ice Cream, and Hotels — toggle any of them on or off, on the fly.
+
+  <img src="docs/media/04-live-mode.gif" alt="Live mode showing resupply around your location" width="280">
+
+- **12 categories.** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops, Fuel
+  stations, Ice Cream, Hotels, Pharmacies, ATMs, and Campgrounds — toggle any of them on or off,
+  on the fly. Pins on the map always match your active filter.
+
+  <img src="docs/media/categories.png" alt="Category toggles with per-category counts" width="280">
+
 - **Safe water sources.** Shows drinkable water by default, hiding fountains and springs of
   unknown quality unless you want them.
+
+  <img src="docs/media/water.png" alt="Water source detail marked safe to refill" width="280">
+
+- **Downloadable regions.** Ships with a bundled seed and downloads more in-app — a single
+  Bundesland, or whole countries across Europe and North America.
+
+  <img src="docs/media/02-regions-download.gif" alt="Browsing and downloading a region in-app" width="280">
+
+- **Data fields for the ride view.** Put upcoming resupply, your favorites, or any single
+  category straight on your data pages — distance ahead, detour, and the next stops.
+
+  <img src="docs/media/datafield.png" alt="In-ride data field showing upcoming water" width="280">
+
+- **Place detail at a glance.** Opening hours, distance and detour, address and phone, a
+  scannable Google Maps / website QR, and a short description for each stop.
+
+  <img src="docs/media/details.png" alt="Place detail with opening hours" width="240">
+  <img src="docs/media/qr.png" alt="Scannable QR to open the place on your phone" width="240">
+
 - **Google Maps for live data.** Fills in opening hours and contact details on demand when
   OpenStreetMap doesn't have them.
-- **Data fields for the ride view.** Put upcoming resupply, your favorites, or any single
-  category straight on your data pages.
-- **Place detail at a glance.** Opening hours, address and phone, a scannable website QR, and
-  a short description for each stop.
+
+- **Smart search radius & themes.** Searches tight in busy areas and reaches further where
+  places are sparse (or set a fixed radius yourself), plus light / dark / auto appearance.
+
+  <img src="docs/media/settings.png" alt="Settings: safe water, smart radius, appearance" width="280">
+  <img src="docs/media/regions.png" alt="Regions screen with installed regions and place counts" width="280">
 
 ## How it works
 

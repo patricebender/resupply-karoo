@@ -6,7 +6,7 @@ cellular signal. With no route loaded it finds resupply around the rider's curre
 instead. What sets it apart:
 
 - **Configurable detour distance** — how far off the route to search for POIs.
-- **Category toggles** — nine POI categories, switched on/off live without rebuilding.
+- **Category toggles** — twelve POI categories, switched on/off live without rebuilding.
 - **Favorites** — star the stops you're planning for; refine the roadbook down to just those.
 - **Safe-water filter** — drinkable water only by default.
 - **Ride-view data fields** — upcoming resupply, favorites, or a single category on a data page.

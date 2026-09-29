@@ -1,6 +1,7 @@
 package io.resupply.karoo
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import io.hammerhead.karooext.KarooSystemService
@@ -43,7 +45,12 @@ import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.WikipediaClient
 import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.extension.toSymbol
+import io.resupply.karoo.data.AppManifest
+import io.resupply.karoo.data.AppUpdateClient
+import io.resupply.karoo.service.AppUpdateService
 import io.resupply.karoo.service.RegionDownloadService
+import io.resupply.karoo.ui.AppUpdateCheck
+import io.resupply.karoo.ui.AppUpdateInfo
 import io.resupply.karoo.ui.SettingsScreen
 import io.resupply.karoo.ui.theme.ResupplyTheme
 import io.resupply.karoo.ui.PoiDetailScreen
@@ -113,6 +120,14 @@ class MainActivity : ComponentActivity() {
         androidx.compose.runtime.mutableStateOf<Map<String, RegionManifestEntry>>(emptyMap())
     private val manifestLoading = androidx.compose.runtime.mutableStateOf(false)
     private val manifestFailed = androidx.compose.runtime.mutableStateOf(false)
+
+    // The app update check, run when Settings opens. Drives the always-present Update section:
+    // Checking → UpToDate / Available / Failed. The manifest is kept on the Available/UpToDate
+    // states so the install action has the APK URL. Starts Checking; a failed fetch keeps the
+    // last good manifest but reports Failed only when there's nothing better to show.
+    private val appManifest = androidx.compose.runtime.mutableStateOf<AppManifest?>(null)
+    private val appCheckState =
+        androidx.compose.runtime.mutableStateOf<AppUpdateCheck>(AppUpdateCheck.Checking)
 
     // Bumped on every fresh entry from the data field (onCreate + onNewIntent). The app is
     // singleTop, so a re-tap re-uses this Activity and the composition survives — observing
@@ -286,6 +301,23 @@ class MainActivity : ComponentActivity() {
             )
 
             is Screen.Settings -> {
+                // Check for an app update on entering Settings (mirrors the Regions screen's
+                // manifest fetch). Keeps the last good value on failure; silent — no spinner.
+                LaunchedEffect(Unit) { loadAppManifest() }
+                val updateProgress by AppUpdateService.progress.collectAsStateWithLifecycle()
+                // Clear a stale terminal (DONE/FAILED) state when re-entering Settings, so a prior
+                // attempt doesn't linger over a fresh "update available".
+                LaunchedEffect(Unit) { AppUpdateService.clear() }
+                val manifest = appManifest.value
+                val checkState = appCheckState.value
+                // Re-read the "install unknown apps" grant on every resume, not just first
+                // composition: returning from the OS settings page (where the rider just granted
+                // it) resumes us, and the button must flip "Allow installs" → "Install now".
+                var canInstallApp by remember { mutableStateOf(canRequestInstalls()) }
+                LifecycleResumeEffect(Unit) {
+                    canInstallApp = canRequestInstalls()
+                    onPauseOrDispose { }
+                }
                 SettingsScreen(
                     config = config,
                     buildState = buildState,
@@ -313,6 +345,15 @@ class MainActivity : ComponentActivity() {
                     onThemeModeChange = { mode ->
                         lifecycleScope.launch { configStore.setThemeMode(mode) }
                     },
+                    updateCheck = checkState,
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    updateProgress = updateProgress,
+                    canInstallApp = canInstallApp,
+                    onInstallUpdate = {
+                        manifest?.let { AppUpdateService.start(applicationContext, it.latestApkUrl) }
+                    },
+                    onAllowInstalls = { openUnknownSourcesSettings() },
+                    onRetryCheck = { loadAppManifest() },
                     onBuild = ::runBuild,
                     onClear = {
                         repository.clear()
@@ -600,6 +641,81 @@ class MainActivity : ComponentActivity() {
                 regionManifest.value = manifest.regions.associateBy { it.id }
             }
         }
+    }
+
+    /**
+     * Fetch the app release manifest (the same manifest.json the Karoo store reads) so Settings
+     * can offer an in-app update. Small JSON over the Karoo bridge; keeps the last good value on
+     * failure — a failed check just leaves the Update section absent.
+     */
+    private fun loadAppManifest() {
+        // Only show the "Checking…" state when we have nothing better on screen; a silent refresh
+        // over an existing result keeps that result visible until the new one lands.
+        if (appManifest.value == null) appCheckState.value = AppUpdateCheck.Checking
+        lifecycleScope.launch {
+            val manifest = withKarooConnection(applicationContext) { system ->
+                AppUpdateClient(system).fetchManifest()
+            }
+            if (manifest != null) {
+                appManifest.value = manifest
+                appCheckState.value = if (AppUpdateClient.isNewer(manifest)) {
+                    AppUpdateCheck.Available(
+                        run {
+                            val notes = releaseNotes(manifest.releaseNotes)
+                            AppUpdateInfo(
+                                versionName = manifest.latestVersion,
+                                whatsNew = notes.firstOrNull().orEmpty(),
+                                notes = notes,
+                            )
+                        },
+                    )
+                } else {
+                    AppUpdateCheck.UpToDate
+                }
+            } else if (appManifest.value == null) {
+                // Nothing good to fall back to → surface the failure (retryable).
+                appCheckState.value = AppUpdateCheck.Failed
+            }
+        }
+    }
+
+    /**
+     * Route the rider to the OS "install unknown apps" permission for us, so the in-app updater
+     * can drive the installer. Needed once when [android.content.pm.PackageManager.canRequestPackageInstalls]
+     * is false; the setting page is per-app on Android O+.
+     */
+    /**
+     * The release-note bullets as plain prose: each `* `/`- ` line, with markdown links
+     * `[text](url)` reduced to their text and `(#nn)`/`(hash)` refs dropped — the CHANGELOG is
+     * release-please Markdown, but the settings row + changelog dialog show plain text. First
+     * entry feeds the inline "what's new" line; the whole list feeds the dialog.
+     */
+    private fun releaseNotes(notes: String): List<String> =
+        notes.lineSequence()
+            .filter { it.trimStart().startsWith("* ") || it.trimStart().startsWith("- ") }
+            .map { line ->
+                line.trim().removePrefix("* ").removePrefix("- ")
+                    .replace(Regex("""\[([^\]]+)\]\([^)]*\)"""), "$1") // [text](url) -> text
+                    .replace(Regex("""\s*\(#\d+\)"""), "")             // drop (#123) PR refs
+                    .replace(Regex("""\s*\(\[[0-9a-f]{6,}\]\([^)]*\)\)"""), "") // drop ([hash](url))
+                    .replace(Regex("""\s{2,}"""), " ")
+                    .trim()
+            }
+            .filter { it.isNotBlank() }
+            .toList()
+
+    /** Whether the OS grants us "install unknown apps" (always true pre-O, where it's implicit). */
+    private fun canRequestInstalls(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()
+
+    private fun openUnknownSourcesSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val intent = Intent(
+            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            android.net.Uri.parse("package:$packageName"),
+        )
+        runCatching { startActivity(intent) }
+            .onFailure { Timber.e(it, "couldn't open unknown-sources settings") }
     }
 
     /**

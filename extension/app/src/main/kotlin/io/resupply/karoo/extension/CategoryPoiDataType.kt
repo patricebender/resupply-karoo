@@ -45,7 +45,7 @@ class CategoryPoiDataType(
         // Always one card for this category, whatever the slot size. An empty list just draws
         // the card's "–" hero (same as the rotating field's small slot for a category with
         // nothing ahead) — the rider still sees which amenity the field is for.
-        SmallUpcomingField(rowFor(category, r.upcoming[category].orEmpty(), large = false), activity, interactive)
+        SmallUpcomingField(rowFor(category, r.upcoming[category].orEmpty(), large = false, useImperial = r.useImperial), activity, interactive)
     }
 
     companion object {

@@ -138,6 +138,8 @@ fun WaybookScreen(
     nearbyPaused: Boolean,
     // The detour radius (meters) — sets the nearby proximity band's right-edge scale.
     nearbyRadiusMeters: Int,
+    // Render distances in miles/feet instead of km/m (resolved units mode).
+    useImperial: Boolean,
     buildState: BuildState,
     // The rider's starred POIs (ids) on the current roadbook, and whether the "favorites only"
     // filter is on. Route-mode only — both are ignored/hidden when there's no route.
@@ -247,6 +249,7 @@ fun WaybookScreen(
                 hasFix = riderLocation != null,
                 paused = nearbyPaused,
                 hasData = installedRegions.isNotEmpty(),
+                useImperial = useImperial,
                 onBuild = onBuild,
                 onOpenRegions = onOpenRegions,
             )
@@ -344,6 +347,7 @@ fun WaybookScreen(
                     listEndMeters = visibleSpanMeters?.second,
                     // Little yellow stars above favorite dots (route timeline only).
                     favoritePoiIds = favoritePoiIds,
+                    useImperial = useImperial,
                 )
                 HorizontalDivider()
             }
@@ -359,6 +363,7 @@ fun WaybookScreen(
                         // Straight-line span of the visible list window → the shared range bracket.
                         listStartMeters = visibleNearbySpanMeters?.first,
                         listEndMeters = visibleNearbySpanMeters?.second,
+                        useImperial = useImperial,
                     )
                     HorizontalDivider()
                 }
@@ -444,6 +449,7 @@ fun WaybookScreen(
                     favoritable = routeMode,
                     isFavorite = poi.id in favoritePoiIds,
                     onToggleFavorite = { fav -> onToggleFavorite(poi, fav) },
+                    useImperial = useImperial,
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
             }
@@ -663,6 +669,8 @@ private fun PoiRow(
     favoritable: Boolean,
     isFavorite: Boolean,
     onToggleFavorite: (Boolean) -> Unit,
+    // Render distances in miles/feet instead of km/m (resolved units mode).
+    useImperial: Boolean,
 ) {
     val style = styleForType(poi.type)
     val passed = behindMeters != null
@@ -683,11 +691,11 @@ private fun PoiRow(
         // at most three lines on the right).
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             StatusIcon(style = style, hours = hours)
-            DistanceLabel(aheadMeters = aheadMeters, behindMeters = behindMeters)
+            DistanceLabel(aheadMeters = aheadMeters, behindMeters = behindMeters, useImperial = useImperial)
             // Detour (only meaningful along a route): a compact "+120m" under the distance.
             if (hasRoute && poi.detourMeters > 0) {
                 Text(
-                    "+${formatDistance(poi.detourMeters)}",
+                    "+${formatDistance(poi.detourMeters, useImperial)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -779,10 +787,10 @@ private fun StatusIcon(style: CategoryStyle, hours: OpeningHours.Hours?) {
  * when there's no live position. A little top padding separates it from the icon.
  */
 @Composable
-private fun DistanceLabel(aheadMeters: Double?, behindMeters: Double?) {
+private fun DistanceLabel(aheadMeters: Double?, behindMeters: Double?, useImperial: Boolean) {
     when {
         aheadMeters != null -> Text(
-            formatKm(aheadMeters),
+            formatKm(aheadMeters, useImperial),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
@@ -790,7 +798,7 @@ private fun DistanceLabel(aheadMeters: Double?, behindMeters: Double?) {
             modifier = Modifier.padding(top = 3.dp),
         )
         behindMeters != null -> Text(
-            "↓ ${formatKm(behindMeters)}",
+            "↓ ${formatKm(behindMeters, useImperial)}",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -964,6 +972,8 @@ private fun EmptyState(
     // Whether any region data is installed. With no data, the route face disables Find and shows a
     // hint pointing the rider to Settings → Data.
     hasData: Boolean,
+    // Render distances in miles/feet instead of km/m (resolved units mode).
+    useImperial: Boolean,
     onBuild: () -> Unit,
     onOpenRegions: () -> Unit,
 ) {
@@ -973,7 +983,7 @@ private fun EmptyState(
     // vanish and be replaced by the route-oriented "Tracing your route…" copy — an abrupt swap
     // between two different layouts. Each face animates its own mark while building.
     if (loaded != null) {
-        RouteReadyState(loaded, buildState, hasData, onBuild, onOpenRegions)
+        RouteReadyState(loaded, buildState, hasData, useImperial, onBuild, onOpenRegions)
     } else {
         NearbyReadyState(buildState, hasFix, paused, onBuild)
     }
@@ -992,7 +1002,7 @@ private fun EmptyState(
  * attempt) a similar hint suggests the route may be outside an installed region.
  */
 @Composable
-private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, hasData: Boolean, onBuild: () -> Unit, onOpenRegions: () -> Unit) {
+private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, hasData: Boolean, useImperial: Boolean, onBuild: () -> Unit, onOpenRegions: () -> Unit) {
     val building = buildState is BuildState.Building
     // A route search ran and returned nothing because the corridor is outside an installed region.
     // Only true for that specific error — not for connectivity failures or GPS timeouts.
@@ -1031,7 +1041,7 @@ private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, h
         // Distance line stays put while building — only the title above swaps to the phase, so
         // the block barely changes between idle and building (matching the nearby face's calm).
         Text(
-            routeSubtitle(route),
+            routeSubtitle(route, useImperial),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -1072,8 +1082,8 @@ private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, h
 }
 
 /** The route's distance line, with a "· reversed" note when riding it backwards. */
-private fun routeSubtitle(route: RouteState.Loaded?): String {
-    val km = route?.distanceMeters?.takeIf { it > 0.0 }?.let { formatKm(it) }
+private fun routeSubtitle(route: RouteState.Loaded?, useImperial: Boolean): String {
+    val km = route?.distanceMeters?.takeIf { it > 0.0 }?.let { formatKm(it, useImperial) }
     return when {
         km != null && route.reversed -> "$km · reversed"
         km != null -> km

@@ -12,6 +12,7 @@ import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.StreamState
 import io.hammerhead.karooext.models.UpdateGraphicConfig
+import io.hammerhead.karooext.models.UserProfile
 import io.hammerhead.karooext.models.ViewConfig
 import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.ConfigStore
@@ -40,6 +41,8 @@ import io.resupply.karoo.util.haversine
 import io.resupply.karoo.util.locationFlow
 import io.resupply.karoo.util.navStateFlow
 import io.resupply.karoo.util.streamDataFlow
+import io.resupply.karoo.util.userProfileFlow
+import io.resupply.karoo.ui.useImperial
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,8 +115,14 @@ abstract class UpcomingPoisBaseDataType(
         val locationFlow = karooSystem.locationFlow()
             .map { LatLng(it.lat, it.lng) as LatLng? }
             .onStart { emit(null) }
-        val liveFlow = combine(progressFlow, routeFlow, locationFlow) { stream, route, loc ->
-            Live(stream, route, loc)
+        // The Karoo's own unit preference (imperial vs metric), so the Auto units mode renders
+        // distances to match the device. Folded into `liveFlow` to keep the top-level combine at
+        // its 5-arg typed overload. Seeded metric so the field renders before the first profile.
+        val unitFlow = karooSystem.userProfileFlow()
+            .map { it.preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL }
+            .onStart { emit(false) }
+        val liveFlow = combine(progressFlow, routeFlow, locationFlow, unitFlow) { stream, route, loc, imperial ->
+            Live(stream, route, loc, imperial)
         }
 
         // MainActivity, launched when the rider taps the field (open app / "Tap to build").
@@ -128,7 +137,8 @@ abstract class UpcomingPoisBaseDataType(
                 rotation,
             ) { pois, routeLen, cfg, live, tick ->
                 Frame(pois, routeLen, cfg.enabledCategories, cfg.safeWaterOnly, cfg.detourMeters,
-                    cfg.favoritePoiIds, live.stream, live.routeState, live.location, tick)
+                    cfg.favoritePoiIds, live.stream, live.routeState, live.location,
+                    cfg.unitMode.useImperial(live.systemImperial), tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
                     render(f, config, mainActivity, interactive)
@@ -149,6 +159,7 @@ abstract class UpcomingPoisBaseDataType(
         val stream: StreamState.Streaming?,
         val routeState: RouteState,
         val location: LatLng?,
+        val systemImperial: Boolean,
     )
 
     private data class Frame(
@@ -161,6 +172,7 @@ abstract class UpcomingPoisBaseDataType(
         val stream: StreamState.Streaming?,
         val routeState: RouteState,
         val location: LatLng?,
+        val useImperial: Boolean,
         val rotationTick: Long,
     )
 
@@ -183,6 +195,8 @@ abstract class UpcomingPoisBaseDataType(
         val upcoming: Map<Category, List<UpcomingPoi>>,
         val progressMeters: Double,
         val source: PoiSource,
+        // Render distances in miles/feet instead of km/m (resolved units mode). Passed to [rowFor].
+        val useImperial: Boolean,
     )
 
     /**
@@ -251,7 +265,7 @@ abstract class UpcomingPoisBaseDataType(
                 rider?.let { haversine(it, LatLng(poi.lat, poi.lng)) }?.takeIf { it <= radius }
             }
             return renderResolved(
-                ResolvedPois(f.enabled, upcoming, progressMeters = 0.0, source = source),
+                ResolvedPois(f.enabled, upcoming, progressMeters = 0.0, source = source, useImperial = f.useImperial),
                 config,
                 f.rotationTick,
                 mainActivity,
@@ -283,7 +297,7 @@ abstract class UpcomingPoisBaseDataType(
             upcomingByCategory(f.pois, f.enabled, safeWaterOnly = f.safeWaterOnly) { aheadMetersFor(it, progress) }
         }
         renderResolved(
-            ResolvedPois(f.enabled, upcoming, progress, source = source),
+            ResolvedPois(f.enabled, upcoming, progress, source = source, useImperial = f.useImperial),
             config,
             f.rotationTick,
             mainActivity,
@@ -300,17 +314,18 @@ abstract class UpcomingPoisBaseDataType(
         category: Category,
         pois: List<UpcomingPoi>,
         large: Boolean,
+        useImperial: Boolean,
     ): CategoryRow {
         val cells = pois.mapIndexed { i, p ->
             PoiCell(
-                distance = formatKm(p.aheadMeters),
+                distance = formatKm(p.aheadMeters, useImperial),
                 // Chevrons mark "further along the route": nearest bare, 2nd ›, 3rd ».
                 arrow = when (i) {
                     0 -> ""
                     1 -> "›"
                     else -> "»"
                 },
-                detour = formatDetour(p.detourMeters).removePrefix("·").takeIf { it.isNotEmpty() },
+                detour = formatDetour(p.detourMeters, useImperial).removePrefix("·").takeIf { it.isNotEmpty() },
                 detourMeters = p.detourMeters,
             )
         }

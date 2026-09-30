@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,6 +67,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -74,6 +76,7 @@ import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.ThemeMode
+import io.resupply.karoo.data.UnitMode
 import io.resupply.karoo.service.AppUpdateService
 import io.resupply.karoo.service.AppUpdateService.UpdatePhase
 import io.resupply.karoo.service.RegionDownloadService
@@ -133,6 +136,10 @@ fun SettingsScreen(
     onSmartDistanceToggle: (Boolean) -> Unit,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    unitMode: UnitMode,
+    onUnitModeChange: (UnitMode) -> Unit,
+    // Resolved units for the detour-radius label (Auto folds in the Karoo's preference).
+    useImperial: Boolean,
     // The app-update check result (checking / up-to-date / available / failed). Drives the
     // always-present Update section. The check runs on entering Settings.
     updateCheck: AppUpdateCheck,
@@ -284,7 +291,7 @@ fun SettingsScreen(
                 var dragIndex by remember(currentIndex) { mutableStateOf<Float?>(null) }
                 val shownIndex = dragIndex ?: currentIndex.toFloat()
                 Text(
-                    formatDistance(options[shownIndex.roundToInt().coerceIn(0, options.lastIndex)]),
+                    formatDistance(options[shownIndex.roundToInt().coerceIn(0, options.lastIndex)], useImperial),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Slider(
@@ -305,6 +312,10 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
             SectionHeader("Appearance")
             AppearanceSection(mode = themeMode, onModeChange = onThemeModeChange)
+
+            Spacer(Modifier.height(20.dp))
+            SectionHeader("Units")
+            UnitsSection(mode = unitMode, onModeChange = onUnitModeChange)
 
             // Always present, so the rider can always see "am I current?" — a stable anchor that
             // distinguishes up-to-date from a check that hasn't landed or failed.
@@ -525,39 +536,64 @@ private fun SmartDistanceRow(checked: Boolean, enabled: Boolean, onToggle: (Bool
  */
 @Composable
 private fun AppearanceSection(mode: ThemeMode, onModeChange: (ThemeMode) -> Unit) {
-    ThemeModeToggle(
-        mode = mode,
-        onModeChange = onModeChange,
+    SegmentedModeToggle(
+        segments = THEME_SEGMENTS,
+        selected = mode,
+        onSelect = onModeChange,
         modifier = Modifier.fillMaxWidth(),
     )
 }
 
-/** The three segments, in display order (left→right), each with its icon + label. */
+/**
+ * The Units section: a single three-way distance toggle — km / Auto / mi — mapping directly to the
+ * three [UnitMode]s. Auto ([UnitMode.SYSTEM]) follows the Karoo's own unit preference and is the
+ * default; km/mi are explicit rider overrides. Same segmented control as Appearance.
+ */
+@Composable
+private fun UnitsSection(mode: UnitMode, onModeChange: (UnitMode) -> Unit) {
+    SegmentedModeToggle(
+        segments = UNIT_SEGMENTS,
+        selected = mode,
+        onSelect = onModeChange,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** The theme segments, in display order (left→right), each with its icon + label. */
 private val THEME_SEGMENTS = listOf(
     Triple(ThemeMode.LIGHT, Icons.Filled.WbSunny, "Light"),
     Triple(ThemeMode.SYSTEM, Icons.Filled.BrightnessAuto, "Auto"),
     Triple(ThemeMode.DARK, Icons.Filled.DarkMode, "Dark"),
 )
 
+/** The unit segments, in display order (left→right). Auto reuses the Appearance "Auto" icon. */
+private val UNIT_SEGMENTS = listOf(
+    Triple(UnitMode.METRIC, Icons.Filled.Straighten, "km"),
+    Triple(UnitMode.SYSTEM, Icons.Filled.BrightnessAuto, "Auto"),
+    Triple(UnitMode.IMPERIAL, Icons.Filled.Straighten, "mi"),
+)
+
 /**
- * A segmented Light / Auto / Dark control: a rounded track holding three equal cells, with a
- * highlighted pill thumb that slides to the selected cell (animated offset + color, the same motion
- * vocabulary as the header star toggle). Thin dividers between the resting cells sell the "three
- * segments" read; the active cell's content flips to the primary's on-color, the others stay muted.
- * Tapping a cell selects that [ThemeMode]. Width is measured so the thumb lands on exact thirds.
+ * A generic three-(or more)-way segmented control: a rounded track holding equal cells, with a
+ * highlighted pill thumb that slides to the [selected] cell (animated offset + color, the same
+ * motion vocabulary as the header star toggle). Thin dividers between the resting cells sell the
+ * "segments" read; the active cell's content flips to the primary's on-color, the others stay
+ * muted. Tapping a cell selects its value. Width is measured so the thumb lands on exact fractions.
+ * Shared by the Appearance and Units sections.
  */
 @Composable
-private fun ThemeModeToggle(
-    mode: ThemeMode,
-    onModeChange: (ThemeMode) -> Unit,
+private fun <T> SegmentedModeToggle(
+    segments: List<Triple<T, ImageVector, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val count = THEME_SEGMENTS.size
-    val selectedIndex = THEME_SEGMENTS.indexOfFirst { it.first == mode }.coerceAtLeast(0)
+    val count = segments.size
+    val selectedIndex = segments.indexOfFirst { it.first == selected }.coerceAtLeast(0)
     val thumbIndex by animateFloatAsState(
         targetValue = selectedIndex.toFloat(),
         animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-        label = "thememode-thumb",
+        label = "segmentedmode-thumb",
     )
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
     val thumbColor = MaterialTheme.colorScheme.primary
@@ -578,7 +614,7 @@ private fun ThemeModeToggle(
         val segmentWidth = maxWidth / count
 
         // Resting dividers between cells — fade out as the thumb approaches so it never overlaps
-        // the accent pill. Two dividers for three cells.
+        // the accent pill. One fewer divider than cells.
         for (i in 1 until count) {
             // Distance (in cells) from the thumb centre to this divider; near → hide it.
             val near = (kotlin.math.abs(thumbIndex + 0.5f - i)).coerceIn(0f, 1f)
@@ -604,21 +640,21 @@ private fun ThemeModeToggle(
                 .background(thumbColor),
         )
 
-        // The three cells on top: each exactly one third wide, content centred within it.
+        // The cells on top: each exactly one Nth wide, content centred within it.
         Row(modifier = Modifier.fillMaxSize()) {
-            THEME_SEGMENTS.forEachIndexed { index, (segMode, icon, label) ->
+            segments.forEachIndexed { index, (value, icon, label) ->
                 val active = index == selectedIndex
                 val content by animateColorAsState(
                     targetValue = if (active) onThumb else onTrack,
                     animationSpec = tween(durationMillis = 300),
-                    label = "thememode-content",
+                    label = "segmentedmode-content",
                 )
                 Row(
                     modifier = Modifier
                         .width(segmentWidth)
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(percent = 50))
-                        .clickable { onModeChange(segMode) },
+                        .clickable { onSelect(value) },
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

@@ -5,7 +5,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.Poi
+import io.resupply.karoo.data.UnitMode
 import java.util.Calendar
+import java.util.Locale
 
 /**
  * Resolve a POI's normalized [OpeningHours.Hours] from whichever source we have:
@@ -15,24 +17,74 @@ import java.util.Calendar
 fun hoursFor(poi: Poi, googleHours: OpeningHours.Hours?): OpeningHours.Hours? =
     poi.tags["opening_hours"]?.let { OpeningHours.Hours.fromOsm(it) } ?: googleHours
 
-/** Human distance: "180 m" under 1 km, "1.6 km" above. */
-fun formatDistance(meters: Int): String =
-    if (meters >= 1000) "%.1f km".format(meters / 1000.0) else "$meters m"
+// --- Units ------------------------------------------------------------------------------------
+//
+// Metres are the app's internal distance unit (POI distances, route length, detour radius all
+// stay in metres). The formatters below convert to km/m or mi/ft only at display time, driven by
+// a resolved [useImperial] boolean so the same call renders either system.
 
-fun formatDistance(meters: Double): String = formatDistance(meters.toInt())
+/** One mile in metres, and one foot in metres — the imperial conversion constants. */
+const val METERS_PER_MILE = 1609.344
+const val METERS_PER_FOOT = 0.3048
+
+// Below this, imperial distances read in feet rather than fractional miles (the mi/ft analog of
+// the metric m→km split at 1 km). 0.1 mi ≈ 161 m ≈ 528 ft.
+private const val IMPERIAL_FEET_BELOW_MILES = 0.1
 
 /**
- * Compact along-route range for the collapsed range pill, e.g. "20–21 km" or "800–950 m".
- * Shares one unit across both ends so it reads as a single span, not two independent
- * distances. Uses km when either end is ≥ 1 km. If both ends round to the same displayed
- * value (a degenerate span), shows that single value instead of "x–x".
+ * Resolve a [UnitMode] to a concrete `useImperial` flag. [UnitMode.SYSTEM] (Auto) follows the
+ * Karoo's own preference via [systemImperial] (from `UserProfile.preferredUnit.distance`);
+ * [UnitMode.METRIC]/[UnitMode.IMPERIAL] are explicit overrides.
  */
-fun formatRangeCompact(startMeters: Double, endMeters: Double): String {
+fun UnitMode.useImperial(systemImperial: Boolean): Boolean = when (this) {
+    UnitMode.SYSTEM -> systemImperial
+    UnitMode.METRIC -> false
+    UnitMode.IMPERIAL -> true
+}
+
+/**
+ * Human distance. Metric: "180 m" under 1 km, "1.6 km" above. Imperial: "450 ft" under 0.1 mi,
+ * "1.6 mi" above.
+ */
+fun formatDistance(meters: Int, useImperial: Boolean = false): String {
+    if (!useImperial) {
+        return if (meters >= 1000) String.format(Locale.US, "%.1f km", meters / 1000.0) else "$meters m"
+    }
+    val miles = meters / METERS_PER_MILE
+    return if (miles >= IMPERIAL_FEET_BELOW_MILES) {
+        String.format(Locale.US, "%.1f mi", miles)
+    } else {
+        "${(meters / METERS_PER_FOOT).toInt()} ft"
+    }
+}
+
+fun formatDistance(meters: Double, useImperial: Boolean = false): String =
+    formatDistance(meters.toInt(), useImperial)
+
+/**
+ * Compact along-route range for the collapsed range pill, e.g. "20–21 km" / "800–950 m", or in
+ * imperial "12–13 mi" / "300–450 ft". Shares one unit across both ends so it reads as a single
+ * span, not two independent distances. Switches to the larger unit (km/mi) when the far end is
+ * beyond the threshold. If both ends round to the same displayed value (a degenerate span), shows
+ * that single value instead of "x–x".
+ */
+fun formatRangeCompact(startMeters: Double, endMeters: Double, useImperial: Boolean = false): String {
     val lo = minOf(startMeters, endMeters)
     val hi = maxOf(startMeters, endMeters)
+    if (useImperial) {
+        return if (hi / METERS_PER_MILE >= IMPERIAL_FEET_BELOW_MILES) {
+            val a = String.format(Locale.US, "%.1f", lo / METERS_PER_MILE)
+            val b = String.format(Locale.US, "%.1f", hi / METERS_PER_MILE)
+            if (a == b) "$a mi" else "$a–$b mi"
+        } else {
+            val a = (lo / METERS_PER_FOOT).toInt()
+            val b = (hi / METERS_PER_FOOT).toInt()
+            if (a == b) "$a ft" else "$a–$b ft"
+        }
+    }
     return if (hi >= 1000) {
-        val a = "%.1f".format(lo / 1000.0)
-        val b = "%.1f".format(hi / 1000.0)
+        val a = String.format(Locale.US, "%.1f", lo / 1000.0)
+        val b = String.format(Locale.US, "%.1f", hi / 1000.0)
         if (a == b) "$a km" else "$a–$b km"
     } else {
         val a = lo.toInt()

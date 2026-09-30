@@ -10,6 +10,7 @@ import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnStreamState
 import io.hammerhead.karooext.models.StreamState
+import io.hammerhead.karooext.models.UserProfile
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
@@ -115,6 +116,17 @@ fun KarooSystemService.navStateFlow(): Flow<OnNavigationState.NavigationState> =
  */
 fun KarooSystemService.locationFlow(): Flow<OnLocationChanged> = callbackFlow {
     val listenerId = addConsumer<OnLocationChanged> { event -> trySendBlocking(event) }
+    awaitClose { removeConsumer(listenerId) }
+}
+
+/**
+ * Cold flow of the rider's [UserProfile], subscribing on collect and unsubscribing on cancel.
+ * Carries the Karoo's own unit preference ([UserProfile.preferredUnit]) so the app and the data
+ * fields can render distances in km/mi to match the rider's device setting when the units mode is
+ * on Auto ([UnitMode.SYSTEM]). Same consumer pattern as [navStateFlow].
+ */
+fun KarooSystemService.userProfileFlow(): Flow<UserProfile> = callbackFlow {
+    val listenerId = addConsumer<UserProfile> { event -> trySendBlocking(event) }
     awaitClose { removeConsumer(listenerId) }
 }
 

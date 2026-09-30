@@ -44,6 +44,13 @@ enum class Category(val id: String, val label: String) {
  */
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
+/**
+ * Distance-unit selection. [SYSTEM] follows the Karoo's own unit preference
+ * (`UserProfile.preferredUnit.distance`, the default); [METRIC]/[IMPERIAL] are explicit rider
+ * overrides. Resolved to a concrete `useImperial` boolean by `UnitMode.useImperial` (see Format.kt).
+ */
+enum class UnitMode { SYSTEM, METRIC, IMPERIAL }
+
 /** Rider-configurable build settings. */
 data class ResupplyConfig(
     /** Detour search radius around the route, in meters. Ignored while [smartDistance] is on. */
@@ -77,6 +84,8 @@ data class ResupplyConfig(
     val favoritesOnly: Boolean = false,
     /** How the app resolves its light/dark theme. Defaults to following the Karoo system mode. */
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** How distances are shown (km/mi). Defaults to following the Karoo's unit preference. */
+    val unitMode: UnitMode = UnitMode.SYSTEM,
 ) {
     /**
      * Whether [poi] should be shown under this config: its category must be enabled, and —

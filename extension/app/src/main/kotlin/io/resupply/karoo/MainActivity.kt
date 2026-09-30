@@ -24,6 +24,7 @@ import io.hammerhead.karooext.models.LaunchPinDrop
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.StreamState
+import io.hammerhead.karooext.models.UserProfile
 import io.resupply.karoo.build.BuildController
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
@@ -66,7 +67,9 @@ import io.resupply.karoo.util.awaitOnce
 import io.resupply.karoo.util.locationFlow
 import io.resupply.karoo.util.navStateFlow
 import io.resupply.karoo.util.streamDataFlow
+import io.resupply.karoo.util.userProfileFlow
 import io.resupply.karoo.util.withKarooConnection
+import io.resupply.karoo.ui.useImperial
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +115,10 @@ class MainActivity : ComponentActivity() {
     // Rider location, followed live off the same connection. Powers the overview's nearby
     // list distances (straight-line to each POI) when the current set is a /nearby build.
     private val riderLocation = MutableStateFlow<LatLng?>(null)
+    // The Karoo's own distance-unit preference (imperial vs metric), followed live off the same
+    // connection. Drives the Auto ([UnitMode.SYSTEM]) units mode so distances match the device
+    // setting. Null until the first UserProfile arrives → treated as metric.
+    private val systemImperial = MutableStateFlow(false)
     private val regionCatalog: List<Region> by lazy { RegionCatalog.load(applicationContext) }
 
     // Region manifest (sizes/counts) + its fetch state. The download itself lives in the
@@ -171,6 +178,11 @@ class MainActivity : ComponentActivity() {
                 progressSystem.streamDataFlow(DataType.Type.AVERAGE_SPEED).collect { state ->
                     avgSpeedMps.value = (state as? StreamState.Streaming)
                         ?.dataPoint?.values?.get(DataType.Field.AVERAGE_SPEED)
+                }
+            }
+            lifecycleScope.launch {
+                progressSystem.userProfileFlow().collect {
+                    systemImperial.value = it.preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL
                 }
             }
         }
@@ -235,6 +247,11 @@ class MainActivity : ComponentActivity() {
             config.detourMeters
         }
 
+        // Resolve the units mode to a concrete flag: Auto follows the Karoo's own preference
+        // (systemImperial), explicit modes override. Threaded into every distance formatter.
+        val systemImp by systemImperial.collectAsStateWithLifecycle()
+        val useImperial = config.unitMode.useImperial(systemImp)
+
         var screen: Screen by remember { mutableStateOf(initialScreen) }
 
         // First-run onboarding: if nothing is installed and the welcome hasn't been shown, land
@@ -279,6 +296,7 @@ class MainActivity : ComponentActivity() {
                 nearbyLive = nearbyLive,
                 nearbyPaused = nearbyPaused,
                 nearbyRadiusMeters = nearbyRadiusMeters,
+                useImperial = useImperial,
                 buildState = buildState,
                 installedRegions = installedRegions,
                 favoritePoiIds = config.favoritePoiIds,
@@ -345,6 +363,11 @@ class MainActivity : ComponentActivity() {
                     onThemeModeChange = { mode ->
                         lifecycleScope.launch { configStore.setThemeMode(mode) }
                     },
+                    unitMode = config.unitMode,
+                    onUnitModeChange = { mode ->
+                        lifecycleScope.launch { configStore.setUnitMode(mode) }
+                    },
+                    useImperial = useImperial,
                     updateCheck = checkState,
                     currentVersion = BuildConfig.VERSION_NAME,
                     updateProgress = updateProgress,
@@ -456,6 +479,7 @@ class MainActivity : ComponentActivity() {
                         poi = poi,
                         hasRoute = routeLength > 0,
                         arrival = detailArrival,
+                        useImperial = useImperial,
                         cachedDescription = repository.cachedDescription(poi.id),
                         loadDescription = { fetchDescription(poi) },
                         cachedGoogleHours = repository.cachedHours(poi.id),

@@ -64,7 +64,7 @@ class FavoritePoisDataType(
         val capacity = capacityFor(config.viewSize.second)
         if (capacity <= 1) {
             val cat = ahead[(tick % ahead.size).toInt()]
-            return SmallUpcomingField(rowFor(cat, r.upcoming.getValue(cat), large = false), activity, interactive)
+            return SmallUpcomingField(rowFor(cat, r.upcoming.getValue(cat), large = false, useImperial = r.useImperial), activity, interactive)
         }
 
         val pageSize = capacity.coerceAtMost(ahead.size)
@@ -72,7 +72,7 @@ class FavoritePoisDataType(
         val pageIndex = if (pageCount > 1) (tick % pageCount).toInt() else 0
         val page = ahead.drop(pageIndex * pageSize).take(pageSize)
 
-        val rows = page.map { cat -> rowFor(cat, r.upcoming.getValue(cat), large = true) }
+        val rows = page.map { cat -> rowFor(cat, r.upcoming.getValue(cat), large = true, useImperial = r.useImperial) }
         LargeUpcomingField(rows, activity, interactive)
     }
 

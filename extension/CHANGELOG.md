@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* fail CI release builds when the signing keystore is missing ([#103](https://github.com/patricebender/resupply-karoo/issues/103)) ([83cbb64](https://github.com/patricebender/resupply-karoo/commit/83cbb6445b43b4bb9dd39d99f8d56f9de1ff7bf2))
+* Please install this version manually from github again, signing was messed up. After that you can again use the in-app update feature. SORRY! ([#103](https://github.com/patricebender/resupply-karoo/issues/103)) ([83cbb64](https://github.com/patricebender/resupply-karoo/commit/83cbb6445b43b4bb9dd39d99f8d56f9de1ff7bf2))
 
 ## [1.6.0](https://github.com/patricebender/resupply-karoo/compare/v1.5.0...v1.6.0) (2026-09-30)
 

@@ -21,9 +21,11 @@ android {
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = "1.5.0" // x-release-please-version
 
-        // Karoo is arm64 — only ship that ABI of the bundled SQLite native lib.
+        // Bundled SQLite ships a native .so, so the APK is ABI-specific. Karoo 3 is
+        // arm64-v8a; Karoo 2 is 32-bit armeabi-v7a (Android 8). Ship both or the
+        // install fails NO_MATCHING_ABIS on whichever device the APK wasn't built for.
         ndk {
-            abiFilters += "arm64-v8a"
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
 
         // Google Places API key for the on-demand "check hours on Google" feature.

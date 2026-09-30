@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/patricebender/resupply-karoo/compare/v1.5.0...v1.6.0) (2026-09-30)
+
+
+### Features
+
+* show distances in the Karoo's units (metric/imperial) ([#102](https://github.com/patricebender/resupply-karoo/issues/102)) ([c45eef0](https://github.com/patricebender/resupply-karoo/commit/c45eef0157b128d0b99063af59fd362af133a7a0))
+
+
+### Bug Fixes
+
+* ship armeabi-v7a so the APK installs on Karoo 2 ([#100](https://github.com/patricebender/resupply-karoo/issues/100)) ([09fc52b](https://github.com/patricebender/resupply-karoo/commit/09fc52b275ec9c5cbd4e105c9f9ea64186568bba))
+
 ## [1.5.0](https://github.com/patricebender/resupply-karoo/compare/v1.4.0...v1.5.0) (2026-09-29)
 
 

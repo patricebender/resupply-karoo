@@ -69,7 +69,6 @@ import io.resupply.karoo.util.navStateFlow
 import io.resupply.karoo.util.streamDataFlow
 import io.resupply.karoo.util.userProfileFlow
 import io.resupply.karoo.util.withKarooConnection
-import io.resupply.karoo.ui.useImperial
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -116,8 +115,8 @@ class MainActivity : ComponentActivity() {
     // list distances (straight-line to each POI) when the current set is a /nearby build.
     private val riderLocation = MutableStateFlow<LatLng?>(null)
     // The Karoo's own distance-unit preference (imperial vs metric), followed live off the same
-    // connection. Drives the Auto ([UnitMode.SYSTEM]) units mode so distances match the device
-    // setting. Null until the first UserProfile arrives → treated as metric.
+    // connection. Every distance the app shows is formatted to match it. False until the first
+    // UserProfile arrives → treated as metric.
     private val systemImperial = MutableStateFlow(false)
     private val regionCatalog: List<Region> by lazy { RegionCatalog.load(applicationContext) }
 
@@ -247,10 +246,9 @@ class MainActivity : ComponentActivity() {
             config.detourMeters
         }
 
-        // Resolve the units mode to a concrete flag: Auto follows the Karoo's own preference
-        // (systemImperial), explicit modes override. Threaded into every distance formatter.
-        val systemImp by systemImperial.collectAsStateWithLifecycle()
-        val useImperial = config.unitMode.useImperial(systemImp)
+        // Distances follow the Karoo's own unit preference (imperial vs metric). Threaded into
+        // every distance formatter.
+        val useImperial by systemImperial.collectAsStateWithLifecycle()
 
         var screen: Screen by remember { mutableStateOf(initialScreen) }
 
@@ -362,10 +360,6 @@ class MainActivity : ComponentActivity() {
                     themeMode = config.themeMode,
                     onThemeModeChange = { mode ->
                         lifecycleScope.launch { configStore.setThemeMode(mode) }
-                    },
-                    unitMode = config.unitMode,
-                    onUnitModeChange = { mode ->
-                        lifecycleScope.launch { configStore.setUnitMode(mode) }
                     },
                     useImperial = useImperial,
                     updateCheck = checkState,

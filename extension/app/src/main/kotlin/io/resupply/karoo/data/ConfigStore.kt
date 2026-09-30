@@ -54,11 +54,6 @@ class ConfigStore(private val context: Context) {
         val themeMode = prefs[THEME_MODE_KEY]
             ?.let { id -> ThemeMode.entries.find { it.name == id } }
             ?: ThemeMode.SYSTEM
-        // Absent (or unrecognized) key reads as SYSTEM, so existing installs follow the Karoo's
-        // unit preference without a first-run write.
-        val unitMode = prefs[UNIT_MODE_KEY]
-            ?.let { id -> UnitMode.entries.find { it.name == id } }
-            ?: UnitMode.SYSTEM
         ResupplyConfig(
             detourMeters = detour,
             smartDistance = smartDistance,
@@ -67,7 +62,6 @@ class ConfigStore(private val context: Context) {
             favoritePoiIds = favoriteIds,
             favoritesOnly = prefs[FAVORITES_ONLY_KEY] ?: false,
             themeMode = themeMode,
-            unitMode = unitMode,
         )
     }
 
@@ -85,10 +79,6 @@ class ConfigStore(private val context: Context) {
 
     suspend fun setThemeMode(mode: ThemeMode) {
         context.dataStore.edit { it[THEME_MODE_KEY] = mode.name }
-    }
-
-    suspend fun setUnitMode(mode: UnitMode) {
-        context.dataStore.edit { it[UNIT_MODE_KEY] = mode.name }
     }
 
     suspend fun setCategoryEnabled(category: Category, enabled: Boolean) {
@@ -294,7 +284,6 @@ class ConfigStore(private val context: Context) {
         val SAFE_WATER_KEY = booleanPreferencesKey("safe_water_only")
         val SMART_DISTANCE_KEY = booleanPreferencesKey("smart_distance")
         val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
-        val UNIT_MODE_KEY = stringPreferencesKey("unit_mode")
         val REGIONS_KEY = stringSetPreferencesKey("installed_regions")
         val REGION_VERSIONS_KEY = stringPreferencesKey("installed_region_versions")
         val FAVORITES_ONLY_KEY = booleanPreferencesKey("favorites_only")

@@ -1,9 +1,6 @@
 package io.resupply.karoo.ui
 
-import io.resupply.karoo.data.UnitMode
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FormatTest {
@@ -41,13 +38,5 @@ class FormatTest {
         assertEquals("328–410 ft", formatRangeCompact(100.0, 125.0, useImperial = true))
         // Far end past 0.1 mi → miles.
         assertEquals("12.4–13.0 mi", formatRangeCompact(20_000.0, 20_921.0, useImperial = true))
-    }
-
-    @Test
-    fun `useImperial resolver follows system on Auto and overrides otherwise`() {
-        assertTrue(UnitMode.SYSTEM.useImperial(systemImperial = true))
-        assertFalse(UnitMode.SYSTEM.useImperial(systemImperial = false))
-        assertFalse(UnitMode.METRIC.useImperial(systemImperial = true))
-        assertTrue(UnitMode.IMPERIAL.useImperial(systemImperial = false))
     }
 }

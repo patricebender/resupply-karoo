@@ -41,7 +41,6 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
@@ -76,7 +75,6 @@ import io.resupply.karoo.data.Category
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.ThemeMode
-import io.resupply.karoo.data.UnitMode
 import io.resupply.karoo.service.AppUpdateService
 import io.resupply.karoo.service.AppUpdateService.UpdatePhase
 import io.resupply.karoo.service.RegionDownloadService
@@ -136,9 +134,7 @@ fun SettingsScreen(
     onSmartDistanceToggle: (Boolean) -> Unit,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
-    unitMode: UnitMode,
-    onUnitModeChange: (UnitMode) -> Unit,
-    // Resolved units for the detour-radius label (Auto folds in the Karoo's preference).
+    // Resolved units for the detour-radius label — follows the Karoo's own unit preference.
     useImperial: Boolean,
     // The app-update check result (checking / up-to-date / available / failed). Drives the
     // always-present Update section. The check runs on entering Settings.
@@ -312,10 +308,6 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
             SectionHeader("Appearance")
             AppearanceSection(mode = themeMode, onModeChange = onThemeModeChange)
-
-            Spacer(Modifier.height(20.dp))
-            SectionHeader("Units")
-            UnitsSection(mode = unitMode, onModeChange = onUnitModeChange)
 
             // Always present, so the rider can always see "am I current?" — a stable anchor that
             // distinguishes up-to-date from a check that hasn't landed or failed.
@@ -544,33 +536,11 @@ private fun AppearanceSection(mode: ThemeMode, onModeChange: (ThemeMode) -> Unit
     )
 }
 
-/**
- * The Units section: a single three-way distance toggle — km / Auto / mi — mapping directly to the
- * three [UnitMode]s. Auto ([UnitMode.SYSTEM]) follows the Karoo's own unit preference and is the
- * default; km/mi are explicit rider overrides. Same segmented control as Appearance.
- */
-@Composable
-private fun UnitsSection(mode: UnitMode, onModeChange: (UnitMode) -> Unit) {
-    SegmentedModeToggle(
-        segments = UNIT_SEGMENTS,
-        selected = mode,
-        onSelect = onModeChange,
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
 /** The theme segments, in display order (left→right), each with its icon + label. */
 private val THEME_SEGMENTS = listOf(
     Triple(ThemeMode.LIGHT, Icons.Filled.WbSunny, "Light"),
     Triple(ThemeMode.SYSTEM, Icons.Filled.BrightnessAuto, "Auto"),
     Triple(ThemeMode.DARK, Icons.Filled.DarkMode, "Dark"),
-)
-
-/** The unit segments, in display order (left→right). Auto reuses the Appearance "Auto" icon. */
-private val UNIT_SEGMENTS = listOf(
-    Triple(UnitMode.METRIC, Icons.Filled.Straighten, "km"),
-    Triple(UnitMode.SYSTEM, Icons.Filled.BrightnessAuto, "Auto"),
-    Triple(UnitMode.IMPERIAL, Icons.Filled.Straighten, "mi"),
 )
 
 /**
@@ -579,7 +549,6 @@ private val UNIT_SEGMENTS = listOf(
  * motion vocabulary as the header star toggle). Thin dividers between the resting cells sell the
  * "segments" read; the active cell's content flips to the primary's on-color, the others stay
  * muted. Tapping a cell selects its value. Width is measured so the thumb lands on exact fractions.
- * Shared by the Appearance and Units sections.
  */
 @Composable
 private fun <T> SegmentedModeToggle(

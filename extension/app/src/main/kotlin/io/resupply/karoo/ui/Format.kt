@@ -5,7 +5,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.Poi
-import io.resupply.karoo.data.UnitMode
 import java.util.Calendar
 import java.util.Locale
 
@@ -30,17 +29,6 @@ const val METERS_PER_FOOT = 0.3048
 // Below this, imperial distances read in feet rather than fractional miles (the mi/ft analog of
 // the metric m→km split at 1 km). 0.1 mi ≈ 161 m ≈ 528 ft.
 private const val IMPERIAL_FEET_BELOW_MILES = 0.1
-
-/**
- * Resolve a [UnitMode] to a concrete `useImperial` flag. [UnitMode.SYSTEM] (Auto) follows the
- * Karoo's own preference via [systemImperial] (from `UserProfile.preferredUnit.distance`);
- * [UnitMode.METRIC]/[UnitMode.IMPERIAL] are explicit overrides.
- */
-fun UnitMode.useImperial(systemImperial: Boolean): Boolean = when (this) {
-    UnitMode.SYSTEM -> systemImperial
-    UnitMode.METRIC -> false
-    UnitMode.IMPERIAL -> true
-}
 
 /**
  * Human distance. Metric: "180 m" under 1 km, "1.6 km" above. Imperial: "450 ft" under 0.1 mi,

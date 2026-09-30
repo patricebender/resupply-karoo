@@ -42,7 +42,6 @@ import io.resupply.karoo.util.locationFlow
 import io.resupply.karoo.util.navStateFlow
 import io.resupply.karoo.util.streamDataFlow
 import io.resupply.karoo.util.userProfileFlow
-import io.resupply.karoo.ui.useImperial
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -138,7 +137,7 @@ abstract class UpcomingPoisBaseDataType(
             ) { pois, routeLen, cfg, live, tick ->
                 Frame(pois, routeLen, cfg.enabledCategories, cfg.safeWaterOnly, cfg.detourMeters,
                     cfg.favoritePoiIds, live.stream, live.routeState, live.location,
-                    cfg.unitMode.useImperial(live.systemImperial), tick)
+                    live.systemImperial, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
                     render(f, config, mainActivity, interactive)

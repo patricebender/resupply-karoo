@@ -122,8 +122,8 @@ fun KarooSystemService.locationFlow(): Flow<OnLocationChanged> = callbackFlow {
 /**
  * Cold flow of the rider's [UserProfile], subscribing on collect and unsubscribing on cancel.
  * Carries the Karoo's own unit preference ([UserProfile.preferredUnit]) so the app and the data
- * fields can render distances in km/mi to match the rider's device setting when the units mode is
- * on Auto ([UnitMode.SYSTEM]). Same consumer pattern as [navStateFlow].
+ * fields render distances in km/mi to match the rider's device setting. Same consumer pattern as
+ * [navStateFlow].
  */
 fun KarooSystemService.userProfileFlow(): Flow<UserProfile> = callbackFlow {
     val listenerId = addConsumer<UserProfile> { event -> trySendBlocking(event) }

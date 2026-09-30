@@ -69,7 +69,16 @@ android {
         release {
             // Use the real release key when CI provided a keystore; otherwise fall back to
             // debug signing so local `assembleRelease` still produces an installable APK.
+            // In CI the fallback must NEVER trigger: a debug-signed release ships a throwaway
+            // key that differs every run, so no release can update over another (the
+            // "different signing" install failure). Fail loudly instead — a blank keystore in
+            // CI means a misconfigured/misnamed secret, not a valid build.
             signingConfig = if (System.getenv("KEYSTORE_BASE64").isNullOrBlank()) {
+                if (System.getenv("CI") == "true") {
+                    throw GradleException(
+                        "Release build in CI requires KEYSTORE_BASE64 — refusing to debug-sign a release.",
+                    )
+                }
                 signingConfigs.getByName("debug")
             } else {
                 signingConfigs.getByName("release")

@@ -88,6 +88,8 @@ fun PoiDetailScreen(
     // Estimated arrival time at this POI (distance-ahead + average speed), or null when it's not
     // ahead on a route / no live position. Drives the "open on arrival" ETA callout.
     arrival: java.util.Calendar?,
+    // Render distances in miles/feet instead of km/m (resolved units mode).
+    useImperial: Boolean,
     cachedDescription: String?,
     loadDescription: suspend () -> String?,
     // Google Places fallback for hours when OSM has none. Null when the feature is
@@ -221,8 +223,8 @@ fun PoiDetailScreen(
                 Pill(etaPill.text, themedStatus(etaPill.color), Color.White)
             }
             val routePills = buildList {
-                poi.distancesAlongRoute.firstOrNull()?.let { add("at ${formatDistance(it)}") }
-                if (hasRoute && poi.detourMeters > 0) add("detour ${formatDistance(poi.detourMeters)}")
+                poi.distancesAlongRoute.firstOrNull()?.let { add("at ${formatDistance(it, useImperial)}") }
+                if (hasRoute && poi.detourMeters > 0) add("detour ${formatDistance(poi.detourMeters, useImperial)}")
             }
             if (routePills.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))

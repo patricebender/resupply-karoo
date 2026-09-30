@@ -98,6 +98,8 @@ fun RouteStrip(
     nearbyRadiusMeters: Int = 0,
     // Favorited POI ids: their dots get a small yellow star above them. Route timeline only.
     favoritePoiIds: Set<String> = emptySet(),
+    // Render the distance labels in miles/feet instead of km/m (resolved units mode).
+    useImperial: Boolean = false,
 ) {
     // Nearby proximity radar takes over when there's no route but we have a rider fix. The visible
     // list window (listStart/EndMeters) is straight-line distance here, so the same range bracket
@@ -106,6 +108,7 @@ fun RouteStrip(
         NearbyRadar(
             pois, riderLocation, nearbyRadiusMeters,
             listStartMeters = listStartMeters, listEndMeters = listEndMeters,
+            useImperial = useImperial,
             modifier = modifier,
         )
         return
@@ -281,13 +284,13 @@ fun RouteStrip(
             if (hasRoute) {
                 val endLabel = MaterialTheme.colorScheme.onSurfaceVariant
                 Text(
-                    "0km",
+                    if (useImperial) "0mi" else "0km",
                     style = MaterialTheme.typography.labelSmall,
                     color = endLabel,
                     modifier = Modifier.align(Alignment.BottomStart),
                 )
                 Text(
-                    formatDistance(routeLengthMeters),
+                    formatDistance(routeLengthMeters, useImperial),
                     style = MaterialTheme.typography.labelSmall,
                     color = endLabel,
                     modifier = Modifier.align(Alignment.BottomEnd),
@@ -452,6 +455,7 @@ private fun NearbyRadar(
     // bracket the route timeline uses, over this radar's distance axis. Null → no bracket.
     listStartMeters: Double?,
     listEndMeters: Double?,
+    useImperial: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val baselineColor = MaterialTheme.colorScheme.outlineVariant
@@ -584,7 +588,7 @@ private fun NearbyRadar(
             // Right-edge scale label = the axis max. Pinned to the bottom lane (like the route
             // strip's endpoint labels). Left is the rider (0), shown by the bike.
             Text(
-                formatDistance(radius),
+                formatDistance(radius, useImperial),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.BottomEnd),

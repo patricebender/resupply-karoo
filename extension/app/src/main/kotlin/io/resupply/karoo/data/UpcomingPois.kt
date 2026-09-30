@@ -114,18 +114,37 @@ fun behindMetersFor(poi: Poi, progressMeters: Double): Double? {
         .minOrNull()
 }
 
+// Imperial conversion for the data-field formatters. Defined here (not imported from ui/Format.kt)
+// to keep this JVM-only `data` file free of any `ui` dependency; the values match Format.kt.
+private const val METERS_PER_MILE = 1609.344
+private const val METERS_PER_FOOT = 0.3048
+
 /**
- * Distance shown to the rider. Under 10 km keeps one decimal (`5.2km`); at or above,
- * rounds to a whole km (`12km`) — decimals are noise at that range on a small screen.
+ * Distance shown to the rider in the data field, in the compact no-space style the ~255dp width
+ * needs. Metric: under 10 km one decimal (`5.2km`), at or above a whole km (`12km`) — decimals are
+ * noise at that range on a small screen. Imperial: under 0.1 mi in feet (`450ft`), then miles with
+ * the same 10-mi decimal cutover (`5.2mi` / `12mi`).
  */
-fun formatKm(meters: Double): String {
-    val km = meters.coerceAtLeast(0.0) / 1000.0
+fun formatKm(meters: Double, useImperial: Boolean = false): String {
+    val m = meters.coerceAtLeast(0.0)
+    if (useImperial) {
+        val miles = m / METERS_PER_MILE
+        return when {
+            miles < 0.1 -> "${(m / METERS_PER_FOOT).toInt()}ft"
+            miles < 10.0 -> "${(miles * 10).toInt() / 10.0}mi"
+            else -> "${miles.toInt()}mi"
+        }
+    }
+    val km = m / 1000.0
     return if (km < 10.0) "${(km * 10).toInt() / 10.0}km" else "${km.toInt()}km"
 }
 
-/** Detour suffix for the nearest POI in a row, e.g. `·+200m`. Empty when negligible. */
-fun formatDetour(detourMeters: Int): String =
-    if (detourMeters <= 0) "" else "·+${detourMeters}m"
+/** Detour suffix for the nearest POI in a row, e.g. `·+200m` (or `·+650ft`). Empty when negligible. */
+fun formatDetour(detourMeters: Int, useImperial: Boolean = false): String = when {
+    detourMeters <= 0 -> ""
+    useImperial -> "·+${(detourMeters / METERS_PER_FOOT).toInt()}ft"
+    else -> "·+${detourMeters}m"
+}
 
 /** Truncate a POI name so it can't push the distance columns out of alignment. */
 fun elideName(name: String?, maxChars: Int): String? {

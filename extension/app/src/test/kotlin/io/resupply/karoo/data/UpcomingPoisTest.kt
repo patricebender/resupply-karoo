@@ -248,9 +248,27 @@ class UpcomingPoisTest {
     }
 
     @Test
+    fun `formatKm imperial uses feet under 0-1 mi then miles`() {
+        // 137 m ≈ 0.085 mi → feet (137 / 0.3048 ≈ 449).
+        assertEquals("449ft", formatKm(137.0, useImperial = true))
+        // 8368 m ≈ 5.199 mi → truncated to one decimal (matches the metric branch's truncation).
+        assertEquals("5.1mi", formatKm(8_368.0, useImperial = true))
+        // 20 000 m ≈ 12.4 mi → whole miles at/above 10.
+        assertEquals("12mi", formatKm(20_000.0, useImperial = true))
+        assertEquals("0ft", formatKm(-5.0, useImperial = true)) // clamped
+    }
+
+    @Test
     fun `formatDetour omits zero and formats positive`() {
         assertEquals("", formatDetour(0))
         assertEquals("·+200m", formatDetour(200))
+    }
+
+    @Test
+    fun `formatDetour imperial reads in feet`() {
+        assertEquals("", formatDetour(0, useImperial = true))
+        // 200 m / 0.3048 ≈ 656 ft.
+        assertEquals("·+656ft", formatDetour(200, useImperial = true))
     }
 
     @Test

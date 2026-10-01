@@ -61,7 +61,7 @@ live.
   <tr>
     <td width="50%" valign="top">
       <h3>🗂️ 12 categories</h3>
-      Restaurants, Supermarkets, Café&nbsp;&amp;&nbsp;Bar, Water, Toilets, Bike&nbsp;shops,
+      Restaurants, Supermarkets, Café&nbsp;&amp;&nbsp;Bakery, Water, Toilets, Bike&nbsp;shops,
       Fuel&nbsp;stations, Ice&nbsp;Cream, Hotels, Pharmacies, ATMs, and Campgrounds. Toggle
       any of them on or off on the fly.
     </td>
@@ -77,16 +77,6 @@ live.
       <h3>💧 Safe water sources</h3>
       Shows drinkable water by default, hiding fountains and springs of unknown quality unless
       you want them.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>🌍 Downloadable regions</h3>
-      Ships with a bundled seed and downloads more in-app: a single Bundesland, or whole
-      countries across Europe and North America.
-    </td>
-    <td width="50%" valign="top" align="center">
-      <img src="docs/media/02-regions-download.gif" alt="Browsing and downloading a region in-app" width="280">
     </td>
   </tr>
   <tr>
@@ -123,10 +113,11 @@ live.
   <tr>
     <td width="50%" valign="top">
       <h3>🌍 Regional coverage</h3>
-      Download the regions you ride. Europe, the USA, and Canada are supported for now.
+      Download the regions you ride, right on the device. Europe, the USA, and Canada are
+      supported for now.
     </td>
     <td width="50%" valign="top" align="center">
-      <img src="docs/media/regions.png" alt="Regions screen with installed regions and place counts" width="280">
+      <img src="docs/media/02-regions-download.gif" alt="Browsing and downloading a region in-app" width="280">
     </td>
   </tr>
 </table>
@@ -148,12 +139,11 @@ flood the map while a quiet stretch still shows what's there. The only network c
 optional, on-demand Google Places and Wikipedia lookups; they route device to provider through
 the Karoo HTTP bridge, so they work over a paired phone, not just WiFi.
 
-POI data comes from [OpenStreetMap](https://www.openstreetmap.org/). The bundled database is
-generated offline by **`extension/tools/poi-db/`** (downloads a regional extract, filters to
-our POI tags, loads a spatial SQLite) and baked into the app as an asset the extension seeds
-on first run. The bundled seed ships **all of Germany**; riders can download other regions
-in-app (a single Bundesland, or other countries) from the region picker, which fetches a
-compact per-region file and installs it on-device.
+POI data comes from [OpenStreetMap](https://www.openstreetmap.org/). The per-region databases
+are generated offline by **`extension/tools/poi-db/`** (downloads a regional extract, filters
+to our POI tags, loads a spatial SQLite). Nothing ships inside the app: on first run the rider
+picks regions from the region picker, which fetches a compact per-region file (a single
+Bundesland, or whole countries) and installs it on-device.
 
 See [FOUNDATION.md](FOUNDATION.md) for the full architecture and design.
 
@@ -201,8 +191,8 @@ The bundled POI database is built offline (needs
 ```sh
 cd extension/tools/poi-db
 npm install
-# Rebuilds the bundled Germany seed → app/src/main/assets/pois-germany.sqlite
-npm run build:seed
+# Build the per-region files the in-app picker downloads
+npm run build:regions
 # Or build a single region for a quick test:
 OSM_REGION=europe/germany/baden-wuerttemberg npm run build:poi-db
 ```

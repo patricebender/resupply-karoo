@@ -68,17 +68,12 @@ android {
     buildTypes {
         release {
             // Use the real release key when CI provided a keystore; otherwise fall back to
-            // debug signing so local `assembleRelease` still produces an installable APK.
-            // In CI the fallback must NEVER trigger: a debug-signed release ships a throwaway
-            // key that differs every run, so no release can update over another (the
-            // "different signing" install failure). Fail loudly instead — a blank keystore in
-            // CI means a misconfigured/misnamed secret, not a valid build.
+            // debug signing so local `assembleRelease` still produces an installable APK. The
+            // CI-must-have-a-keystore guard lives at task-execution time (see below), not
+            // here: this block is evaluated whenever the project is configured — including
+            // plain `testDebugUnitTest` runs that need no keystore — so throwing here would
+            // break unrelated CI jobs.
             signingConfig = if (System.getenv("KEYSTORE_BASE64").isNullOrBlank()) {
-                if (System.getenv("CI") == "true") {
-                    throw GradleException(
-                        "Release build in CI requires KEYSTORE_BASE64 — refusing to debug-sign a release.",
-                    )
-                }
                 signingConfigs.getByName("debug")
             } else {
                 signingConfigs.getByName("release")
@@ -204,3 +199,19 @@ tasks.register("generateManifest") {
 // The manifest URL must be substituted before the manifest is merged into the APK.
 tasks.matching { it.name == "processReleaseMainManifest" || it.name == "processDebugMainManifest" }
     .configureEach { dependsOn("generateManifest") }
+
+// Guard: a release APK built in CI without a keystore is debug-signed with a throwaway key
+// that changes every run, so no release can install over another ("different signing") and
+// the in-app auto-update silently breaks. Fail the actual release-packaging task instead of
+// shipping it. This runs only when a release APK is really being assembled — not on plain
+// `testDebugUnitTest`, which configures the project but never triggers these tasks.
+tasks.matching { it.name == "packageRelease" || it.name == "assembleRelease" }
+    .configureEach {
+        doFirst {
+            if (System.getenv("CI") == "true" && System.getenv("KEYSTORE_BASE64").isNullOrBlank()) {
+                throw GradleException(
+                    "Release build in CI requires KEYSTORE_BASE64 — refusing to debug-sign a release.",
+                )
+            }
+        }
+    }

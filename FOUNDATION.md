@@ -98,7 +98,7 @@ POIs live in a spatial SQLite database:
 
 - **Detour radius:** tight 100 m and 250 m options for on-route resupply, then 500 m steps to
   5000 m; default **250 m** (`DETOUR_OPTIONS_METERS` in `data/ResupplyConfig.kt`).
-- **Categories:** Restaurants, Supermarkets, Café & Bar, Water, Toilets, Bike shops, Fuel
+- **Categories:** Restaurants, Supermarkets, Café & Bakery, Water, Toilets, Bike shops, Fuel
   stations, Ice Cream, Hotels. Default enabled: **Water + Bike**. Each maps to a set of OSM
   tags and to a `Symbol.POI` type for the map pin (table below). Toggling a category is a
   **render-time filter over the already-built set**, no rebuild.
@@ -181,7 +181,7 @@ through the **Karoo HTTP bridge** (so they work over the paired phone, not just 
   `description` tag when there's no Wikipedia link.
 - **Google Places opening hours** (`data/PlacesClient.kt`): offered only when OSM has no
   `opening_hours`, the category is one where hours matter (`GOOGLE_HOURS_CATEGORIES`:
-  Supermarkets, Café & Bar, Restaurants, Fuel, Ice Cream, Hotels, Bike shops), and a
+  Supermarkets, Café & Bakery, Restaurants, Fuel, Ice Cream, Hotels, Bike shops), and a
   `PLACES_API_KEY` is configured at build time. The
   resolved **Place ID** is persisted (Maps ToS permits caching Place IDs indefinitely); the
   **hours themselves are never persisted**, kept in memory with a short TTL and re-fetched,
@@ -213,7 +213,7 @@ regional Geofabrik extract → `osmium tags-filter` to just our POI tags → exp
 |------------------|------------------------------------------------|----------------------------|
 | Restaurants      | `amenity=restaurant/fast_food`                 | FOOD                       |
 | Supermarkets     | `shop=supermarket/convenience`                 | CONVENIENCE_STORE          |
-| Café & Bar       | `amenity=cafe` / `amenity=bar/pub`             | COFFEE / BAR               |
+| Café & Bakery    | `amenity=cafe` / `shop=bakery` / `amenity=bar/pub` | COFFEE / BAKERY / BAR  |
 | Water            | `amenity=drinking_water`                       | REST_STOP → WATER icon     |
 | Toilets          | `amenity=toilets`                              | RESTROOM                   |
 | Bike shops       | `shop=bicycle`                                 | BIKE_SHOP                  |

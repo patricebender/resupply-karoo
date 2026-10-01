@@ -20,8 +20,11 @@ export const CATEGORY_RULES: Record<Category, TagRule[]> = {
     { key: "shop", value: "supermarket", type: "CONVENIENCE_STORE" },
     { key: "shop", value: "convenience", type: "CONVENIENCE_STORE" },
   ],
-  cafe_bar: [
+  // Labelled "Café & Bakery" rider-facing, but bars/pubs ride along in the same
+  // toggle (a BAR type keeps their own pin/label on the individual place).
+  cafe_bakery: [
     { key: "amenity", value: "cafe", type: "COFFEE" },
+    { key: "shop", value: "bakery", type: "BAKERY" },
     { key: "amenity", value: "bar", type: "BAR" },
     { key: "amenity", value: "pub", type: "BAR" },
   ],

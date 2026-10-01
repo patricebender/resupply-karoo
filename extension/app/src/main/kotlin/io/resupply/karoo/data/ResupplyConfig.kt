@@ -7,7 +7,7 @@ package io.resupply.karoo.data
 enum class Category(val id: String, val label: String) {
     RESTAURANTS("restaurants", "Restaurants"),
     SUPERMARKETS("supermarkets", "Supermarkets"),
-    CAFE_BAR("cafe_bar", "Café & Bar"),
+    CAFE_BAKERY("cafe_bakery", "Café & Bakery"),
     WATER("water", "Water"),
     TOILET("toilet", "Toilets"),
     BIKE("bike", "Bike shops"),
@@ -23,7 +23,7 @@ enum class Category(val id: String, val label: String) {
         fun ofType(type: String): Category? = when (type) {
             "FOOD" -> RESTAURANTS
             "CONVENIENCE_STORE" -> SUPERMARKETS
-            "COFFEE", "BAR" -> CAFE_BAR
+            "COFFEE", "BAR", "BAKERY" -> CAFE_BAKERY
             "REST_STOP" -> WATER
             "RESTROOM" -> TOILET
             "BIKE_SHOP" -> BIKE

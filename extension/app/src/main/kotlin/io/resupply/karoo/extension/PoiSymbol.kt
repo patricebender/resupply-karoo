@@ -24,6 +24,7 @@ fun Poi.toSymbol(): Symbol.POI = Symbol.POI(
  */
 private fun symbolType(type: String): String = when (type) {
     "COFFEE" -> Symbol.POI.Types.COFFEE
+    "BAKERY" -> Symbol.POI.Types.COFFEE        // no bakery pin in karoo-ext → coffee icon
     "FOOD" -> Symbol.POI.Types.FOOD
     "BAR" -> Symbol.POI.Types.BAR
     "CONVENIENCE_STORE" -> Symbol.POI.Types.CONVENIENCE_STORE

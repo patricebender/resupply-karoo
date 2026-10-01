@@ -15,7 +15,7 @@ data class FieldStyle(val color: Color, val glyph: String, val label: String)
 // with the pins and strip.
 private val RESTAURANT = Color(0xFFD84315)
 private val SUPERMARKET = Color(0xFF1565C0)
-private val CAFE_BAR = Color(0xFFE8820C)
+private val CAFE_BAKERY = Color(0xFFE8820C)
 private val WATER = Color(0xFF0097A7)
 private val TOILET = Color(0xFF6A1B9A)
 private val BIKE = Color(0xFF2E7D32)
@@ -29,7 +29,7 @@ private val CAMPGROUND = Color(0xFF33691E)
 private val STYLES: Map<Category, FieldStyle> = mapOf(
     Category.RESTAURANTS to FieldStyle(RESTAURANT, "🍴", "Food"),
     Category.SUPERMARKETS to FieldStyle(SUPERMARKET, "🛒", "Shop"),
-    Category.CAFE_BAR to FieldStyle(CAFE_BAR, "☕", "Café"),
+    Category.CAFE_BAKERY to FieldStyle(CAFE_BAKERY, "🥐", "Café"),
     Category.WATER to FieldStyle(WATER, "💧", "Water"),
     Category.TOILET to FieldStyle(TOILET, "🚻", "Toilet"),
     Category.BIKE to FieldStyle(BIKE, "🚲", "Bike"),

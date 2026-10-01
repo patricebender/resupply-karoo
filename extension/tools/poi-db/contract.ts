@@ -7,7 +7,7 @@
 export type Category =
   | "restaurants"
   | "supermarkets"
-  | "cafe_bar"
+  | "cafe_bakery"
   | "water"
   | "toilet"
   | "bike"
@@ -21,7 +21,7 @@ export type Category =
 export const ALL_CATEGORIES: Category[] = [
   "restaurants",
   "supermarkets",
-  "cafe_bar",
+  "cafe_bakery",
   "water",
   "toilet",
   "bike",
@@ -38,6 +38,7 @@ export type PoiType =
   | "COFFEE"
   | "FOOD"
   | "BAR"
+  | "BAKERY"
   | "CONVENIENCE_STORE"
   | "REST_STOP" // drinking water
   | "RESTROOM"

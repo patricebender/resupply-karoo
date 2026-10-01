@@ -47,6 +47,7 @@ osmium tags-filter --overwrite -o "$FILTERED" "$PBF" \
   nwr/amenity=cafe \
   nwr/amenity=restaurant \
   nwr/amenity=fast_food \
+  nwr/shop=bakery \
   nwr/amenity=bar \
   nwr/amenity=pub \
   nwr/shop=convenience \

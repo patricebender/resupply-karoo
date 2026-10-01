@@ -48,6 +48,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -81,6 +83,7 @@ import io.resupply.karoo.data.formatKm
 import io.resupply.karoo.data.poiSourceFor
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.haversine
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 // Position-follow: advances within this many rows animate (smooth, normal progress); larger
@@ -333,6 +336,42 @@ fun WaybookScreen(
             }
         }
 
+        // Timeline scrubbing: dragging the strip reports an along-axis position in METERS, which
+        // we turn into the nearest POI and scroll the list there — the reverse of the strip
+        // mirroring the list. A scrub is manual exploration, so it ends position-following (the
+        // same hook a hand scroll uses). Guarded to >1 POI — a single-row strip has nothing to
+        // scrub. The target index is found over the SAME ordering the list renders (displayPois),
+        // so it lands on the right row.
+        //
+        // Smoothness: a drag fires pointer moves dozens of times a second, but the list only has
+        // one row per POI — so most moves resolve to the SAME row. We skip any target the list is
+        // already parked at (its firstVisibleItemIndex), and run the scroll on ONE reused job that
+        // cancels its predecessor, so scrolls never stack and fight (that stacking, not the scroll
+        // itself, was the stutter). Deduping against the live position (not a sticky "last scrubbed"
+        // value) means re-tapping a spot still works after the rider has scrolled elsewhere.
+        // scrollToItem is INSTANT so the bracket/pill track the finger responsively; an animated
+        // scroll would lag behind a fast drag and read as sluggish.
+        val scrubScope = rememberCoroutineScope()
+        val scrubbable = displayPois.size > 1
+        var scrubJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+        val onScrubMeters: ((Double) -> Unit)? = if (!scrubbable) null else { meters ->
+            val index = when (source) {
+                PoiSource.ROUTE -> displayPois.indices.minByOrNull {
+                    abs((displayPois[it].distancesAlongRoute.firstOrNull() ?: 0.0) - meters)
+                }
+                PoiSource.NEARBY -> riderLocation?.let { rider ->
+                    displayPois.indices.minByOrNull {
+                        abs(haversine(rider, LatLng(displayPois[it].lat, displayPois[it].lng)) - meters)
+                    }
+                }
+            } ?: -1
+            if (index >= 0 && index != listState.firstVisibleItemIndex) {
+                onUserScrolled()
+                scrubJob?.cancel()
+                scrubJob = scrubScope.launch { listState.scrollToItem(index) }
+            }
+        }
+
         // The band above the list: a route timeline for a route build, or a proximity "radar"
         // for a nearby build (rider at the left edge, POIs by straight-line distance). Both
         // reuse RouteStrip; the nearby mode also carries the "Live" indicator, which has room
@@ -348,6 +387,7 @@ fun WaybookScreen(
                     // Little yellow stars above favorite dots (route timeline only).
                     favoritePoiIds = favoritePoiIds,
                     useImperial = useImperial,
+                    onScrub = onScrubMeters,
                 )
                 HorizontalDivider()
             }
@@ -364,6 +404,7 @@ fun WaybookScreen(
                         listStartMeters = visibleNearbySpanMeters?.first,
                         listEndMeters = visibleNearbySpanMeters?.second,
                         useImperial = useImperial,
+                        onScrub = onScrubMeters,
                     )
                     HorizontalDivider()
                 }

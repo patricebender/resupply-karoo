@@ -8,6 +8,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,6 +41,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
@@ -82,6 +85,12 @@ private const val RADAR_MIN_SPAN_METERS = 500.0
  * x-axis is straight-line distance out to [nearbyRadiusMeters], and each POI dot is placed by
  * its distance (splayed by category so same-distance dots don't collide). A "Live · N places"
  * pill shows the auto-refresh status where the header has no room. See [NearbyRadar].
+ *
+ * **Scrubbing:** when [onScrub] is given the strip becomes a draggable scrubber — press/drag
+ * (or tap) anywhere along it reports the along-axis position *in meters* (route distance here,
+ * straight-line distance on the radar), which the host turns into a list scroll. The range
+ * bracket + pill track the scrolled window, and the pill grows drag chevrons while scrubbing so
+ * the gesture reads at a glance.
  */
 @Composable
 fun RouteStrip(
@@ -100,6 +109,9 @@ fun RouteStrip(
     favoritePoiIds: Set<String> = emptySet(),
     // Render the distance labels in miles/feet instead of km/m (resolved units mode).
     useImperial: Boolean = false,
+    // Non-null → the strip is a scrubber: press/drag/tap reports the along-axis position in
+    // METERS (0..routeLength here, 0..radarMax on the nearby radar). Null → static overview.
+    onScrub: ((Double) -> Unit)? = null,
 ) {
     // Nearby proximity radar takes over when there's no route but we have a rider fix. The visible
     // list window (listStart/EndMeters) is straight-line distance here, so the same range bracket
@@ -109,6 +121,7 @@ fun RouteStrip(
             pois, riderLocation, nearbyRadiusMeters,
             listStartMeters = listStartMeters, listEndMeters = listEndMeters,
             useImperial = useImperial,
+            onScrub = onScrub,
             modifier = modifier,
         )
         return
@@ -139,6 +152,12 @@ fun RouteStrip(
         ?.takeIf { hasRoute }
         ?.let { (it / routeLengthMeters).coerceIn(0.0, 1.0).toFloat() }
 
+    // Scrub state: non-null while a finger is down on the strip (its axis fraction), which flips
+    // the pill into its drag-affordance look. Null when not scrubbing. The host gets the position
+    // in METERS (fraction * route length) via [onScrub], which it is free to leave null (e.g. a
+    // single-POI strip) to keep the strip a static overview.
+    var scrubFrac by remember { mutableStateOf<Float?>(null) }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -164,7 +183,16 @@ fun RouteStrip(
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(starLaneH + dotZoneH + rangeLaneH),
+                    .height(starLaneH + dotZoneH + rangeLaneH)
+                    // Scrubber: a down-move-up gesture maps local x → axis fraction → meters for
+                    // the host, and parks [scrubFrac] for the pill affordance. The axis here spans
+                    // the full width (left == 0), so the fraction is simply x / width. One gesture
+                    // handles both tap and drag — the down already reports (a tap jumps), each move
+                    // re-reports (a drag scrubs continuously), and the up clears the scrub state.
+                    .then(if (onScrub != null && hasRoute) Modifier.scrubGesture(routeLengthMeters) { frac ->
+                        scrubFrac = frac
+                        frac?.let { onScrub(it * routeLengthMeters) }
+                    } else Modifier),
             ) {
                 val left = 0f
                 val right = size.width
@@ -297,7 +325,10 @@ fun RouteStrip(
                 )
 
                 // The range readout: a single "a–b km" pill centered on the bracket's window
-                // midpoint. Shared with the nearby radar (see [RangePillOverlay]).
+                // midpoint — pill and bracket are ONE unit, so the pill always sits on the bracket
+                // (they'd visibly desync if the pill chased the finger while the bracket tracked
+                // the list). While a scrub is in flight it grows guillemet chevrons (‹ a–b km ›) as
+                // a drag affordance; the chevrons fade out on release. Shared with the nearby radar.
                 if (listStartMeters != null && listEndMeters != null &&
                     startFrac != null && endFrac != null
                 ) {
@@ -305,10 +336,45 @@ fun RouteStrip(
                         text = formatRangeCompact(listStartMeters, listEndMeters),
                         centerFraction = (startFrac + endFrac) / 2f,
                         fullWidth = fullWidth,
+                        scrubbing = scrubFrac != null,
                     )
                 }
             }
         }
+    }
+}
+
+/**
+ * Turns the strip into a horizontal scrubber. A single down–move–up gesture serves both tap and
+ * drag: the down reports immediately (a tap jumps), each move re-reports (a drag scrubs), and the
+ * up reports null (clears the scrub state). [onScrub] receives the finger's position as a fraction
+ * `[0,1]` of the *axis* — the width minus [leftInset]/[rightInset], so the nearby radar (whose dots
+ * live inside those insets) and the full-width route timeline both report over their own axis. The
+ * pointer event is consumed so the enclosing list doesn't also react. [key] re-arms the handler
+ * when the axis scale changes (route length / radar radius). Null [onScrub] arg = release.
+ */
+private fun Modifier.scrubGesture(
+    key: Any?,
+    leftInset: Dp = 0.dp,
+    rightInset: Dp = 0.dp,
+    onScrub: (Float?) -> Unit,
+): Modifier = pointerInput(key) {
+    val axisStart = leftInset.toPx()
+    val axisSpan = (size.width - axisStart - rightInset.toPx()).coerceAtLeast(1f)
+    fun report(x: Float) = onScrub(((x - axisStart) / axisSpan).coerceIn(0f, 1f))
+    awaitEachGesture {
+        val down = awaitFirstDown()
+        down.consume()
+        report(down.position.x)
+        // Follow the finger until it lifts; consume each move so the list below stays put.
+        do {
+            val event = awaitPointerEvent()
+            event.changes.forEach { change ->
+                report(change.position.x)
+                change.consume()
+            }
+        } while (event.changes.any { it.pressed })
+        onScrub(null)
     }
 }
 
@@ -319,13 +385,21 @@ fun RouteStrip(
  * than spilling past. Pinned to the bottom lane. Shared by the route timeline and the nearby radar.
  */
 @Composable
-private fun BoxScope.RangePillOverlay(text: String, centerFraction: Float, fullWidth: Dp) {
+private fun BoxScope.RangePillOverlay(
+    text: String,
+    centerFraction: Float,
+    fullWidth: Dp,
+    // While true the pill wears guillemet chevrons (‹ … ›) as a "drag me" affordance and lifts
+    // slightly. The chevrons fade in/out so they vanish cleanly on release.
+    scrubbing: Boolean = false,
+) {
     var pillW by remember { mutableStateOf(0.dp) }
     val density = LocalDensity.current
     val cx = fullWidth * centerFraction
     val pillX = (cx - pillW / 2).coerceIn(0.dp, (fullWidth - pillW).coerceAtLeast(0.dp))
     RangePill(
         text = text,
+        scrubbing = scrubbing,
         modifier = Modifier
             .align(Alignment.BottomStart)
             .offset(x = pillX)
@@ -333,15 +407,43 @@ private fun BoxScope.RangePillOverlay(text: String, centerFraction: Float, fullW
     )
 }
 
-/** A rounded primary pill carrying a bold km readout — the shared style for the range pills. */
+/**
+ * A rounded primary pill carrying a bold km readout — the shared style for the range pills. While
+ * [scrubbing] it flanks the readout with guillemet chevrons that slide out + fade in (‹ a–b km ›),
+ * reading as "drag to move"; on release they retract and fade so the pill returns to its calm
+ * resting form. The chevron gap is animated (not toggled) so the text doesn't jump.
+ */
 @Composable
-private fun RangePill(text: String, modifier: Modifier = Modifier) {
-    Box(
+private fun RangePill(text: String, modifier: Modifier = Modifier, scrubbing: Boolean = false) {
+    val chevronAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (scrubbing) 1f else 0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "scrubChevronAlpha",
+    )
+    val chevronGap by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (scrubbing) 5.dp else 0.dp,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "scrubChevronGap",
+    )
+    Row(
         modifier = modifier
             .clip(RoundedCornerShape(50))
             .background(MaterialTheme.colorScheme.primary)
             .padding(horizontal = 8.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Leading chevron: present only while scrubbing (zero-width + transparent at rest, so the
+        // resting pill is unchanged). alpha carries the fade; the gap Spacer carries the slide.
+        if (chevronAlpha > 0f) {
+            Text(
+                "‹",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = chevronAlpha),
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(chevronGap))
+        }
         Text(
             text,
             style = MaterialTheme.typography.labelSmall,
@@ -349,6 +451,16 @@ private fun RangePill(text: String, modifier: Modifier = Modifier) {
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
+        if (chevronAlpha > 0f) {
+            Spacer(Modifier.width(chevronGap))
+            Text(
+                "›",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = chevronAlpha),
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -456,6 +568,9 @@ private fun NearbyRadar(
     listStartMeters: Double?,
     listEndMeters: Double?,
     useImperial: Boolean = false,
+    // Non-null → scrubbable: reports the finger's straight-line distance (m) over this radar's
+    // axis, 0 at the rider to [radius] at the right edge. Null → static radar.
+    onScrub: ((Double) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val baselineColor = MaterialTheme.colorScheme.outlineVariant
@@ -481,6 +596,10 @@ private fun NearbyRadar(
     val startFrac = listStartMeters?.let { (it / radius).coerceIn(0.0, 1.0).toFloat() }
     val endFrac = listEndMeters?.let { (it / radius).coerceIn(0.0, 1.0).toFloat() }
 
+    // Scrub state, mirroring the route timeline: the finger's axis fraction while dragging (drives
+    // the pill affordance), null otherwise. The host gets it as meters (fraction * radius).
+    var scrubFrac by remember { mutableStateOf<Float?>(null) }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -500,7 +619,13 @@ private fun NearbyRadar(
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(topLaneH + dotZoneH + rangeLaneH),
+                    .height(topLaneH + dotZoneH + rangeLaneH)
+                    // Scrubber over the radar's inset distance axis (0 at the rider anchor, 1 at
+                    // the right edge). The gesture reports the fraction; we hand the host meters.
+                    .then(if (onScrub != null) Modifier.scrubGesture(radius, leftInset, rightInset) { frac ->
+                        scrubFrac = frac
+                        frac?.let { onScrub(it * radius) }
+                    } else Modifier),
             ) {
                 val left = 0f
                 val right = size.width
@@ -565,10 +690,6 @@ private fun NearbyRadar(
                         color = bracketColor,
                     )
                 }
-                // (The rider anchor is a bike glyph overlaid at the left edge — see below —
-                // rather than a Canvas playhead: it marks the origin of the distance axis,
-                // "you", not a moving position, so it shouldn't borrow the route strip's
-                // moving-playhead language.)
             }
 
             // Rider anchor: a small bike glyph pinned to the left edge, on the baseline. The
@@ -603,14 +724,16 @@ private fun NearbyRadar(
                 val axisStart = with(density) { leftInset.toPx() }
                 val axisSpan = with(density) { (fullWidth - leftInset - rightInset).toPx() }
                 val fullPx = with(density) { fullWidth.toPx() }
+                // Pill sits on the bracket's window midpoint (pill + bracket are one unit, so they
+                // never desync). Map the axis fraction to a fraction of the FULL width (the overlay
+                // positions in full-width terms), accounting for the radar's left/right insets.
                 val midFrac = (startFrac + endFrac) / 2f
-                // Map the axis fraction to a fraction of the FULL width (the overlay positions in
-                // full-width terms), accounting for the radar's left/right insets.
                 val centerFraction = (axisStart + midFrac * axisSpan) / fullPx
                 RangePillOverlay(
                     text = formatRangeCompact(listStartMeters, listEndMeters),
                     centerFraction = centerFraction,
                     fullWidth = fullWidth,
+                    scrubbing = scrubFrac != null,
                 )
             }
             // The "Live" status now lives in the header (a chip replacing the rebuild button),

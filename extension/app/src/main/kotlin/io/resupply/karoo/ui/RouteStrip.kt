@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -157,10 +158,12 @@ fun RouteStrip(
         ?.let { (it / routeLengthMeters).coerceIn(0.0, 1.0).toFloat() }
 
     // Scrub state: non-null while a finger is down on the strip (its axis fraction), which flips
-    // the pill into its drag-affordance look. Null when not scrubbing. The host gets the position
-    // in METERS (fraction * route length) via [onScrub], which it is free to leave null (e.g. a
-    // single-POI strip) to keep the strip a static overview.
+    // the pill into its drag-affordance look. Null when not scrubbing. The host gets the fraction
+    // [0,1] via [onScrub], which it is free to leave null (e.g. a single-POI strip) to keep the
+    // strip a static overview. [currentOnScrub] keeps the gesture (which outlives recompositions)
+    // pointed at the latest handler, so a favorites toggle is picked up without re-arming.
     var scrubFrac by remember { mutableStateOf<Float?>(null) }
+    val currentOnScrub by rememberUpdatedState(onScrub)
 
     Column(
         modifier = modifier
@@ -193,9 +196,9 @@ fun RouteStrip(
                     // the full width (left == 0), so the fraction is simply x / width. One gesture
                     // handles both tap and drag — the down already reports (a tap jumps), each move
                     // re-reports (a drag scrubs continuously), and the up clears the scrub state.
-                    .then(if (onScrub != null && hasRoute) Modifier.scrubGesture(routeLengthMeters) { frac ->
+                    .then(if (onScrub != null && hasRoute) Modifier.scrubGesture { frac ->
                         scrubFrac = frac
-                        frac?.let { onScrub(it) }
+                        frac?.let { f -> currentOnScrub?.invoke(f) }
                     } else Modifier),
             ) {
                 val left = 0f
@@ -359,14 +362,18 @@ fun RouteStrip(
  * begins on it and the list feels stuck. So we don't consume the down; we wait for the touch slop
  * and only claim the gesture when it breaks HORIZONTALLY. A vertical break is left unconsumed so it
  * falls through to the LazyColumn. A tap (lift before slop) still jumps — it reports the down point.
- * [key] re-arms the handler when the axis scale changes (route length / radar radius).
+ *
+ * The gesture runs for the lifetime of the composable (keyed on [Unit]); [onScrub] must therefore
+ * be a stable reference that reads current state internally (callers wrap it with
+ * rememberUpdatedState). That way a favorites toggle — which swaps the rendered POI set the handler
+ * closes over — is picked up WITHOUT re-arming the gesture, so there's no stale-lambda window that
+ * maps the finger over the pre-toggle list (the "scrub does nothing in favorites" bug).
  */
 private fun Modifier.scrubGesture(
-    key: Any?,
     leftInset: Dp = 0.dp,
     rightInset: Dp = 0.dp,
     onScrub: (Float?) -> Unit,
-): Modifier = pointerInput(key) {
+): Modifier = pointerInput(Unit) {
     val axisStart = leftInset.toPx()
     val axisSpan = (size.width - axisStart - rightInset.toPx()).coerceAtLeast(1f)
     fun report(x: Float) = onScrub(((x - axisStart) / axisSpan).coerceIn(0f, 1f))
@@ -623,8 +630,10 @@ private fun NearbyRadar(
     val endFrac = listEndMeters?.let { (it / radius).coerceIn(0.0, 1.0).toFloat() }
 
     // Scrub state, mirroring the route timeline: the finger's axis fraction while dragging (drives
-    // the pill affordance), null otherwise. The host gets it as meters (fraction * radius).
+    // the pill affordance), null otherwise. The host gets the fraction [0,1]. [currentOnScrub] keeps
+    // the long-lived gesture pointed at the latest handler (survives a set change without re-arming).
     var scrubFrac by remember { mutableStateOf<Float?>(null) }
+    val currentOnScrub by rememberUpdatedState(onScrub)
 
     Column(
         modifier = modifier
@@ -648,9 +657,9 @@ private fun NearbyRadar(
                     .height(topLaneH + dotZoneH + rangeLaneH)
                     // Scrubber over the radar's inset distance axis (0 at the rider anchor, 1 at
                     // the right edge). The gesture reports the fraction; we hand the host meters.
-                    .then(if (onScrub != null) Modifier.scrubGesture(radius, leftInset, rightInset) { frac ->
+                    .then(if (onScrub != null) Modifier.scrubGesture(leftInset, rightInset) { frac ->
                         scrubFrac = frac
-                        frac?.let { onScrub(it) }
+                        frac?.let { f -> currentOnScrub?.invoke(f) }
                     } else Modifier),
             ) {
                 val left = 0f

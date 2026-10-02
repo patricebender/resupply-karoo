@@ -336,6 +336,17 @@ fun WaybookScreen(
             }
         }
 
+        // Manual-control latch, local to this composition and flipped SYNCHRONOUSLY the instant the
+        // rider scrubs or drags. The authoritative [following] flag is hoisted in MainActivity, so
+        // releasing it via [onUserScrolled] is an async round-trip; a live-position tick can fire
+        // the follow effect in that gap and yank the list back (the "glued to the left after a
+        // favorites toggle" bug — a header-button toggle never drags the list, so following was
+        // never released, and the async release always lost the race to the next GPS tick). This
+        // local latch lets the follow effect bail immediately, with no round-trip. It re-arms (back
+        // to false) whenever the host re-engages [following] on a fresh field-tap entry.
+        var userTookControl by remember { mutableStateOf(false) }
+        LaunchedEffect(following) { if (following) userTookControl = false }
+
         // Timeline scrubbing: dragging the strip reports the finger's position as a fraction of the
         // strip width, which we map straight to a list index — the reverse of the strip mirroring
         // the list. Mapping to INDEX (not along-route distance) is what keeps it responsive when
@@ -356,6 +367,10 @@ fun WaybookScreen(
         val onScrubFraction: ((Float) -> Unit)? = if (!scrubbable) null else { frac ->
             val index = (frac * lastIndex).roundToInt().coerceIn(0, lastIndex)
             if (index != listState.firstVisibleItemIndex) {
+                // Take manual control SYNCHRONOUSLY (local flag below), not only via the async
+                // onUserScrolled hop to the host — otherwise a live-position tick fires the follow
+                // effect before `following` flips and yanks the list back, gluing the scrub.
+                userTookControl = true
                 onUserScrolled()
                 scrubTarget = index
             }
@@ -433,7 +448,10 @@ fun WaybookScreen(
         // subscribed (no need to re-key on `following`, which would open a teardown race).
         LaunchedEffect(listState) {
             listState.interactionSource.interactions.collect {
-                if (it is DragInteraction.Start) onUserScrolled()
+                if (it is DragInteraction.Start) {
+                    userTookControl = true   // synchronous local latch, same as the scrub path
+                    onUserScrolled()
+                }
             }
         }
 
@@ -441,14 +459,13 @@ fun WaybookScreen(
         // rider crosses into a new POI (or following re-engages) — and moves there in THIS
         // coroutine, so a re-key cancels an in-flight scroll instead of stacking animations.
         // Near advances animate, large jumps snap (see [SMOOTH_FOLLOW_ROWS]).
-        LaunchedEffect(followIndex, following, canFollow) {
-            if (!canFollow || !following || followIndex < 0) return@LaunchedEffect
-            // Never steal a scroll the rider is actively driving (a hand fling, or a strip scrub):
-            // a live-position tick that re-runs this effect mid-gesture would otherwise yank the
-            // list back to [followIndex] and read as the list being "stuck" near the top. The first
-            // DragInteraction.Start has already flipped following off via onUserScrolled, but that
-            // state hasn't propagated yet within the same gesture — so guard on the live scroll flag.
-            if (listState.isScrollInProgress) return@LaunchedEffect
+        LaunchedEffect(followIndex, following, canFollow, userTookControl) {
+            // Bail the moment the rider has taken manual control (scrub or drag). This local latch
+            // is set synchronously, unlike the hoisted [following] whose release is an async hop —
+            // without it a live-position tick re-runs this effect before [following] flips and yanks
+            // the list back to [followIndex], gluing a scrub to the top (notably after a favorites
+            // toggle, which never drags the list so nothing else releases following).
+            if (userTookControl || !canFollow || !following || followIndex < 0) return@LaunchedEffect
             val current = listState.firstVisibleItemIndex
             if (followIndex == current && listState.firstVisibleItemScrollOffset == 0) return@LaunchedEffect
             if (abs(followIndex - current) <= SMOOTH_FOLLOW_ROWS) listState.animateScrollToItem(followIndex)

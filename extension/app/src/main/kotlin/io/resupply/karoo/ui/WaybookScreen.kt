@@ -446,6 +446,12 @@ fun WaybookScreen(
         // Near advances animate, large jumps snap (see [SMOOTH_FOLLOW_ROWS]).
         LaunchedEffect(followIndex, following, canFollow) {
             if (!canFollow || !following || followIndex < 0) return@LaunchedEffect
+            // Never steal a scroll the rider is actively driving (a hand fling, or a strip scrub):
+            // a live-position tick that re-runs this effect mid-gesture would otherwise yank the
+            // list back to [followIndex] and read as the list being "stuck" near the top. The first
+            // DragInteraction.Start has already flipped following off via onUserScrolled, but that
+            // state hasn't propagated yet within the same gesture — so guard on the live scroll flag.
+            if (listState.isScrollInProgress) return@LaunchedEffect
             val current = listState.firstVisibleItemIndex
             if (followIndex == current && listState.firstVisibleItemScrollOffset == 0) return@LaunchedEffect
             if (abs(followIndex - current) <= SMOOTH_FOLLOW_ROWS) listState.animateScrollToItem(followIndex)

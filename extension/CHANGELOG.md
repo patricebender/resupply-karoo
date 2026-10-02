@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.0](https://github.com/patricebender/resupply-karoo/compare/v1.6.1...v1.7.0) (2026-10-02)
+
+
+### Features
+
+* rename Café & Bar category to Café & Bakery, add bakeries ([#107](https://github.com/patricebender/resupply-karoo/issues/107)) ([d68cdf7](https://github.com/patricebender/resupply-karoo/commit/d68cdf7b3d142a0f0c130db25a28239b76c5598d))
+* vertical scrolling through the POI timeline ⚡️ ([#114](https://github.com/patricebender/resupply-karoo/issues/114)) ([9960c5b](https://github.com/patricebender/resupply-karoo/commit/9960c5b52f66a95ec3764f542a59212273a102a0))
+
+
+### Bug Fixes
+
+* gate CI signing guard on release assembly, not project config ([#105](https://github.com/patricebender/resupply-karoo/issues/105)) ([e43b38a](https://github.com/patricebender/resupply-karoo/commit/e43b38a289b53f61bdf09758e1179a2a812ee931))
+
 ## [1.6.1](https://github.com/patricebender/resupply-karoo/compare/v1.6.0...v1.6.1) (2026-09-30)
 
 

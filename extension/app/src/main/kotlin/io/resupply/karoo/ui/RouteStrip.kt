@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -60,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import io.resupply.karoo.data.Poi
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.haversine
+import kotlin.math.abs
 
 /**
  * Floor for the nearby radar's axis span (meters). Keeps a single very-near POI from stretching
@@ -345,13 +347,17 @@ fun RouteStrip(
 }
 
 /**
- * Turns the strip into a horizontal scrubber. A single down–move–up gesture serves both tap and
- * drag: the down reports immediately (a tap jumps), each move re-reports (a drag scrubs), and the
- * up reports null (clears the scrub state). [onScrub] receives the finger's position as a fraction
- * `[0,1]` of the *axis* — the width minus [leftInset]/[rightInset], so the nearby radar (whose dots
- * live inside those insets) and the full-width route timeline both report over their own axis. The
- * pointer event is consumed so the enclosing list doesn't also react. [key] re-arms the handler
- * when the axis scale changes (route length / radar radius). Null [onScrub] arg = release.
+ * Turns the strip into a horizontal scrubber that coexists with the list's vertical scroll. [onScrub]
+ * receives the finger's position as a fraction `[0,1]` of the *axis* — the width minus
+ * [leftInset]/[rightInset], so the nearby radar (whose dots live inside those insets) and the
+ * full-width route timeline both report over their own axis. A null arg means the gesture ended.
+ *
+ * Direction disambiguation is the whole point: a touch that starts on the strip must still be able
+ * to scroll the LIST if the finger moves vertically — otherwise the strip "eats" every drag that
+ * begins on it and the list feels stuck. So we don't consume the down; we wait for the touch slop
+ * and only claim the gesture when it breaks HORIZONTALLY. A vertical break is left unconsumed so it
+ * falls through to the LazyColumn. A tap (lift before slop) still jumps — it reports the down point.
+ * [key] re-arms the handler when the axis scale changes (route length / radar radius).
  */
 private fun Modifier.scrubGesture(
     key: Any?,
@@ -363,10 +369,28 @@ private fun Modifier.scrubGesture(
     val axisSpan = (size.width - axisStart - rightInset.toPx()).coerceAtLeast(1f)
     fun report(x: Float) = onScrub(((x - axisStart) / axisSpan).coerceIn(0f, 1f))
     awaitEachGesture {
-        val down = awaitFirstDown()
-        down.consume()
-        report(down.position.x)
-        // Follow the finger until it lifts; consume each move so the list below stays put.
+        // Don't consume the down — a vertical drag starting here must still reach the list.
+        val down = awaitFirstDown(requireUnconsumed = false)
+        // Resolve the gesture's intent at the touch slop: horizontal → scrub, vertical → let the
+        // list scroll, lift-before-slop → a tap that jumps.
+        var isHorizontal = false
+        val slopChange = awaitTouchSlopOrCancellation(down.id) { change, over ->
+            if (abs(over.x) >= abs(over.y)) {
+                isHorizontal = true
+                change.consume()   // claim it as a scrub so the list won't also scroll
+            }
+            // Vertical: leave unconsumed; we bail below and the list takes over.
+        }
+        if (slopChange == null) {
+            // Lifted before crossing slop → a tap. Jump to the tapped point, then clear.
+            report(down.position.x)
+            onScrub(null)
+            return@awaitEachGesture
+        }
+        if (!isHorizontal) return@awaitEachGesture   // vertical drag → hand off to the list
+        // Claimed a horizontal scrub: seed at the slop position, then follow the finger, consuming
+        // each move so the list stays put, until the last pointer lifts.
+        report(slopChange.position.x)
         do {
             val event = awaitPointerEvent()
             event.changes.forEach { change ->

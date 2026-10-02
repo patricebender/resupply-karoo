@@ -89,10 +89,12 @@ private const val RADAR_MIN_SPAN_METERS = 500.0
  * pill shows the auto-refresh status where the header has no room. See [NearbyRadar].
  *
  * **Scrubbing:** when [onScrub] is given the strip becomes a draggable scrubber — press/drag
- * (or tap) anywhere along it reports the along-axis position *in meters* (route distance here,
- * straight-line distance on the radar), which the host turns into a list scroll. The range
- * bracket + pill track the scrolled window, and the pill grows drag chevrons while scrubbing so
- * the gesture reads at a glance.
+ * (or tap) anywhere along it reports the finger's position as a fraction `[0,1]` of the strip
+ * width, which the host maps straight to a list index. Reporting a fraction (not meters) keeps
+ * scrubbing responsive when POIs are few and far apart on a long route: each dot occupies an equal
+ * slice of the width, so even finger travel scrolls evenly — no dead zones between distant dots.
+ * The range bracket + pill track the scrolled window, and the pill grows drag chevrons while
+ * scrubbing so the gesture reads at a glance.
  */
 @Composable
 fun RouteStrip(
@@ -111,9 +113,9 @@ fun RouteStrip(
     favoritePoiIds: Set<String> = emptySet(),
     // Render the distance labels in miles/feet instead of km/m (resolved units mode).
     useImperial: Boolean = false,
-    // Non-null → the strip is a scrubber: press/drag/tap reports the along-axis position in
-    // METERS (0..routeLength here, 0..radarMax on the nearby radar). Null → static overview.
-    onScrub: ((Double) -> Unit)? = null,
+    // Non-null → the strip is a scrubber: press/drag/tap reports the finger's position as a
+    // fraction [0,1] of the strip width, which the host maps to a list index. Null → static.
+    onScrub: ((Float) -> Unit)? = null,
 ) {
     // Nearby proximity radar takes over when there's no route but we have a rider fix. The visible
     // list window (listStart/EndMeters) is straight-line distance here, so the same range bracket
@@ -193,7 +195,7 @@ fun RouteStrip(
                     // re-reports (a drag scrubs continuously), and the up clears the scrub state.
                     .then(if (onScrub != null && hasRoute) Modifier.scrubGesture(routeLengthMeters) { frac ->
                         scrubFrac = frac
-                        frac?.let { onScrub(it * routeLengthMeters) }
+                        frac?.let { onScrub(it) }
                     } else Modifier),
             ) {
                 val left = 0f
@@ -592,9 +594,9 @@ private fun NearbyRadar(
     listStartMeters: Double?,
     listEndMeters: Double?,
     useImperial: Boolean = false,
-    // Non-null → scrubbable: reports the finger's straight-line distance (m) over this radar's
-    // axis, 0 at the rider to [radius] at the right edge. Null → static radar.
-    onScrub: ((Double) -> Unit)? = null,
+    // Non-null → scrubbable: reports the finger's position as a fraction [0,1] of the strip width
+    // (the host maps it to a list index). Null → static radar.
+    onScrub: ((Float) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val baselineColor = MaterialTheme.colorScheme.outlineVariant
@@ -648,7 +650,7 @@ private fun NearbyRadar(
                     // the right edge). The gesture reports the fraction; we hand the host meters.
                     .then(if (onScrub != null) Modifier.scrubGesture(radius, leftInset, rightInset) { frac ->
                         scrubFrac = frac
-                        frac?.let { onScrub(it * radius) }
+                        frac?.let { onScrub(it) }
                     } else Modifier),
             ) {
                 val left = 0f

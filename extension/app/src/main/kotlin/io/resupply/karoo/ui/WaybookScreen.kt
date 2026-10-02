@@ -48,8 +48,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -83,8 +83,8 @@ import io.resupply.karoo.data.formatKm
 import io.resupply.karoo.data.poiSourceFor
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.haversine
-import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 // Position-follow: advances within this many rows animate (smooth, normal progress); larger
 // jumps snap instantly, so a discontinuity re-syncs the list without the range bracket
@@ -336,40 +336,37 @@ fun WaybookScreen(
             }
         }
 
-        // Timeline scrubbing: dragging the strip reports an along-axis position in METERS, which
-        // we turn into the nearest POI and scroll the list there — the reverse of the strip
-        // mirroring the list. A scrub is manual exploration, so it ends position-following (the
-        // same hook a hand scroll uses). Guarded to >1 POI — a single-row strip has nothing to
-        // scrub. The target index is found over the SAME ordering the list renders (displayPois),
-        // so it lands on the right row.
+        // Timeline scrubbing: dragging the strip reports the finger's position as a fraction of the
+        // strip width, which we map straight to a list index — the reverse of the strip mirroring
+        // the list. Mapping to INDEX (not along-route distance) is what keeps it responsive when
+        // POIs are few and far apart: each row gets an equal slice of the width, so even finger
+        // travel scrolls evenly instead of forcing a long drag to reach a distant dot's true km.
+        // A scrub is manual exploration, so it ends position-following (the same hook a hand scroll
+        // uses). Guarded to >1 POI — a single-row strip has nothing to scrub.
         //
-        // Smoothness: a drag fires pointer moves dozens of times a second, but the list only has
-        // one row per POI — so most moves resolve to the SAME row. We skip any target the list is
-        // already parked at (its firstVisibleItemIndex), and run the scroll on ONE reused job that
-        // cancels its predecessor, so scrolls never stack and fight (that stacking, not the scroll
-        // itself, was the stutter). Deduping against the live position (not a sticky "last scrubbed"
-        // value) means re-tapping a spot still works after the rider has scrolled elsewhere.
-        // scrollToItem is INSTANT so the bracket/pill track the finger responsively; an animated
-        // scroll would lag behind a fast drag and read as sluggish.
-        val scrubScope = rememberCoroutineScope()
-        val scrubbable = displayPois.size > 1
-        var scrubJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-        val onScrubMeters: ((Double) -> Unit)? = if (!scrubbable) null else { meters ->
-            val index = when (source) {
-                PoiSource.ROUTE -> displayPois.indices.minByOrNull {
-                    abs((displayPois[it].distancesAlongRoute.firstOrNull() ?: 0.0) - meters)
-                }
-                PoiSource.NEARBY -> riderLocation?.let { rider ->
-                    displayPois.indices.minByOrNull {
-                        abs(haversine(rider, LatLng(displayPois[it].lat, displayPois[it].lng)) - meters)
+        // Smoothness without starving the scroll: a drag fires pointer moves dozens of times a
+        // second. Cancelling an in-flight scrollToItem per move (to "avoid stacking") starves it —
+        // each suspend call is cancelled by the next before it applies, so the list sticks. Instead
+        // the handler just records the latest target index in a state; a single effect below
+        // consumes it and scrolls. snapshotFlow coalesces bursts to the newest value, so we scroll
+        // once per settled target, never stacking, never starved.
+        val lastIndex = displayPois.lastIndex
+        val scrubbable = lastIndex > 0
+        var scrubTarget by remember { mutableStateOf(-1) }
+        val onScrubFraction: ((Float) -> Unit)? = if (!scrubbable) null else { frac ->
+            val index = (frac * lastIndex).roundToInt().coerceIn(0, lastIndex)
+            if (index != listState.firstVisibleItemIndex) {
+                onUserScrolled()
+                scrubTarget = index
+            }
+        }
+        LaunchedEffect(listState, lastIndex) {
+            snapshotFlow { scrubTarget }
+                .collect { target ->
+                    if (target in 0..lastIndex && target != listState.firstVisibleItemIndex) {
+                        listState.scrollToItem(target)
                     }
                 }
-            } ?: -1
-            if (index >= 0 && index != listState.firstVisibleItemIndex) {
-                onUserScrolled()
-                scrubJob?.cancel()
-                scrubJob = scrubScope.launch { listState.scrollToItem(index) }
-            }
         }
 
         // The band above the list: a route timeline for a route build, or a proximity "radar"
@@ -387,7 +384,7 @@ fun WaybookScreen(
                     // Little yellow stars above favorite dots (route timeline only).
                     favoritePoiIds = favoritePoiIds,
                     useImperial = useImperial,
-                    onScrub = onScrubMeters,
+                    onScrub = onScrubFraction,
                 )
                 HorizontalDivider()
             }
@@ -404,7 +401,7 @@ fun WaybookScreen(
                         listStartMeters = visibleNearbySpanMeters?.first,
                         listEndMeters = visibleNearbySpanMeters?.second,
                         useImperial = useImperial,
-                        onScrub = onScrubMeters,
+                        onScrub = onScrubFraction,
                     )
                     HorizontalDivider()
                 }

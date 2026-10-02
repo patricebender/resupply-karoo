@@ -618,5 +618,10 @@
     "id": "canada-yukon",
     "label": "Yukon",
     "group": "North America"
+  },
+  {
+    "id": "australia",
+    "label": "Australia",
+    "group": "Australia"
   }
 ]

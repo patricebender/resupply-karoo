@@ -25,7 +25,7 @@ export interface Region {
   /** Display name shown in the picker. */
   label: string;
   /** Picker section. */
-  group: "Europe" | "North America";
+  group: "Europe" | "North America" | "Australia";
   /** Geofabrik path(s) under download.geofabrik.de, minus `-latest.osm.pbf`. */
   geofabrik: string | string[];
   /**
@@ -227,6 +227,15 @@ const RAW_REGIONS: Array<Omit<Region, "dataVersion">> = [
     group: "North America" as const,
     geofabrik: `north-america/canada/${p.slug}`,
   })),
+
+  // Australia — whole country, single Geofabrik extract (no per-state breakdown published).
+  // A ~920 MB PBF, on par with the larger single-country European extracts; a plain leaf.
+  {
+    id: "australia",
+    label: "Australia",
+    group: "Australia",
+    geofabrik: "australia-oceania/australia",
+  },
 ];
 
 export const REGIONS: Region[] = RAW_REGIONS.map((r) => ({

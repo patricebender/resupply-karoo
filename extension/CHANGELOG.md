@@ -5,7 +5,7 @@
 
 ### Features
 
-* ship Australia as a selectable region ([#118](https://github.com/patricebender/resupply-karoo/issues/118)) ([848f2f7](https://github.com/patricebender/resupply-karoo/commit/848f2f7d46a3c59193cdd7af1368b092c1b10912))
+* add Australia region data 🇦🇺 ([#118](https://github.com/patricebender/resupply-karoo/issues/118)) ([848f2f7](https://github.com/patricebender/resupply-karoo/commit/848f2f7d46a3c59193cdd7af1368b092c1b10912))
 
 
 ### Bug Fixes

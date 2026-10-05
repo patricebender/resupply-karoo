@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/patricebender/resupply-karoo/compare/v1.7.0...v1.8.0) (2026-10-05)
+
+
+### Features
+
+* ship Australia as a selectable region ([#118](https://github.com/patricebender/resupply-karoo/issues/118)) ([848f2f7](https://github.com/patricebender/resupply-karoo/commit/848f2f7d46a3c59193cdd7af1368b092c1b10912))
+
+
+### Bug Fixes
+
+* stable in-app update flow ([#120](https://github.com/patricebender/resupply-karoo/issues/120)) ([c84a596](https://github.com/patricebender/resupply-karoo/commit/c84a59694a9f1e4edea6760b6d49ef39211d991e))
+
 ## [1.7.0](https://github.com/patricebender/resupply-karoo/compare/v1.6.1...v1.7.0) (2026-10-02)
 
 

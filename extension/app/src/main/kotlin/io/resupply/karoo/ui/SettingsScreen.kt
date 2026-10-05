@@ -98,8 +98,11 @@ sealed interface AppUpdateCheck {
     data object UpToDate : AppUpdateCheck
     /** Checked: a newer release is available. */
     data class Available(val info: AppUpdateInfo) : AppUpdateCheck
-    /** The check couldn't complete (offline / no phone link) and there's nothing to show. */
-    data object Failed : AppUpdateCheck
+    /**
+     * The check couldn't complete and there's nothing to show. [reason] is the rider-facing
+     * detail line — e.g. off WiFi (the check needs it) vs a network/parse failure on WiFi.
+     */
+    data class Failed(val reason: String = "No connection to check for updates.") : AppUpdateCheck
 }
 
 /**
@@ -814,7 +817,7 @@ private fun UpdateCard(
             CardCopy("UPDATE FAILED", "Couldn't install", humanInstallError(progress.reason))
         progress?.phase == UpdatePhase.DONE -> CardCopy("READY", "Confirm to finish", "Approve the install prompt to update.")
         available != null -> CardCopy("UPDATE AVAILABLE", "Version ${available.info.versionName}")
-        check is AppUpdateCheck.Failed -> CardCopy("COULDN'T CHECK", "You're on $currentVersion", "No connection to check for updates.")
+        check is AppUpdateCheck.Failed -> CardCopy("COULDN'T CHECK", "You're on $currentVersion", check.reason)
         else -> CardCopy("", "")
     }
     val overline = copy.overline
@@ -999,6 +1002,16 @@ private fun UpdateSubtle(text: String, maxLines: Int = 1) {
  */
 private fun humanInstallError(reason: String?): String = when {
     reason == null -> "Something went wrong. Try again."
+    // Our own pre-install failures (AppUpdateService.fail) — pass these through verbatim; they're
+    // already rider-facing and actionable. Collapsing them into "Couldn't install" (below) is what
+    // made a Wi‑Fi/download problem look like a signing/packaging one.
+    reason.contains("Wi‑Fi", true) || reason.contains("Wi-Fi", true) || reason.contains("WiFi", true) ->
+        reason
+    reason.contains("Download failed", true) ->
+        "Download failed. Check your connection and try again."
+    reason.contains("Couldn't start the installer", true) ->
+        reason
+    // PackageInstaller STATUS_FAILURE_* messages.
     reason.contains("SIGNATURE", true) || reason.contains("signatures do not match", true) ->
         "This update is signed differently from the installed app. Uninstall the current app, then install the update."
     reason.contains("INSUFFICIENT_STORAGE", true) || reason.contains("storage", true) ->

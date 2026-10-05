@@ -19,7 +19,7 @@ android {
         targetSdk = 34
         // versionCode: CI injects the monotonic run number; defaults to 1 locally.
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
-        versionName = "1.7.0" // x-release-please-version
+        versionName = "1.8.0" // x-release-please-version
 
         // Bundled SQLite ships a native .so, so the APK is ABI-specific. Karoo 3 is
         // arm64-v8a; Karoo 2 is 32-bit armeabi-v7a (Android 8). Ship both or the

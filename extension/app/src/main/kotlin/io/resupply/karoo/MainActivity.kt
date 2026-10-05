@@ -671,13 +671,21 @@ class MainActivity : ComponentActivity() {
      * failure — a failed check just leaves the Update section absent.
      */
     private fun loadAppManifest() {
+        // The check resolves the newest app release via the GitHub API and reads its manifest over
+        // a direct OkHttp connection — that needs WiFi (the bridge can't carry the releases listing
+        // under its size cap, and the APK download needs WiFi anyway). Off WiFi, don't try: keep
+        // the last good result, else say so plainly.
+        if (!Connectivity.isOnWifi(applicationContext)) {
+            if (appManifest.value == null) {
+                appCheckState.value = AppUpdateCheck.Failed("Connect to Wi‑Fi to check for updates.")
+            }
+            return
+        }
         // Only show the "Checking…" state when we have nothing better on screen; a silent refresh
         // over an existing result keeps that result visible until the new one lands.
         if (appManifest.value == null) appCheckState.value = AppUpdateCheck.Checking
         lifecycleScope.launch {
-            val manifest = withKarooConnection(applicationContext) { system ->
-                AppUpdateClient(system).fetchManifest()
-            }
+            val manifest = withContext(Dispatchers.IO) { AppUpdateClient().fetchManifest() }
             if (manifest != null) {
                 appManifest.value = manifest
                 appCheckState.value = if (AppUpdateClient.isNewer(manifest)) {
@@ -695,8 +703,9 @@ class MainActivity : ComponentActivity() {
                     AppUpdateCheck.UpToDate
                 }
             } else if (appManifest.value == null) {
-                // Nothing good to fall back to → surface the failure (retryable).
-                appCheckState.value = AppUpdateCheck.Failed
+                // Nothing good to fall back to → surface the failure (retryable). On WiFi but the
+                // fetch still failed: a network/parse problem, not connectivity.
+                appCheckState.value = AppUpdateCheck.Failed("Couldn't check for updates. Try again.")
             }
         }
     }

@@ -47,36 +47,60 @@ android {
         buildConfigField("String", "SEED_REGION_IDS", "\"\"")
     }
 
-    // Release signing key. In CI the keystore is a base64 secret decoded to a temp file;
-    // locally there's usually no key, so `release` falls back to debug signing below and
-    // sideloaded dev builds keep installing without a keystore. Store-distributed builds
-    // MUST be signed with this stable key — its signature is permanent once riders install.
+    // Release signing key, from one of two sources (CI wins):
+    //  1. CI: a base64 keystore secret + passwords in env vars, decoded to a temp file.
+    //  2. Local: a `release.keystore` next to this module, with its passwords/alias in the
+    //     gitignored `local.properties` (RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS /
+    //     RELEASE_KEY_PASSWORD). This lets a developer build a *production-signed* local APK to
+    //     test the real in-app OTA flow (install it, then let the in-app updater replace it with
+    //     a GitHub release APK — only possible when both share this signature).
+    // Otherwise `release` falls back to debug signing so a plain local `assembleRelease` still
+    // produces an installable (dev) APK. Store-distributed builds MUST use this stable key — its
+    // signature is permanent once riders install.
+    val localProps = Properties().apply {
+        rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    }
+    val hasCiKeystore = !System.getenv("KEYSTORE_BASE64").isNullOrBlank()
+    // Local base64 keystore in local.properties — intended to hold the SAME key CI uses, so a
+    // developer can build a production-signed APK and test the real in-app OTA (a GitHub release
+    // can only replace it in place when both share this signature).
+    val localKeystoreB64 = localProps.getProperty("RELEASE_KEYSTORE_B64")?.takeIf { it.isNotBlank() }
+    val hasLocalKeystore = localKeystoreB64 != null &&
+        localProps.getProperty("RELEASE_STORE_PASSWORD") != null
     signingConfigs {
         create("release") {
-            val base64Keystore = System.getenv("KEYSTORE_BASE64")
-            if (!base64Keystore.isNullOrBlank()) {
+            if (hasCiKeystore) {
                 val keystoreFile = File.createTempFile("keystore", ".jks")
-                keystoreFile.writeBytes(Base64.getDecoder().decode(base64Keystore))
+                keystoreFile.writeBytes(Base64.getDecoder().decode(System.getenv("KEYSTORE_BASE64")))
                 storeFile = keystoreFile
                 storePassword = System.getenv("KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("KEY_ALIAS")
                 keyPassword = System.getenv("KEY_PASSWORD")
+            } else if (hasLocalKeystore) {
+                val keystoreFile = File.createTempFile("keystore", ".jks")
+                keystoreFile.writeBytes(Base64.getDecoder().decode(localKeystoreB64!!.trim()))
+                storeFile = keystoreFile
+                storePassword = localProps.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = localProps.getProperty("RELEASE_KEY_ALIAS")
+                // Key password defaults to the store password when unset (common for single-key stores).
+                keyPassword = localProps.getProperty("RELEASE_KEY_PASSWORD")
+                    ?: localProps.getProperty("RELEASE_STORE_PASSWORD")
             }
         }
     }
 
     buildTypes {
         release {
-            // Use the real release key when CI provided a keystore; otherwise fall back to
-            // debug signing so local `assembleRelease` still produces an installable APK. The
-            // CI-must-have-a-keystore guard lives at task-execution time (see below), not
-            // here: this block is evaluated whenever the project is configured — including
-            // plain `testDebugUnitTest` runs that need no keystore — so throwing here would
-            // break unrelated CI jobs.
-            signingConfig = if (System.getenv("KEYSTORE_BASE64").isNullOrBlank()) {
-                signingConfigs.getByName("debug")
-            } else {
+            // Use the real release key when CI or a local keystore provided one; otherwise fall
+            // back to debug signing so local `assembleRelease` still produces an installable APK.
+            // The CI-must-have-a-keystore guard lives at task-execution time (see below), not
+            // here: this block is evaluated whenever the project is configured — including plain
+            // `testDebugUnitTest` runs that need no keystore — so throwing here would break
+            // unrelated CI jobs.
+            signingConfig = if (hasCiKeystore || hasLocalKeystore) {
                 signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -146,6 +170,10 @@ tasks.register("generateManifest") {
             ?: "https://github.com/patricebender/resupply-karoo/releases/latest/download"
 
         // First bullet block of the newest CHANGELOG entry, as the library's "what's new".
+        // Beautified for display: the CHANGELOG is release-please Markdown with trailing PR/commit
+        // refs (`([#107](url)) ([d68cdf7](url))`) — strip those and reduce any `[text](url)` to its
+        // text, so the manifest carries clean prose. (The app also strips these at runtime in
+        // MainActivity.releaseNotes(); baking it keeps the two in sync and the field tiny.)
         val releaseNotes = runCatching {
             val changelog = rootProject.file("CHANGELOG.md")
             if (!changelog.exists()) return@runCatching ""
@@ -154,6 +182,13 @@ tasks.register("generateManifest") {
                 .drop(1)
                 .takeWhile { !it.startsWith("## ") }        // until the next version heading
                 .filter { it.startsWith("* ") || it.startsWith("- ") }
+                .map { line ->
+                    line.replace(Regex("""\s*\(\[[0-9a-f]{6,}]\([^)]*\)\)"""), "") // ([hash](url))
+                        .replace(Regex("""\s*\(\[#\d+]\([^)]*\)\)"""), "")          // ([#123](url))
+                        .replace(Regex("""\[([^]]+)]\([^)]*\)"""), "$1")            // [text](url) -> text
+                        .replace(Regex("""\s{2,}"""), " ")
+                        .trimEnd()
+                }
                 .joinToString("\n")
         }.getOrDefault("")
 

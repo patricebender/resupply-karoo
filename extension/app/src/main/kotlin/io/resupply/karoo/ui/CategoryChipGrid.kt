@@ -1,5 +1,10 @@
 package io.resupply.karoo.ui
 
+import androidx.compose.animation.animateColor
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,33 +92,51 @@ private fun CategoryChip(
 ) {
     val style = styleForCategory(category)
     val shape = RoundedCornerShape(10.dp)
-    var tile = modifier
+    // Animate on↔off so a tap — and especially the "all on / all off" bulk flip — glides rather
+    // than snapping: the fill fades, the strike wipes in/out along its own length, and the icon
+    // tint crosses between white (on) and the category color (off).
+    val transition = updateTransition(targetState = on, label = "categoryChip")
+    val fill by transition.animateColor(
+        transitionSpec = { tween(durationMillis = 240, easing = FastOutSlowInEasing) },
+        label = "fill",
+    ) { if (it) style.color else Color.Transparent }
+    // 1 = fully struck (off), 0 = no strike (on). Drives the diagonal wipe.
+    val strike by transition.animateFloat(
+        transitionSpec = { tween(durationMillis = 240, easing = FastOutSlowInEasing) },
+        label = "strike",
+    ) { if (it) 0f else 1f }
+    val iconTint by transition.animateColor(
+        transitionSpec = { tween(durationMillis = 240, easing = FastOutSlowInEasing) },
+        label = "iconTint",
+    ) { if (it) Color.White else style.color }
+
+    val tile = modifier
         .aspectRatio(1.4f)
         .clip(shape)
-        .background(if (on) style.color else Color.Transparent)
+        .background(fill)
         .clickable(enabled = canToggle) { onToggle(category, !on) }
-    if (!on) {
-        // Outlined + a diagonal strike (top-left → bottom-right) in the category color so
-        // an off tile reads as "excluded" at a glance.
-        tile = tile
-            .border(1.dp, style.color, shape)
-            .drawWithContent {
-                drawContent()
+        // A faint outline always rides underneath the fill; it only shows through when off.
+        .border(1.dp, style.color.copy(alpha = 1f - strike), shape)
+        // Diagonal strike (top-left → bottom-right) that grows from the corner as the tile turns
+        // off, so "excluded" reads at a glance and the flip has direction.
+        .drawWithContent {
+            drawContent()
+            if (strike > 0f) {
                 drawLine(
                     color = style.color,
                     start = Offset(0f, 0f),
-                    end = Offset(size.width, size.height),
+                    end = Offset(size.width * strike, size.height * strike),
                     strokeWidth = 2.dp.toPx(),
                     cap = StrokeCap.Round,
                 )
             }
-    }
+        }
     Box(modifier = tile, contentAlignment = Alignment.Center) {
         Icon(
             style.icon,
             // No label, so the icon carries the meaning — name it for accessibility.
             contentDescription = style.label,
-            tint = if (on) Color.White else style.color,
+            tint = iconTint,
             modifier = Modifier.size(26.dp * style.iconScale),
         )
         // Post-build count of found places for an enabled category — a small corner badge.

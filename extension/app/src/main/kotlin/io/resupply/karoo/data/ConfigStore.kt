@@ -90,6 +90,17 @@ class ConfigStore(private val context: Context) {
         }
     }
 
+    /**
+     * Flip every category on or off in one write (the Categories "all on / all off" switch).
+     * Off writes an explicit empty set — distinct from the absent key, which reads as all-on —
+     * so "none" survives a restart instead of silently defaulting back to all enabled.
+     */
+    suspend fun setAllCategories(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[CATEGORIES_KEY] = if (enabled) Category.entries.map { it.id }.toSet() else emptySet()
+        }
+    }
+
     // --- Favorites -----------------------------------------------------------------------------
     //
     // Favorites are stored per route in [FAVORITES_BY_ROUTE_KEY], keyed by the route's polyline

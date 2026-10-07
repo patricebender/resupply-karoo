@@ -351,6 +351,9 @@ class MainActivity : ComponentActivity() {
                     onCategoryToggle = { c, on ->
                         lifecycleScope.launch { configStore.setCategoryEnabled(c, on) }
                     },
+                    onAllCategoriesToggle = { on ->
+                        lifecycleScope.launch { configStore.setAllCategories(on) }
+                    },
                     onSafeWaterToggle = { on ->
                         lifecycleScope.launch { configStore.setSafeWaterOnly(on) }
                     },

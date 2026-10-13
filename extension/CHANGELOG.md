@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/patricebender/resupply-karoo/compare/v1.8.0...v1.9.0) (2026-10-13)
+
+
+### Features
+
+* toggle all POI categories at once ([#121](https://github.com/patricebender/resupply-karoo/issues/121)) ([a6bbdf7](https://github.com/patricebender/resupply-karoo/commit/a6bbdf79a3ceb240d123aa6f164f79e3aaa18b4d))
+
 ## [1.8.0](https://github.com/patricebender/resupply-karoo/compare/v1.7.0...v1.8.0) (2026-10-05)
 
 

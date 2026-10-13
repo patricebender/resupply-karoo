@@ -34,8 +34,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.IndeterminateCheckBox
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
@@ -133,6 +136,8 @@ fun SettingsScreen(
     installedSummary: String,
     onDetourChange: (Int) -> Unit,
     onCategoryToggle: (Category, Boolean) -> Unit,
+    // Flip every category at once (the Categories header "all on / all off" switch).
+    onAllCategoriesToggle: (Boolean) -> Unit,
     onSafeWaterToggle: (Boolean) -> Unit,
     onSmartDistanceToggle: (Boolean) -> Unit,
     themeMode: ThemeMode,
@@ -253,7 +258,16 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
-            SectionHeader("Categories")
+            SectionHeader("Categories") {
+                CategoryMasterToggle(
+                    // Tri-state read of the grid: all / none / some enabled.
+                    enabledCount = config.enabledCategories.size,
+                    total = Category.entries.size,
+                    enabled = !building,
+                    // One tap flips the whole grid: anything off → turn all on; all on → clear.
+                    onToggleAll = { onAllCategoriesToggle(config.enabledCategories.size < Category.entries.size) },
+                )
+            }
             CategoryChipGrid(
                 enabled = config.enabledCategories,
                 counts = visibleCounts,
@@ -650,16 +664,110 @@ private fun <T> SegmentedModeToggle(
     }
 }
 
-/** Uppercase section label shared by the settings sections. */
+/**
+ * Uppercase section label shared by the settings sections. An optional [trailing] slot sits on the
+ * same baseline, pushed to the far end (used by Categories for its "all on / all off" switch).
+ */
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(bottom = 8.dp),
+private fun SectionHeader(text: String, trailing: (@Composable () -> Unit)? = null) {
+    if (trailing == null) {
+        Text(
+            text.uppercase(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        return
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text.uppercase(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        trailing()
+    }
+}
+
+/**
+ * The Categories "all on / all off" convenience switch, living on the section header. It's a
+ * tri-state pill that *reads* the grid at a glance and *acts* as a single toggle:
+ *  - **all on**  → a filled accent pill, a done-all check + "All on". Tap clears the whole grid.
+ *  - **none on** → a muted outline pill, an empty-box glyph + "All off". Tap selects everything.
+ *  - **some on** → the same outline pill, an indeterminate dash + "N / total". Tap selects the rest.
+ * The leading glyph swaps on a short cross-fade and the fill animates, so a bulk flip feels like one
+ * deliberate motion rather than nine chips blinking independently. Disabled (greyed, inert) while a
+ * build runs, matching the chips.
+ */
+@Composable
+private fun CategoryMasterToggle(
+    enabledCount: Int,
+    total: Int,
+    enabled: Boolean,
+    onToggleAll: () -> Unit,
+) {
+    val allOn = enabledCount == total
+    val noneOn = enabledCount == 0
+
+    val accent = MaterialTheme.colorScheme.primary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    // Filled accent when everything's on; a quiet outline otherwise. Grey + inert while building.
+    val tint = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        allOn -> MaterialTheme.colorScheme.onPrimary
+        else -> muted
+    }
+    val fill by animateColorAsState(
+        targetValue = if (allOn && enabled) accent else Color.Transparent,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "categoryMasterFill",
     )
+    val borderColor = if (enabled) muted.copy(alpha = 0.5f) else muted.copy(alpha = 0.2f)
+
+    val icon = when {
+        allOn -> Icons.Filled.DoneAll
+        noneOn -> Icons.Filled.CheckBoxOutlineBlank
+        else -> Icons.Filled.IndeterminateCheckBox
+    }
+    val label = when {
+        allOn -> "All on"
+        noneOn -> "All off"
+        else -> "$enabledCount / $total"
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(fill)
+            // Hairline ring only when not filled, so the on-state pill stays clean.
+            .then(if (allOn && enabled) Modifier else Modifier.border(1.dp, borderColor, RoundedCornerShape(percent = 50)))
+            .clickable(enabled = enabled, onClick = onToggleAll)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    ) {
+        // Cross-fade the glyph so the all/some/none transition reads as one motion.
+        androidx.compose.animation.Crossfade(
+            targetState = icon,
+            animationSpec = tween(durationMillis = 180),
+            label = "categoryMasterIcon",
+        ) { glyph ->
+            Icon(glyph, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.size(6.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = tint,
+            maxLines = 1,
+        )
+    }
 }
 
 /**

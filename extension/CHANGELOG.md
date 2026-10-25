@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.0](https://github.com/patricebender/resupply-karoo/compare/v1.8.0...v1.9.0) (2026-10-25)
+
+
+### Features
+
+* add About screen with privacy & location disclosure ([#128](https://github.com/patricebender/resupply-karoo/issues/128)) ([637c8d7](https://github.com/patricebender/resupply-karoo/commit/637c8d7b929edbbb8b1c34a8356a7a3ed399d132))
+* improve onboarding dialog for first official release ✨ ([#131](https://github.com/patricebender/resupply-karoo/issues/131)) ([2fa5e13](https://github.com/patricebender/resupply-karoo/commit/2fa5e139de257f861c64705bdbf21d5fa13fcbf0))
+* toggle all POI categories at once ([#121](https://github.com/patricebender/resupply-karoo/issues/121)) ([a6bbdf7](https://github.com/patricebender/resupply-karoo/commit/a6bbdf79a3ceb240d123aa6f164f79e3aaa18b4d))
+
+
+### Bug Fixes
+
+* all-POIs data field respects filter settings ([#129](https://github.com/patricebender/resupply-karoo/issues/129)) ([4ebdb99](https://github.com/patricebender/resupply-karoo/commit/4ebdb999b1a912528fd7e31f51ce557a98296190))
+
 ## [1.8.0](https://github.com/patricebender/resupply-karoo/compare/v1.7.0...v1.8.0) (2026-10-05)
 
 

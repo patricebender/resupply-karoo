@@ -12,7 +12,7 @@
 
 ### Bug Fixes
 
-* all-POIs field honors the favorites-only filter ([#129](https://github.com/patricebender/resupply-karoo/issues/129)) ([4ebdb99](https://github.com/patricebender/resupply-karoo/commit/4ebdb999b1a912528fd7e31f51ce557a98296190))
+* all-POIs data field respects filter settings ([#129](https://github.com/patricebender/resupply-karoo/issues/129)) ([4ebdb99](https://github.com/patricebender/resupply-karoo/commit/4ebdb999b1a912528fd7e31f51ce557a98296190))
 
 ## [1.8.0](https://github.com/patricebender/resupply-karoo/compare/v1.7.0...v1.8.0) (2026-10-05)
 

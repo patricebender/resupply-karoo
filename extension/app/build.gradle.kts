@@ -207,9 +207,10 @@ tasks.register("generateManifest") {
             "latestVersion" to android.defaultConfig.versionName,
             "latestVersionCode" to android.defaultConfig.versionCode,
             "developer" to "github.com/patricebender",
-            "description" to "Turns a loaded route into an offline guide of POIs along the way " +
-                "(water, food, bike shops, fuel and more), with in-ride data fields and a map layer. " +
-                "Download the regions you ride on demand.",
+            "description" to "Plan your next ride's resupply in seconds — fully offline. " +
+                "Resupply finds water, food and other stops along your route, shows their opening hours, " +
+                "and tells you when you'll arrive. Save favorites while planning, then let in-ride data " +
+                "fields keep your next stop a glance away. No route loaded? Live mode shows what's around you.",
             "releaseNotes" to releaseNotes,
             "screenshotUrls" to screenshotUrls,
             "tags" to listOf("navigation", "poi"),

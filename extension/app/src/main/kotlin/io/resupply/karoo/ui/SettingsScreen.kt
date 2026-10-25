@@ -1087,7 +1087,7 @@ private fun ChangelogDialog(version: String, notes: List<String>, onDismiss: () 
         title = {
             Text(
                 "What's new in v$version",
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleMedium,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )

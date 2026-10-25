@@ -6,7 +6,7 @@
 ### Features
 
 * add About screen with privacy & location disclosure ([#128](https://github.com/patricebender/resupply-karoo/issues/128)) ([637c8d7](https://github.com/patricebender/resupply-karoo/commit/637c8d7b929edbbb8b1c34a8356a7a3ed399d132))
-* add data-field intro page to first-run onboarding ([#131](https://github.com/patricebender/resupply-karoo/issues/131)) ([2fa5e13](https://github.com/patricebender/resupply-karoo/commit/2fa5e139de257f861c64705bdbf21d5fa13fcbf0))
+* improve onboarding dialog for first official release ✨ ([#131](https://github.com/patricebender/resupply-karoo/issues/131)) ([2fa5e13](https://github.com/patricebender/resupply-karoo/commit/2fa5e139de257f861c64705bdbf21d5fa13fcbf0))
 * toggle all POI categories at once ([#121](https://github.com/patricebender/resupply-karoo/issues/121)) ([a6bbdf7](https://github.com/patricebender/resupply-karoo/commit/a6bbdf79a3ceb240d123aa6f164f79e3aaa18b4d))
 
 

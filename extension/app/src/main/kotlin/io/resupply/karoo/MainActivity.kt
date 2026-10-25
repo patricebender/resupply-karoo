@@ -56,6 +56,7 @@ import io.resupply.karoo.ui.SettingsScreen
 import io.resupply.karoo.ui.theme.ResupplyTheme
 import io.resupply.karoo.ui.PoiDetailScreen
 import io.resupply.karoo.ui.RegionsScreen
+import io.resupply.karoo.ui.AboutScreen
 import io.resupply.karoo.ui.WaybookScreen
 import io.resupply.karoo.ui.WelcomeScreen
 import io.resupply.karoo.util.Connectivity
@@ -85,6 +86,7 @@ private sealed interface Screen {
     data object Waybook : Screen
     data object Settings : Screen
     data object Regions : Screen
+    data object About : Screen
     data object Welcome : Screen
     data class Detail(val poiId: String) : Screen
 }
@@ -400,6 +402,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onOpenRegions = { screen = Screen.Regions },
+                    onOpenAbout = { screen = Screen.About },
                     onBack = { screen = Screen.Waybook },
                 )
             }
@@ -454,6 +457,8 @@ class MainActivity : ComponentActivity() {
                     onBack = { screen = Screen.Waybook },
                 )
             }
+
+            is Screen.About -> AboutScreen(onBack = { screen = Screen.Settings })
 
             is Screen.Detail -> {
                 val poi = pois.firstOrNull { it.id == s.poiId }

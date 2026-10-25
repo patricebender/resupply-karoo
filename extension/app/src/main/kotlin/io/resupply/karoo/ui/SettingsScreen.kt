@@ -71,6 +71,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.resupply.karoo.build.BuildState
@@ -163,6 +164,7 @@ fun SettingsScreen(
     // over); false = pause → pre-search state (overview shows its invitation).
     onToggleLive: (Boolean) -> Unit,
     onOpenRegions: () -> Unit,
+    onOpenAbout: () -> Unit,
     onBack: () -> Unit,
 ) {
     val building = buildState is BuildState.Building
@@ -343,6 +345,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
             SectionHeader("Data")
             RegionsRow(summary = installedSummary, enabled = !building, onClick = onOpenRegions)
+            AboutRow(onClick = onOpenAbout)
         }
     }
 
@@ -797,6 +800,35 @@ private fun RegionsRow(summary: String, enabled: Boolean, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * The "About this app" entry in the Data section, styled as a settings list row like [RegionsRow]
+ * (info glyph + title + drill-in chevron — single line, the title says it all). Drills into
+ * [AboutScreen]. Always enabled — it's just information, independent of build state.
+ */
+@Composable
+private fun AboutRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Info,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.size(12.dp))
+        Text("About this app", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,

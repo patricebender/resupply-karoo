@@ -136,7 +136,7 @@ abstract class UpcomingPoisBaseDataType(
                 rotation,
             ) { pois, routeLen, cfg, live, tick ->
                 Frame(pois, routeLen, cfg.enabledCategories, cfg.safeWaterOnly, cfg.detourMeters,
-                    cfg.favoritePoiIds, live.stream, live.routeState, live.location,
+                    cfg.favoritePoiIds, cfg.favoritesOnly, live.stream, live.routeState, live.location,
                     live.systemImperial, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
@@ -168,6 +168,7 @@ abstract class UpcomingPoisBaseDataType(
         val safeWaterOnly: Boolean,
         val detourMeters: Int,
         val favoriteIds: Set<String>,
+        val favoritesOnly: Boolean,
         val stream: StreamState.Streaming?,
         val routeState: RouteState,
         val location: LatLng?,
@@ -288,7 +289,11 @@ abstract class UpcomingPoisBaseDataType(
         val onRoute = values?.get(DataType.Field.ON_ROUTE)?.let { it >= 0.5 } ?: true
         if (!onRoute && progress > START_GRACE_METERS) return OffRouteMessage(mainActivity, interactive)
 
-        val upcoming = if (favoritesField) {
+        // Narrow to favorites when this is the favorites field, OR when the rider has the
+        // "favorites only" filter on — the latter is what keeps the all-POIs field in step with
+        // the overview list (ResupplyConfig.favoritesOnly narrows "the list, map pins and fields
+        // all together"). Without the filter, the all-POIs field shows every enabled category.
+        val upcoming = if (favoritesField || f.favoritesOnly) {
             favoritesUpcoming(f.pois, f.enabled, f.favoriteIds, safeWaterOnly = f.safeWaterOnly) {
                 aheadMetersFor(it, progress)
             }

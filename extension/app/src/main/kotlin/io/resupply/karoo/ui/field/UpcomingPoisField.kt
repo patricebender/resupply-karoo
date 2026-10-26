@@ -420,22 +420,22 @@ fun NearbyPromptField(activity: ComponentName, interactive: Boolean) {
 private val LiveGreen = dayNightColorProvider(day = Color(0xFF2E7D32), night = Color(0xFF66BB6A))
 
 /**
- * A small solid green dot pinned to the top-right, marking "live (nearby) search is active" while a
- * route is loaded (forced-live). Overlaid in a [Box] over the resolved card so it never steals a
- * POI row — readable down to the 1/8 field size where text wouldn't fit. (Glance RemoteViews can't
- * animate, so this is a steady dot, not a pulse; it only repaints on the field's data/rotation
- * ticks.)
+ * A small solid green dot marking "live (nearby) search is active" while a route is loaded
+ * (forced-live). Overlaid top-right over the resolved card so it never steals a POI row — readable
+ * down to the 1/8 field size where text wouldn't fit. A comfortable inset keeps it off the very
+ * edge (jammed into the corner it read as a rendering glitch). (Glance RemoteViews can't animate,
+ * so this is a steady dot, not a pulse; it only repaints on the field's data/rotation ticks.)
  */
 @androidx.compose.runtime.Composable
 fun LiveDot() {
     Box(
-        modifier = GlanceModifier.fillMaxSize().padding(top = 3.dp, end = 3.dp),
+        modifier = GlanceModifier.fillMaxSize().padding(top = 6.dp, end = 8.dp),
         contentAlignment = Alignment.TopEnd,
     ) {
         Box(
             modifier = GlanceModifier
-                .size(7.dp)
-                .cornerRadius(4.dp)
+                .size(9.dp)
+                .cornerRadius(5.dp)
                 .background(LiveGreen),
             content = {},
         )

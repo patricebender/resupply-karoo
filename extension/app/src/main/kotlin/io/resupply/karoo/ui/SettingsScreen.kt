@@ -263,7 +263,8 @@ fun SettingsScreen(
             Spacer(Modifier.height(12.dp))
             LiveSearchRow(
                 on = if (routeLoaded) liveOverride else liveOn,
-                enabled = hasFix && !building,
+                hasFix = hasFix,
+                building = building,
                 routeLoaded = routeLoaded,
                 onToggle = { onToggleLive(!(if (routeLoaded) liveOverride else liveOn)) },
             )
@@ -377,20 +378,27 @@ fun SettingsScreen(
 @Composable
 private fun LiveSearchRow(
     on: Boolean,
-    enabled: Boolean,
+    hasFix: Boolean,
+    building: Boolean,
     routeLoaded: Boolean,
     onToggle: () -> Unit,
 ) {
+    // Turning live ON needs a GPS fix (nothing to search around without one), but turning it OFF
+    // must ALWAYS be allowed — otherwise a rider who forced live on and then lost the fix is
+    // trapped and can't get back to route mode. So the switch is interactive whenever it's already
+    // on (to allow off) or a fix exists (to allow on), gated by no build in flight.
+    val enabled = (on || hasFix) && !building
     val labelColor = if (enabled) {
         MaterialTheme.colorScheme.onSurface
     } else {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     }
     // Route mode frames it as a temporary detour from the route; route-less it's the nearby
-    // search's own pause/resume. No-fix adds the same "need GPS" note either way.
+    // search's own pause/resume. With no fix and off, the "need GPS" note explains why it won't turn
+    // on; with no fix and on, the rider can still turn it off, so we keep the mode's normal copy.
     val description = when {
-        !enabled -> "Waiting for GPS — live search needs a location fix."
-        routeLoaded -> "Temporarily search for resupply around you. Turns off to return to the route."
+        !hasFix && !on -> "Waiting for GPS — live search needs a location fix."
+        routeLoaded -> "Temporarily search for resupply around you. Turn off to return to route mode."
         else -> "Keep finding resupply around you as you ride. Turn off to stop."
     }
     Column(modifier = Modifier.fillMaxWidth()) {

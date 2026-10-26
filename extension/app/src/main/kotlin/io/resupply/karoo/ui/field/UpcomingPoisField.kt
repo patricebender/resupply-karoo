@@ -22,6 +22,7 @@ import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
+import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.layout.wrapContentHeight
 import androidx.glance.text.FontWeight
@@ -381,6 +382,63 @@ fun NearbyPromptField(activity: ComponentName, interactive: Boolean) {
     }
 }
 
+// Live-mode green — matches the app's "Live" chip language (nearby search active). Day/night
+// adaptive so the dot stays visible on either ride theme.
+private val LiveGreen = dayNightColorProvider(day = Color(0xFF2E7D32), night = Color(0xFF66BB6A))
+
+/**
+ * A small solid green dot pinned to the top-right, marking "live (nearby) search is active" while a
+ * route is loaded (forced-live). Overlaid in a [Box] over the resolved card so it never steals a
+ * POI row — readable down to the 1/8 field size where text wouldn't fit. (Glance RemoteViews can't
+ * animate, so this is a steady dot, not a pulse; it only repaints on the field's data/rotation
+ * ticks.)
+ */
+@androidx.compose.runtime.Composable
+fun LiveDot() {
+    Box(
+        modifier = GlanceModifier.fillMaxSize().padding(top = 3.dp, end = 3.dp),
+        contentAlignment = Alignment.TopEnd,
+    ) {
+        Box(
+            modifier = GlanceModifier
+                .size(7.dp)
+                .cornerRadius(4.dp)
+                .background(LiveGreen),
+            content = {},
+        )
+    }
+}
+
+/**
+ * Forced-live, nothing found yet: the rider switched to live search over a route but no nearby POIs
+ * have resolved. A live-green compass glyph + "Searching nearby" reads as "actively live, none yet"
+ * rather than the tap-to-start [NearbyPromptField] (nothing to tap — it's already searching).
+ * Still tap-to-open.
+ */
+@androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+@androidx.compose.runtime.Composable
+fun LiveSearchingField(activity: ComponentName, interactive: Boolean) {
+    Box(modifier = GlanceModifier.fillMaxSize()) {
+        Column(
+            modifier = GlanceModifier
+                .fillMaxSize()
+                .padding(6.dp)
+                .tapToOpen(interactive, openAppIntent(activity)),
+            verticalAlignment = Alignment.Vertical.CenterVertically,
+            horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+        ) {
+            Text("🧭", style = TextStyle(fontSize = 20.sp))
+            Spacer(GlanceModifier.height(2.dp))
+            Text(
+                "Searching nearby",
+                style = TextStyle(color = LiveGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                maxLines = 1,
+            )
+        }
+        LiveDot()
+    }
+}
+
 // The favorites amber, reused for the detour note so a side-trip to a starred POI reads warmly
 // (a chosen stop) rather than as an error.
 private val DetourAmber = ColorProvider(Color(0xFFFFB300))
@@ -423,9 +481,10 @@ fun FavoritesEmptyField(activity: ComponentName, interactive: Boolean) {
 
 /**
  * "On a detour" state: the rider tapped a POI and is navigating to it, so the route roadbook is
- * paused (kept, not lost). A calm note — a pin glyph + "On a detour" + a reassuring sub-line —
- * rather than the alarm-toned [OffRouteMessage], because this is a deliberate side-trip. Recovers
- * to the normal POI view automatically when the Karoo resumes the route. Still tap-to-open.
+ * paused (kept, not lost). A calm pin glyph + "Resupply paused" — one line, so it stays legible
+ * down to the 1/8 field size (the old reassuring sub-line was unreadable there) — and amber, not
+ * the alarm-toned [OffRouteMessage], because this is a deliberate side-trip. Recovers to the normal
+ * POI view automatically when the Karoo resumes the route. Still tap-to-open.
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
@@ -441,13 +500,8 @@ fun DetourMessage(activity: ComponentName, interactive: Boolean) {
         Text("📍", style = TextStyle(fontSize = 20.sp))
         Spacer(GlanceModifier.height(2.dp))
         Text(
-            "On a detour",
+            "Resupply paused",
             style = TextStyle(color = DetourAmber, fontSize = 14.sp, fontWeight = FontWeight.Bold),
-            maxLines = 1,
-        )
-        Text(
-            "roadbook resumes on route",
-            style = TextStyle(color = Dim, fontSize = 11.sp),
             maxLines = 1,
         )
     }

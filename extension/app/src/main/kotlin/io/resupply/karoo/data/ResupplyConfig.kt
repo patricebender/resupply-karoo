@@ -77,6 +77,14 @@ data class ResupplyConfig(
     val favoritesOnly: Boolean = false,
     /** How the app resolves its light/dark theme. Defaults to following the Karoo system mode. */
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /**
+     * When true, loading a route that has no cached roadbook builds one automatically — no "Tap to
+     * build" step. A build-trigger preference, not a query input, so it's deliberately NOT part of
+     * [io.resupply.karoo.build.routeBuildKey] (it doesn't change what a build returns). Off restores
+     * the manual tap. Default on; honored only when the rider hasn't forced live search over the
+     * route.
+     */
+    val autoBuild: Boolean = true,
 ) {
     /**
      * Whether [poi] should be shown under this config: its category must be enabled, and —

@@ -366,6 +366,10 @@ class MainActivity : ComponentActivity() {
                     onSmartDistanceToggle = { on ->
                         lifecycleScope.launch { configStore.setSmartDistance(on) }
                     },
+                    autoBuild = config.autoBuild,
+                    onAutoBuildToggle = { on ->
+                        lifecycleScope.launch { configStore.setAutoBuild(on) }
+                    },
                     themeMode = config.themeMode,
                     onThemeModeChange = { mode ->
                         lifecycleScope.launch { configStore.setThemeMode(mode) }

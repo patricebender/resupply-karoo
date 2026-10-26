@@ -144,6 +144,8 @@ fun SettingsScreen(
     onAllCategoriesToggle: (Boolean) -> Unit,
     onSafeWaterToggle: (Boolean) -> Unit,
     onSmartDistanceToggle: (Boolean) -> Unit,
+    autoBuild: Boolean,
+    onAutoBuildToggle: (Boolean) -> Unit,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
     // Resolved units for the detour-radius label — follows the Karoo's own unit preference.
@@ -314,6 +316,13 @@ fun SettingsScreen(
                     enabled = !building,
                 )
             }
+
+            Spacer(Modifier.height(20.dp))
+            AutoBuildRow(
+                checked = autoBuild,
+                enabled = !building,
+                onToggle = onAutoBuildToggle,
+            )
 
             Spacer(Modifier.height(20.dp))
             SectionHeader("Appearance")
@@ -524,6 +533,41 @@ private fun SmartDistanceRow(checked: Boolean, enabled: Boolean, onToggle: (Bool
             Text(
                 "Searches close to your route in busy areas and extends further where places are " +
                     "few. Turn off to set a fixed radius yourself.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AutoBuildRow(checked: Boolean, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val labelColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Auto-build on route load",
+                style = MaterialTheme.typography.bodyLarge,
+                color = labelColor,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled)
+        }
+        Row(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
+            Icon(
+                Icons.Filled.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp).padding(top = 1.dp),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                "Finds places automatically when you start a new route. Turn off to build each " +
+                    "route yourself from the overview.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

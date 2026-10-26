@@ -242,10 +242,21 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 configStore = configStore,
             )
             if (!hit) {
-                // Never built (or inputs changed): drop any prior roadbook so the field prompts
-                // to build for this route rather than showing the last route's places.
-                if (repository.pois.value.isNotEmpty()) repository.clear()
-                repository.setBuildState(BuildState.Idle)
+                if (config.autoBuild && !liveOverride.get()) {
+                    // New route, nothing cached, auto-build on → build it for the rider with no tap.
+                    // Same known-route path the radius watcher uses (won't fall through to a nearby
+                    // build if nav state doesn't re-emit) and serialized through BuildController's
+                    // mutex, so it can't race a concurrent radius-change rebuild. rebuildForRoute
+                    // publishes Building/Success/Error, so the field shows progress on its own.
+                    // Skipped under a forced-live override — the rider asked for nearby, not this route.
+                    BuildController(karooSystem, configStore, repository, roadbookCache, query.await())
+                        .rebuildForRoute(state.routePolyline, state.routeDistance)
+                } else {
+                    // Auto-build off (or forced-live): drop any prior roadbook so the field prompts
+                    // to build for this route rather than showing the last route's places.
+                    if (repository.pois.value.isNotEmpty()) repository.clear()
+                    repository.setBuildState(BuildState.Idle)
+                }
             }
         }
     }

@@ -64,10 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -262,20 +259,21 @@ fun SettingsScreen(
                 canToggle = !building,
                 onToggle = onCategoryToggle,
             )
+
+            Spacer(Modifier.height(12.dp))
+            LiveSearchRow(
+                on = if (routeLoaded) liveOverride else liveOn,
+                enabled = hasFix && !building,
+                routeLoaded = routeLoaded,
+                onToggle = { onToggleLive(!(if (routeLoaded) liveOverride else liveOn)) },
+            )
+
+            Spacer(Modifier.height(12.dp))
             SafeWaterRow(
                 checked = config.safeWaterOnly,
                 // Inactive while water is off (nothing to narrow) or a build is running.
                 enabled = Category.WATER in config.enabledCategories && !building,
                 onToggle = onSafeWaterToggle,
-            )
-
-            Spacer(Modifier.height(20.dp))
-            LiveSearchRow(
-                on = if (routeLoaded) liveOverride else liveOn,
-                loading = building,
-                enabled = hasFix && !building,
-                routeLoaded = routeLoaded,
-                onToggle = { onToggleLive(!(if (routeLoaded) liveOverride else liveOn)) },
             )
 
             Spacer(Modifier.height(20.dp))
@@ -373,13 +371,12 @@ fun SettingsScreen(
  *  - route mode: turns on a *temporary* nearby search while the route stays loaded underneath;
  *    turning it off returns to the route roadbook. The description makes the temporary framing clear.
  *  - route-less: pause/resume the ongoing nearby search.
- * The control is the shared [LiveToggle] pill so it reads as the same "Live" feature as the header
- * chip and the Waybook chip.
+ * A plain Switch, matching [SmartDistanceRow]; the header's read-only Live chip and the Waybook
+ * chip carry the live "● Live" motif.
  */
 @Composable
 private fun LiveSearchRow(
     on: Boolean,
-    loading: Boolean,
     enabled: Boolean,
     routeLoaded: Boolean,
     onToggle: () -> Unit,
@@ -404,7 +401,7 @@ private fun LiveSearchRow(
                 color = labelColor,
                 modifier = Modifier.weight(1f),
             )
-            LiveToggle(on = on, loading = loading, enabled = enabled, onToggle = onToggle)
+            Switch(checked = on, onCheckedChange = { onToggle() }, enabled = enabled)
         }
         Text(
             description,
@@ -449,99 +446,6 @@ private fun HeaderLiveChip() {
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
             color = openGreen,
-            maxLines = 1,
-        )
-    }
-}
-
-/**
- * The live-mode top-bar toggle: one "● Live" pill with clear on/off semantics.
- *  - ON  → a tinted-green pill, a slow-pulsing green dot + "Live". Tap to pause.
- *  - OFF → the SAME pill, muted, with a single diagonal slash struck across the whole control
- *          (the universal "off" mark) — the label stays "Live" so it reads as "Live: off", not a
- *          different mode. Tap to resume (a fresh search repopulates and tracking takes back over).
- *  - disabled ([enabled] false, i.e. no GPS fix) → the off look, greyed and inert. Matches the
- *    overview Find button's "no fix → nothing to run" rule.
- * The pulse only breathes in the ON state; every other state is static.
- */
-@Composable
-private fun LiveToggle(on: Boolean, loading: Boolean, enabled: Boolean, onToggle: () -> Unit) {
-    val active = on && enabled
-    // Coming online: the rider tapped ON and the build is running. Wear the green "live" look
-    // already (accent + tinted fill, no slash) so the transition reads as "turning on", with a
-    // spinner in the dot slot until the POIs land.
-    val accent = when {
-        active || loading -> openGreen
-        enabled -> MaterialTheme.colorScheme.onSurfaceVariant // off but toggleable
-        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // no fix → inert
-    }
-    val container = if (active || loading) {
-        openGreen.copy(alpha = 0.14f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-
-    val pulse = rememberInfiniteTransition(label = "liveTogglePulse")
-    val breath by pulse.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.3f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "liveToggleDotAlpha",
-    )
-    val dotAlpha = if (active) breath else 1f
-    // The slash marks "off"; it must NOT show while loading (that's a turning-on state, not off).
-    val slashed = !active && !loading
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .clip(RoundedCornerShape(percent = 50))
-            .background(container)
-            .clickable(enabled = enabled, onClick = onToggle)
-            // Strike a diagonal slash across the ENTIRE pill when off/unavailable (never while
-            // loading), drawn after the content so it sits on top. Round cap + a slight overshoot
-            // so it spans corner-to-corner cleanly.
-            .drawWithContent {
-                drawContent()
-                if (slashed) {
-                    val pad = size.height * 0.18f
-                    drawLine(
-                        color = accent,
-                        start = Offset(pad, size.height - pad),
-                        end = Offset(size.width - pad, pad),
-                        strokeWidth = size.height * 0.09f,
-                        cap = StrokeCap.Round,
-                    )
-                }
-            }
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-    ) {
-        // Dot slot: a spinner while coming online, otherwise a plain dot (the slash, when off,
-        // lives on the pill — not the dot). Same 9dp footprint so the label doesn't shift.
-        if (loading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(9.dp),
-                strokeWidth = 1.5.dp,
-                color = accent,
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(9.dp)
-                    .alpha(dotAlpha)
-                    .clip(CircleShape)
-                    .background(accent),
-            )
-        }
-        Spacer(Modifier.size(7.dp))
-        Text(
-            "Live",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = accent,
             maxLines = 1,
         )
     }

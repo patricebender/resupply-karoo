@@ -296,6 +296,7 @@ class MainActivity : ComponentActivity() {
                 riderLocation = rider,
                 nearbyLive = nearbyLive,
                 nearbyPaused = nearbyPaused,
+                liveOverride = liveOverride,
                 nearbyRadiusMeters = nearbyRadiusMeters,
                 useImperial = useImperial,
                 buildState = buildState,

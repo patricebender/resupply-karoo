@@ -85,7 +85,7 @@ private fun detourColor(meters: Int): ColorProvider = when {
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-fun LargeUpcomingField(rows: List<CategoryRow>, activity: ComponentName, interactive: Boolean) {
+fun LargeUpcomingField(rows: List<CategoryRow>, activity: ComponentName, interactive: Boolean, live: Boolean = false) {
     // Chunk into pairs → one Column child per grid row, each a Row of two weighted cells.
     // With ≤8 categories that's ≤4 grid rows, well under the Glance 10-child Column limit
     // (and each inner Row holds exactly 2 children). No dividers — the cards' own padding
@@ -100,11 +100,11 @@ fun LargeUpcomingField(rows: List<CategoryRow>, activity: ComponentName, interac
         gridRows.forEach { pair ->
             Row(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
                 // Left cell.
-                Box(GlanceModifier.defaultWeight().fillMaxHeight()) { CategoryCard(pair[0]) }
+                Box(GlanceModifier.defaultWeight().fillMaxHeight()) { CategoryCard(pair[0], live) }
                 // Right cell, or an empty weighted spacer so a lone left cell stays at
                 // half width (grid alignment) rather than stretching across.
                 if (pair.size > 1) {
-                    Box(GlanceModifier.defaultWeight().fillMaxHeight()) { CategoryCard(pair[1]) }
+                    Box(GlanceModifier.defaultWeight().fillMaxHeight()) { CategoryCard(pair[1], live) }
                 } else {
                     Spacer(GlanceModifier.defaultWeight())
                 }
@@ -120,13 +120,13 @@ fun LargeUpcomingField(rows: List<CategoryRow>, activity: ComponentName, interac
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-fun SmallUpcomingField(row: CategoryRow, activity: ComponentName, interactive: Boolean) {
+fun SmallUpcomingField(row: CategoryRow, activity: ComponentName, interactive: Boolean, live: Boolean = false) {
     Box(
         modifier = GlanceModifier
             .fillMaxSize()
             .tapToOpen(interactive, openAppIntent(activity)),
     ) {
-        CategoryCard(row)
+        CategoryCard(row, live)
     }
 }
 
@@ -144,7 +144,7 @@ fun SmallUpcomingField(row: CategoryRow, activity: ComponentName, interactive: B
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-private fun CategoryCard(row: CategoryRow) {
+private fun CategoryCard(row: CategoryRow, live: Boolean = false) {
     val style = styleFor(row.category)
     val nearest = row.cells.getOrNull(0)
     val followUps = row.cells.drop(1).filterNotNull()
@@ -156,9 +156,19 @@ private fun CategoryCard(row: CategoryRow) {
             verticalAlignment = Alignment.Vertical.Top,
             horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
         ) {
-            // Line 1: color-coded accent bar + glyph + neutral high-contrast label, centered
-            // as a group (no defaultWeight — that would fill the width and defeat centering).
+            // Line 1: [live dot] + color-coded accent bar + glyph + neutral high-contrast label,
+            // centered as a group (no defaultWeight — that would fill the width and defeat
+            // centering). The live dot sits left of the accent bar when forced-live is on.
             Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                if (live) {
+                    Box(
+                        GlanceModifier
+                            .size(7.dp)
+                            .cornerRadius(4.dp)
+                            .background(LiveGreen),
+                    ) {}
+                    Spacer(GlanceModifier.width(5.dp))
+                }
                 Box(
                     GlanceModifier
                         .width(5.dp)
@@ -416,31 +426,9 @@ fun NearbyPromptField(activity: ComponentName, interactive: Boolean) {
 }
 
 // Live-mode green — matches the app's "Live" chip language (nearby search active). Day/night
-// adaptive so the dot stays visible on either ride theme.
+// adaptive so the dot stays visible on either ride theme. Used for the inline live dot on the
+// category card (left of the accent bar) and the "Searching nearby" live state.
 private val LiveGreen = dayNightColorProvider(day = Color(0xFF2E7D32), night = Color(0xFF66BB6A))
-
-/**
- * A small solid green dot marking "live (nearby) search is active" while a route is loaded
- * (forced-live). Overlaid top-right over the resolved card so it never steals a POI row — readable
- * down to the 1/8 field size where text wouldn't fit. A comfortable inset keeps it off the very
- * edge (jammed into the corner it read as a rendering glitch). (Glance RemoteViews can't animate,
- * so this is a steady dot, not a pulse; it only repaints on the field's data/rotation ticks.)
- */
-@androidx.compose.runtime.Composable
-fun LiveDot() {
-    Box(
-        modifier = GlanceModifier.fillMaxSize().padding(top = 6.dp, end = 8.dp),
-        contentAlignment = Alignment.TopEnd,
-    ) {
-        Box(
-            modifier = GlanceModifier
-                .size(9.dp)
-                .cornerRadius(5.dp)
-                .background(LiveGreen),
-            content = {},
-        )
-    }
-}
 
 /**
  * Forced-live, nothing found yet: the rider switched to live search over a route but no nearby POIs
@@ -451,24 +439,21 @@ fun LiveDot() {
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
 fun LiveSearchingField(activity: ComponentName, interactive: Boolean) {
-    Box(modifier = GlanceModifier.fillMaxSize()) {
-        Column(
-            modifier = GlanceModifier
-                .fillMaxSize()
-                .padding(6.dp)
-                .tapToOpen(interactive, openAppIntent(activity)),
-            verticalAlignment = Alignment.Vertical.CenterVertically,
-            horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
-        ) {
-            Text("🧭", style = TextStyle(fontSize = 20.sp))
-            Spacer(GlanceModifier.height(2.dp))
-            Text(
-                "Searching nearby",
-                style = TextStyle(color = LiveGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                maxLines = 1,
-            )
-        }
-        LiveDot()
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .tapToOpen(interactive, openAppIntent(activity)),
+        verticalAlignment = Alignment.Vertical.CenterVertically,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text("🧭", style = TextStyle(fontSize = 20.sp))
+        Spacer(GlanceModifier.height(2.dp))
+        Text(
+            "Searching nearby",
+            style = TextStyle(color = LiveGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+        )
     }
 }
 

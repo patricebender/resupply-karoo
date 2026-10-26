@@ -3,11 +3,8 @@ package io.resupply.karoo.extension
 import android.content.ComponentName
 import android.content.Context
 import androidx.compose.ui.unit.DpSize
-import androidx.glance.GlanceModifier
 import androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 import androidx.glance.appwidget.GlanceRemoteViews
-import androidx.glance.layout.Box
-import androidx.glance.layout.fillMaxSize
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.DataTypeImpl
 import io.hammerhead.karooext.internal.ViewEmitter
@@ -38,7 +35,6 @@ import io.resupply.karoo.ui.field.BuildingField
 import io.resupply.karoo.ui.field.CategoryRow
 import io.resupply.karoo.ui.field.DetourMessage
 import io.resupply.karoo.ui.field.FieldMessage
-import io.resupply.karoo.ui.field.LiveDot
 import io.resupply.karoo.ui.field.LiveSearchingField
 import io.resupply.karoo.ui.field.NearbyPromptField
 import io.resupply.karoo.ui.field.OffRouteMessage
@@ -224,6 +220,8 @@ abstract class UpcomingPoisBaseDataType(
         val source: PoiSource,
         // Render distances in miles/feet instead of km/m (resolved units mode). Passed to [rowFor].
         val useImperial: Boolean,
+        // Forced-live over a route: the card shows a green live dot left of its accent bar.
+        val live: Boolean = false,
     )
 
     /**
@@ -257,15 +255,12 @@ abstract class UpcomingPoisBaseDataType(
         // Forced-live over a route: the rider explicitly switched to nearby search while navigating,
         // so this takes precedence over the route/detour states (the nav state may still read
         // Loaded or Detour underneath). The shown set is a nearby set (buildNearby zeroes the route
-        // length), so it flows through the PoiSource.NEARBY branch below — we just overlay a live
-        // dot and, when nothing's resolved yet, show the live "searching" state instead of a dead
-        // tap-to-build/tap-for-nearby prompt.
+        // length), so it flows through the nearby render — the card carries a green live dot (left
+        // of its accent bar); when nothing's resolved yet, the live "searching" state shows instead
+        // of a dead tap-to-build/tap-for-nearby prompt.
         if (f.liveOverride) {
             if (f.pois.isEmpty()) return LiveSearchingField(mainActivity, interactive)
-            return Box(modifier = GlanceModifier.fillMaxSize()) {
-                renderNearby(f, config, mainActivity, interactive)
-                LiveDot()
-            }
+            return renderNearby(f, config, mainActivity, interactive, live = true)
         }
 
         // No roadbook yet. Three cases, in order:
@@ -350,10 +345,16 @@ abstract class UpcomingPoisBaseDataType(
      * recomputed as they move. Drops POIs now beyond the detour radius (the cached set was filtered
      * at fetch time, but the rider has since moved) so the field and the overview list agree on
      * what's "nearby". No progress/off-route concept applies. Shared by the route-less case and the
-     * forced-live-over-a-route case (which also overlays a [LiveDot]).
+     * forced-live-over-a-route case ([live] true → the card shows a green dot left of its accent bar).
      */
     @androidx.compose.runtime.Composable
-    private fun renderNearby(f: Frame, config: ViewConfig, mainActivity: ComponentName, interactive: Boolean) {
+    private fun renderNearby(
+        f: Frame,
+        config: ViewConfig,
+        mainActivity: ComponentName,
+        interactive: Boolean,
+        live: Boolean = false,
+    ) {
         val rider = f.location
         val radius = f.detourMeters.toDouble()
         // Favorites are a route concept, but with no route the favorites field falls back to the
@@ -364,7 +365,7 @@ abstract class UpcomingPoisBaseDataType(
             rider?.let { haversine(it, LatLng(poi.lat, poi.lng)) }?.takeIf { it <= radius }
         }
         renderResolved(
-            ResolvedPois(f.enabled, upcoming, progressMeters = 0.0, source = PoiSource.NEARBY, useImperial = f.useImperial),
+            ResolvedPois(f.enabled, upcoming, progressMeters = 0.0, source = PoiSource.NEARBY, useImperial = f.useImperial, live = live),
             config,
             f.rotationTick,
             mainActivity,

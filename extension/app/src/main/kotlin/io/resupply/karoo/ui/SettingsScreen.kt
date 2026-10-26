@@ -196,10 +196,15 @@ fun SettingsScreen(
         }
     }
 
+    // Live search is active (and showing) when the mode's toggle is on and a fix exists — route
+    // mode keys off the forced-live override, route-less off the pause state. Drives the header's
+    // read-only Live chip; the actual control is the row below Categories.
+    val liveActive = (if (routeLoaded) liveOverride else liveOn) && hasFix
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // Top bar: back + title + live toggle (both modes) + trashcan (route mode only). The toggle
-        // shows the "coming online" spinner in place while a build lands, so there's no separate
-        // status banner. The trashcan greys out when there's nothing to clear or a build is running.
+        // Top bar: back + title + a read-only Live chip (when live is active) + trashcan (route mode
+        // only). The live *control* lives in a row below Categories now; this chip is indication
+        // only. The trashcan greys out when there's nothing to clear or a build is running.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -210,19 +215,7 @@ fun SettingsScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text("Settings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            // Live search toggle. Route-less it reflects the pause state; in route mode it reflects
-            // the forced-live override (search nearby while the route stays loaded underneath).
-            val toggleOn = if (routeLoaded) liveOverride else liveOn
-            LiveToggle(
-                on = toggleOn,
-                // Turning on runs a build → show the "coming online" spinner until it lands, so the
-                // ~second of loading reads as progress, not a dead tap.
-                loading = building,
-                // No fix → nothing to run against; the toggle is inert. (Loading is handled
-                // separately so the ON transition still shows the spinner rather than greying.)
-                enabled = hasFix && !building,
-                onToggle = { onToggleLive(!toggleOn) },
-            )
+            if (liveActive) HeaderLiveChip()
             if (routeLoaded) {
                 // Route mode keeps a trashcan to clear this route's roadbook + favorites.
                 IconButton(onClick = { showClearDialog = true }, enabled = hasPins && !building) {
@@ -274,6 +267,15 @@ fun SettingsScreen(
                 // Inactive while water is off (nothing to narrow) or a build is running.
                 enabled = Category.WATER in config.enabledCategories && !building,
                 onToggle = onSafeWaterToggle,
+            )
+
+            Spacer(Modifier.height(20.dp))
+            LiveSearchRow(
+                on = if (routeLoaded) liveOverride else liveOn,
+                loading = building,
+                enabled = hasFix && !building,
+                routeLoaded = routeLoaded,
+                onToggle = { onToggleLive(!(if (routeLoaded) liveOverride else liveOn)) },
             )
 
             Spacer(Modifier.height(20.dp))
@@ -362,6 +364,92 @@ fun SettingsScreen(
                 onClear()
             },
             onDismiss = { showClearDialog = false },
+        )
+    }
+}
+
+/**
+ * The live-search settings row (below Categories), serving both modes:
+ *  - route mode: turns on a *temporary* nearby search while the route stays loaded underneath;
+ *    turning it off returns to the route roadbook. The description makes the temporary framing clear.
+ *  - route-less: pause/resume the ongoing nearby search.
+ * The control is the shared [LiveToggle] pill so it reads as the same "Live" feature as the header
+ * chip and the Waybook chip.
+ */
+@Composable
+private fun LiveSearchRow(
+    on: Boolean,
+    loading: Boolean,
+    enabled: Boolean,
+    routeLoaded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val labelColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    // Route mode frames it as a temporary detour from the route; route-less it's the nearby
+    // search's own pause/resume. No-fix adds the same "need GPS" note either way.
+    val description = when {
+        !enabled -> "Waiting for GPS — live search needs a location fix."
+        routeLoaded -> "Temporarily search for resupply around you. Turns off to return to the route."
+        else -> "Keep finding resupply around you as you ride. Turn off to stop."
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Live search",
+                style = MaterialTheme.typography.bodyLarge,
+                color = labelColor,
+                modifier = Modifier.weight(1f),
+            )
+            LiveToggle(on = on, loading = loading, enabled = enabled, onToggle = onToggle)
+        }
+        Text(
+            description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+        )
+    }
+}
+
+/**
+ * A read-only "● Live" chip for the Settings header — indication only (the control is the
+ * [LiveSearchRow] below Categories). Mirrors the Waybook header chip's slow-pulsing green dot so
+ * "live" reads as one feature across screens.
+ */
+@Composable
+private fun HeaderLiveChip() {
+    val pulse = rememberInfiniteTransition(label = "headerLivePulse")
+    val alpha by pulse.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "headerLivePulseAlpha",
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(end = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .alpha(alpha)
+                .clip(CircleShape)
+                .background(openGreen),
+        )
+        Spacer(Modifier.size(5.dp))
+        Text(
+            "Live",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = openGreen,
+            maxLines = 1,
         )
     }
 }

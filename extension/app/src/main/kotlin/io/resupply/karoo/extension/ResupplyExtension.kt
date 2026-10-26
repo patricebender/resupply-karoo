@@ -209,9 +209,14 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 .collect { override ->
                     liveOverride.set(override)
                     if (!override) {
-                        // Back to route mode: re-show the loaded route's cached roadbook (if any).
-                        // No route held → nothing to restore (the live set stays until the next
-                        // location tick clears it via the refresher gate).
+                        // Back to route mode. Drop the "Live" flag NOW, not on the next location
+                        // tick: with a route still loaded the refresher stands down (liveActive is
+                        // false) and won't fire setNearbyLive(false) until the rider moves — so a
+                        // stale "Live" chip would otherwise linger in the header (crowding the
+                        // settings gear) after toggling off while stationary.
+                        repository.setNearbyLive(false)
+                        // Re-show the loaded route's cached roadbook (if any). No route held →
+                        // nothing to restore.
                         lastRoute?.let { realizeRoadbookForRoute(it) }
                     }
                 }

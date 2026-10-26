@@ -32,7 +32,9 @@ import io.resupply.karoo.data.elideName
 import io.resupply.karoo.data.poiSourceFor
 import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.data.upcomingByCategory
+import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.ui.field.BuildPromptField
+import io.resupply.karoo.ui.field.BuildingField
 import io.resupply.karoo.ui.field.CategoryRow
 import io.resupply.karoo.ui.field.DetourMessage
 import io.resupply.karoo.ui.field.FieldMessage
@@ -125,10 +127,16 @@ abstract class UpcomingPoisBaseDataType(
         val unitFlow = karooSystem.userProfileFlow()
             .map { it.preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL }
             .onStart { emit(false) }
+        // liveOverride + buildState folded into one flow so the live combine stays at its 5-arg
+        // typed overload. buildState drives the "building resupply points" loading state that
+        // replaces the "Tap to build" prompt while an (auto- or manual) build is in flight.
+        val overrideBuildFlow = combine(repository.liveOverride, repository.buildState) { ov, bs ->
+            ov to bs
+        }
         val liveFlow = combine(
-            progressFlow, routeFlow, locationFlow, unitFlow, repository.liveOverride,
-        ) { stream, route, loc, imperial, liveOverride ->
-            Live(stream, route, loc, imperial, liveOverride)
+            progressFlow, routeFlow, locationFlow, unitFlow, overrideBuildFlow,
+        ) { stream, route, loc, imperial, (liveOverride, buildState) ->
+            Live(stream, route, loc, imperial, liveOverride, buildState)
         }
 
         // MainActivity, launched when the rider taps the field (open app / "Tap to build").
@@ -144,7 +152,7 @@ abstract class UpcomingPoisBaseDataType(
             ) { pois, routeLen, cfg, live, tick ->
                 Frame(pois, routeLen, cfg.enabledCategories, cfg.safeWaterOnly, cfg.detourMeters,
                     cfg.favoritePoiIds, cfg.favoritesOnly, live.stream, live.routeState, live.location,
-                    live.systemImperial, live.liveOverride, tick)
+                    live.systemImperial, live.liveOverride, live.buildState, cfg.autoBuild, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
                     render(f, config, mainActivity, interactive)
@@ -169,6 +177,9 @@ abstract class UpcomingPoisBaseDataType(
         // Rider forced live (nearby) search on over the loaded route. Drives the live dot and
         // takes precedence over the route/detour states in render.
         val liveOverride: Boolean,
+        // The roadbook build state. A Building state shows the loading indicator in place of the
+        // "Tap to build" prompt while an (auto- or manual) build runs.
+        val buildState: BuildState,
     )
 
     private data class Frame(
@@ -184,6 +195,11 @@ abstract class UpcomingPoisBaseDataType(
         val location: LatLng?,
         val useImperial: Boolean,
         val liveOverride: Boolean,
+        val buildState: BuildState,
+        // Whether auto-build-on-route-load is enabled. When on, a route with no roadbook shows the
+        // loading indicator (a build is running or imminent) rather than the "Tap to build" CTA,
+        // which is only the right prompt when the rider must act (auto-build off).
+        val autoBuild: Boolean,
         val rotationTick: Long,
     )
 
@@ -252,10 +268,23 @@ abstract class UpcomingPoisBaseDataType(
             }
         }
 
-        // No roadbook yet: "Tap to build" when a route is loaded to build along; otherwise a
-        // "Tap for nearby" prompt that builds around the rider's location (explicit, so a
-        // field tap is never a *surprise* nearby search). Once POIs exist we always show them.
+        // No roadbook yet. Three cases, in order:
         if (f.pois.isEmpty()) {
+            // 1. A build is running (auto or manual) → a loading indicator, never a CTA.
+            if (f.buildState is BuildState.Building) {
+                return BuildingField(mainActivity, interactive)
+            }
+            // 2. A route is loaded with auto-build on, not yet resolved (Idle) → the build is
+            //    imminent (nav watcher kicks it off on route load). Show loading rather than a
+            //    "Tap to build" prompt that would flash for the gap before the build starts, or
+            //    sit as a dead CTA the rider never needs to tap. A finished-but-empty build
+            //    (Success/Error) falls through so we don't spin forever on a no-results route.
+            if (f.routeState is RouteState.Loaded && f.autoBuild && f.buildState is BuildState.Idle) {
+                return BuildingField(mainActivity, interactive)
+            }
+            // 3. A tap is genuinely the required action: "Tap to build" along a route (auto-build
+            //    off, or the build resolved empty), else the "Tap for nearby" prompt (no route;
+            //    explicit so a field tap is never a *surprise* nearby search).
             return if (f.routeState is RouteState.Loaded) {
                 BuildPromptField(mainActivity, interactive)
             } else {

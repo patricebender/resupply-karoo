@@ -345,6 +345,39 @@ fun BuildPromptField(activity: ComponentName, interactive: Boolean) {
 }
 
 /**
+ * "Finding resupply" loading state: a build is running (or, with auto-build on, imminent) and no
+ * roadbook is shown yet. Replaces the "Tap to build" prompt so the field reads as "working on it",
+ * not a CTA the rider has to act on. A map glyph + "Finding resupply…" over "building" — one line
+ * each so it stays legible to the 1/8 size. Still tap-to-open (no build intent — a build is already
+ * under way, so a tap just opens the app).
+ */
+@androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+@androidx.compose.runtime.Composable
+fun BuildingField(activity: ComponentName, interactive: Boolean) {
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .tapToOpen(interactive, openAppIntent(activity)),
+        verticalAlignment = Alignment.Vertical.CenterVertically,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text("🗺", style = TextStyle(fontSize = 20.sp))
+        Spacer(GlanceModifier.height(2.dp))
+        Text(
+            "Finding resupply…",
+            style = TextStyle(color = Primary, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+        )
+        Text(
+            "building",
+            style = TextStyle(color = Dim, fontSize = 11.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+/**
  * "Tap for nearby" prompt: no route is loaded, so there's nothing to build a roadbook along —
  * but the rider can still find places around their current location. Unlike a bare open-app
  * prompt, this carries the `ACTION_BUILD` intent so the tap explicitly kicks off a nearby

@@ -41,6 +41,9 @@ class ConfigStore(private val context: Context) {
         // Absent key reads as on, so existing installs get smart distance without a first-run
         // write; detourMeters stays persisted for when the rider turns it off.
         val smartDistance = prefs[SMART_DISTANCE_KEY] ?: true
+        // Absent key reads as on, so existing installs get auto-build on route load without a
+        // first-run write or a surprise flip.
+        val autoBuild = prefs[AUTO_BUILD_KEY] ?: true
         // Live favorites are DERIVED, not stored separately: they're the cache entry for the
         // route currently loaded ([CURRENT_ROUTE_KEY]). One source of truth — the live set and
         // the per-route cache can't desync, and loading a route needs no restore step. Route-less
@@ -62,6 +65,7 @@ class ConfigStore(private val context: Context) {
             favoritePoiIds = favoriteIds,
             favoritesOnly = prefs[FAVORITES_ONLY_KEY] ?: false,
             themeMode = themeMode,
+            autoBuild = autoBuild,
         )
     }
 
@@ -75,6 +79,10 @@ class ConfigStore(private val context: Context) {
 
     suspend fun setSmartDistance(enabled: Boolean) {
         context.dataStore.edit { it[SMART_DISTANCE_KEY] = enabled }
+    }
+
+    suspend fun setAutoBuild(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_BUILD_KEY] = enabled }
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -294,6 +302,7 @@ class ConfigStore(private val context: Context) {
         val CATEGORIES_KEY = stringSetPreferencesKey("enabled_categories")
         val SAFE_WATER_KEY = booleanPreferencesKey("safe_water_only")
         val SMART_DISTANCE_KEY = booleanPreferencesKey("smart_distance")
+        val AUTO_BUILD_KEY = booleanPreferencesKey("auto_build")
         val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
         val REGIONS_KEY = stringSetPreferencesKey("installed_regions")
         val REGION_VERSIONS_KEY = stringPreferencesKey("installed_region_versions")

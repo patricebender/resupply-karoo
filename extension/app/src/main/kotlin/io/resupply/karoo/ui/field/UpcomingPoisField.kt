@@ -22,6 +22,7 @@ import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
+import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.layout.wrapContentHeight
 import androidx.glance.text.FontWeight
@@ -84,7 +85,7 @@ private fun detourColor(meters: Int): ColorProvider = when {
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-fun LargeUpcomingField(rows: List<CategoryRow>, activity: ComponentName, interactive: Boolean) {
+fun LargeUpcomingField(rows: List<CategoryRow>, activity: ComponentName, interactive: Boolean, live: Boolean = false) {
     // Chunk into pairs → one Column child per grid row, each a Row of two weighted cells.
     // With ≤8 categories that's ≤4 grid rows, well under the Glance 10-child Column limit
     // (and each inner Row holds exactly 2 children). No dividers — the cards' own padding
@@ -99,11 +100,11 @@ fun LargeUpcomingField(rows: List<CategoryRow>, activity: ComponentName, interac
         gridRows.forEach { pair ->
             Row(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
                 // Left cell.
-                Box(GlanceModifier.defaultWeight().fillMaxHeight()) { CategoryCard(pair[0]) }
+                Box(GlanceModifier.defaultWeight().fillMaxHeight()) { CategoryCard(pair[0], live) }
                 // Right cell, or an empty weighted spacer so a lone left cell stays at
                 // half width (grid alignment) rather than stretching across.
                 if (pair.size > 1) {
-                    Box(GlanceModifier.defaultWeight().fillMaxHeight()) { CategoryCard(pair[1]) }
+                    Box(GlanceModifier.defaultWeight().fillMaxHeight()) { CategoryCard(pair[1], live) }
                 } else {
                     Spacer(GlanceModifier.defaultWeight())
                 }
@@ -119,13 +120,13 @@ fun LargeUpcomingField(rows: List<CategoryRow>, activity: ComponentName, interac
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-fun SmallUpcomingField(row: CategoryRow, activity: ComponentName, interactive: Boolean) {
+fun SmallUpcomingField(row: CategoryRow, activity: ComponentName, interactive: Boolean, live: Boolean = false) {
     Box(
         modifier = GlanceModifier
             .fillMaxSize()
             .tapToOpen(interactive, openAppIntent(activity)),
     ) {
-        CategoryCard(row)
+        CategoryCard(row, live)
     }
 }
 
@@ -143,7 +144,7 @@ fun SmallUpcomingField(row: CategoryRow, activity: ComponentName, interactive: B
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
-private fun CategoryCard(row: CategoryRow) {
+private fun CategoryCard(row: CategoryRow, live: Boolean = false) {
     val style = styleFor(row.category)
     val nearest = row.cells.getOrNull(0)
     val followUps = row.cells.drop(1).filterNotNull()
@@ -155,9 +156,19 @@ private fun CategoryCard(row: CategoryRow) {
             verticalAlignment = Alignment.Vertical.Top,
             horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
         ) {
-            // Line 1: color-coded accent bar + glyph + neutral high-contrast label, centered
-            // as a group (no defaultWeight — that would fill the width and defeat centering).
+            // Line 1: [live dot] + color-coded accent bar + glyph + neutral high-contrast label,
+            // centered as a group (no defaultWeight — that would fill the width and defeat
+            // centering). The live dot sits left of the accent bar when forced-live is on.
             Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                if (live) {
+                    Box(
+                        GlanceModifier
+                            .size(7.dp)
+                            .cornerRadius(4.dp)
+                            .background(LiveGreen),
+                    ) {}
+                    Spacer(GlanceModifier.width(5.dp))
+                }
                 Box(
                     GlanceModifier
                         .width(5.dp)
@@ -344,6 +355,39 @@ fun BuildPromptField(activity: ComponentName, interactive: Boolean) {
 }
 
 /**
+ * "Finding resupply" loading state: a build is running (or, with auto-build on, imminent) and no
+ * roadbook is shown yet. Replaces the "Tap to build" prompt so the field reads as "working on it",
+ * not a CTA the rider has to act on. A map glyph + "Finding resupply…" over "building" — one line
+ * each so it stays legible to the 1/8 size. Still tap-to-open (no build intent — a build is already
+ * under way, so a tap just opens the app).
+ */
+@androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+@androidx.compose.runtime.Composable
+fun BuildingField(activity: ComponentName, interactive: Boolean) {
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .tapToOpen(interactive, openAppIntent(activity)),
+        verticalAlignment = Alignment.Vertical.CenterVertically,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text("🗺", style = TextStyle(fontSize = 20.sp))
+        Spacer(GlanceModifier.height(2.dp))
+        Text(
+            "Finding resupply…",
+            style = TextStyle(color = Primary, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+        )
+        Text(
+            "building",
+            style = TextStyle(color = Dim, fontSize = 11.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+/**
  * "Tap for nearby" prompt: no route is loaded, so there's nothing to build a roadbook along —
  * but the rider can still find places around their current location. Unlike a bare open-app
  * prompt, this carries the `ACTION_BUILD` intent so the tap explicitly kicks off a nearby
@@ -376,6 +420,38 @@ fun NearbyPromptField(activity: ComponentName, interactive: Boolean) {
         Text(
             "no route",
             style = TextStyle(color = Dim, fontSize = 11.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+// Live-mode green — matches the app's "Live" chip language (nearby search active). Day/night
+// adaptive so the dot stays visible on either ride theme. Used for the inline live dot on the
+// category card (left of the accent bar) and the "Searching nearby" live state.
+private val LiveGreen = dayNightColorProvider(day = Color(0xFF2E7D32), night = Color(0xFF66BB6A))
+
+/**
+ * Forced-live, nothing found yet: the rider switched to live search over a route but no nearby POIs
+ * have resolved. A live-green compass glyph + "Searching nearby" reads as "actively live, none yet"
+ * rather than the tap-to-start [NearbyPromptField] (nothing to tap — it's already searching).
+ * Still tap-to-open.
+ */
+@androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+@androidx.compose.runtime.Composable
+fun LiveSearchingField(activity: ComponentName, interactive: Boolean) {
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .padding(6.dp)
+            .tapToOpen(interactive, openAppIntent(activity)),
+        verticalAlignment = Alignment.Vertical.CenterVertically,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text("🧭", style = TextStyle(fontSize = 20.sp))
+        Spacer(GlanceModifier.height(2.dp))
+        Text(
+            "Searching nearby",
+            style = TextStyle(color = LiveGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold),
             maxLines = 1,
         )
     }
@@ -423,9 +499,10 @@ fun FavoritesEmptyField(activity: ComponentName, interactive: Boolean) {
 
 /**
  * "On a detour" state: the rider tapped a POI and is navigating to it, so the route roadbook is
- * paused (kept, not lost). A calm note — a pin glyph + "On a detour" + a reassuring sub-line —
- * rather than the alarm-toned [OffRouteMessage], because this is a deliberate side-trip. Recovers
- * to the normal POI view automatically when the Karoo resumes the route. Still tap-to-open.
+ * paused (kept, not lost). A calm pin glyph + "Resupply paused" — one line, so it stays legible
+ * down to the 1/8 field size (the old reassuring sub-line was unreadable there) — and amber, not
+ * the alarm-toned [OffRouteMessage], because this is a deliberate side-trip. Recovers to the normal
+ * POI view automatically when the Karoo resumes the route. Still tap-to-open.
  */
 @androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 @androidx.compose.runtime.Composable
@@ -441,13 +518,8 @@ fun DetourMessage(activity: ComponentName, interactive: Boolean) {
         Text("📍", style = TextStyle(fontSize = 20.sp))
         Spacer(GlanceModifier.height(2.dp))
         Text(
-            "On a detour",
+            "Resupply paused",
             style = TextStyle(color = DetourAmber, fontSize = 14.sp, fontWeight = FontWeight.Bold),
-            maxLines = 1,
-        )
-        Text(
-            "roadbook resumes on route",
-            style = TextStyle(color = Dim, fontSize = 11.sp),
             maxLines = 1,
         )
     }

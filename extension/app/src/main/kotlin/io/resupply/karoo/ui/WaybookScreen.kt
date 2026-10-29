@@ -139,6 +139,10 @@ fun WaybookScreen(
     // Rider has paused route-less live search. Drives the empty face: paused → the "find live
     // resupply" invitation; not paused (actively searching) → "No places nearby".
     nearbyPaused: Boolean,
+    // Rider forced live (nearby) search on over a loaded route. When set, the empty face uses the
+    // nearby (live) face — including its "Waiting for GPS signal" state — instead of the route hero,
+    // so a no-fix live session reads consistently with a route-less live session.
+    liveOverride: Boolean,
     // The detour radius (meters) — sets the nearby proximity band's right-edge scale.
     nearbyRadiusMeters: Int,
     // Render distances in miles/feet instead of km/m (resolved units mode).
@@ -251,6 +255,9 @@ fun WaybookScreen(
                 buildState,
                 hasFix = riderLocation != null,
                 paused = nearbyPaused,
+                // Forced-live over a route → treat the empty face as live (nearby), so no-GPS shows
+                // the "Waiting for GPS signal" face instead of the route hero's "Find places".
+                liveOverride = liveOverride,
                 hasData = installedRegions.isNotEmpty(),
                 useImperial = useImperial,
                 onBuild = onBuild,
@@ -1030,6 +1037,9 @@ private fun EmptyState(
     hasFix: Boolean,
     // Rider paused live search → the nearby face shows the invitation instead of "No places nearby".
     paused: Boolean,
+    // Rider forced live search on over a loaded route → use the nearby (live) face regardless of
+    // the loaded route, so a no-fix live session shows "Waiting for GPS signal" like route-less live.
+    liveOverride: Boolean,
     // Whether any region data is installed. With no data, the route face disables Find and shows a
     // hint pointing the rider to Settings → Data.
     hasData: Boolean,
@@ -1038,9 +1048,12 @@ private fun EmptyState(
     onBuild: () -> Unit,
     onOpenRegions: () -> Unit,
 ) {
-    val loaded = routeState as? RouteState.Loaded
-    // Pick the face by whether a ROUTE is loaded, not by whether a build is running: a nearby
-    // build (no route) must stay on the nearby face and morph in place, or the button would
+    // Forced-live takes the nearby face even with a route loaded: the rider chose live search, so
+    // its states (waiting-on-GPS, searching, none-nearby) are the consistent ones — not the route
+    // hero's "Find places".
+    val loaded = if (liveOverride) null else routeState as? RouteState.Loaded
+    // Otherwise pick the face by whether a ROUTE is loaded, not by whether a build is running: a
+    // nearby build (no route) must stay on the nearby face and morph in place, or the button would
     // vanish and be replaced by the route-oriented "Tracing your route…" copy — an abrupt swap
     // between two different layouts. Each face animates its own mark while building.
     if (loaded != null) {

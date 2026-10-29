@@ -48,30 +48,49 @@ class BuildController(
             when (nav) {
                 is OnNavigationState.NavigationState.NavigatingRoute ->
                     buildForRoute(nav.routePolyline, nav.routeDistance, config, installedRegions)
-                else -> {
-                    // No route: build around the rider. This needs a location fix — with no
-                    // satellite reception the Karoo may have none, so tell the rider we're
-                    // waiting on GPS rather than sitting on the generic "Searching…".
-                    // Nearby has no route → no favorites (derived set is empty).
-                    repository.clear()
-                    configStore.clearCurrentRouteKey()
-                    publish(BuildState.Building("Waiting for GPS…"))
-                    val loc = withTimeoutOrNull(LOCATION_READ_TIMEOUT_MS) {
-                        system.awaitOnce<OnLocationChanged>()
-                    } ?: return fail("No GPS signal - try again later")
-                    Timber.d("build nearby: ${loc.lat},${loc.lng}")
-                    repository.setRouteLength(0.0) // nearby: no route → strip hidden
-                    publish(BuildState.Building()) // fix acquired → back to "Searching…"
-                    val pois = withContext(Dispatchers.IO) {
-                        query.queryNearby(LatLng(loc.lat, loc.lng), config.detourMeters, config.smartDistance)
-                    }
-                    finish(pois, nearby = true) // nearby sets are never cached
-                }
+                else -> buildNearby(config)
             }
         } catch (e: Exception) {
             Timber.e(e, "build failed")
             fail(e.message ?: "Build failed")
         }
+    }
+
+    /**
+     * Force a nearby (route-less) build around the rider, bypassing the nav-state read. Used by the
+     * route-mode "force live search" toggle: a route IS loaded, so [runBuild] would take the route
+     * branch — this runs the nearby path directly instead. The route roadbook in [RoadbookCache] is
+     * left untouched (nearby sets are never cached), so turning the toggle off restores it with no
+     * rebuild. Serialized with the other builds through the same [mutex].
+     */
+    suspend fun rebuildNearby(): BuildState = mutex.withLock {
+        return try {
+            buildNearby(configStore.config.first())
+        } catch (e: Exception) {
+            Timber.e(e, "nearby build failed")
+            fail(e.message ?: "Build failed")
+        }
+    }
+
+    /**
+     * Build around the rider's current location. Needs a fix — with no satellite reception the
+     * Karoo may have none, so we surface "waiting on GPS" rather than a silent hang. Clears any
+     * route context (nearby has no route → no favorites, no cached set). Caller holds the [mutex].
+     */
+    private suspend fun buildNearby(config: io.resupply.karoo.data.ResupplyConfig): BuildState {
+        repository.clear()
+        configStore.clearCurrentRouteKey()
+        publish(BuildState.Building("Waiting for GPS…"))
+        val loc = withTimeoutOrNull(LOCATION_READ_TIMEOUT_MS) {
+            system.awaitOnce<OnLocationChanged>()
+        } ?: return fail("No GPS signal - try again later")
+        Timber.d("build nearby: ${loc.lat},${loc.lng}")
+        repository.setRouteLength(0.0) // nearby: no route → strip hidden
+        publish(BuildState.Building()) // fix acquired → back to "Searching…"
+        val pois = withContext(Dispatchers.IO) {
+            query.queryNearby(LatLng(loc.lat, loc.lng), config.detourMeters, config.smartDistance)
+        }
+        return finish(pois, nearby = true) // nearby sets are never cached
     }
 
     /**

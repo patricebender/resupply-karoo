@@ -55,8 +55,9 @@ import io.resupply.karoo.ui.AppUpdateInfo
 import io.resupply.karoo.ui.SettingsScreen
 import io.resupply.karoo.ui.theme.ResupplyTheme
 import io.resupply.karoo.ui.PoiDetailScreen
+import io.resupply.karoo.ui.PrivacyDataScreen
+import io.resupply.karoo.ui.FeedbackScreen
 import io.resupply.karoo.ui.RegionsScreen
-import io.resupply.karoo.ui.AboutScreen
 import io.resupply.karoo.ui.WaybookScreen
 import io.resupply.karoo.ui.WelcomeScreen
 import io.resupply.karoo.util.Connectivity
@@ -86,7 +87,8 @@ private sealed interface Screen {
     data object Waybook : Screen
     data object Settings : Screen
     data object Regions : Screen
-    data object About : Screen
+    data object PrivacyData : Screen
+    data object Feedback : Screen
     data object Welcome : Screen
     data class Detail(val poiId: String) : Screen
 }
@@ -296,6 +298,7 @@ class MainActivity : ComponentActivity() {
                 riderLocation = rider,
                 nearbyLive = nearbyLive,
                 nearbyPaused = nearbyPaused,
+                liveOverride = liveOverride,
                 nearbyRadiusMeters = nearbyRadiusMeters,
                 useImperial = useImperial,
                 buildState = buildState,
@@ -366,6 +369,10 @@ class MainActivity : ComponentActivity() {
                     onSmartDistanceToggle = { on ->
                         lifecycleScope.launch { configStore.setSmartDistance(on) }
                     },
+                    autoBuild = config.autoBuild,
+                    onAutoBuildToggle = { on ->
+                        lifecycleScope.launch { configStore.setAutoBuild(on) }
+                    },
                     themeMode = config.themeMode,
                     onThemeModeChange = { mode ->
                         lifecycleScope.launch { configStore.setThemeMode(mode) }
@@ -418,7 +425,8 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onOpenRegions = { screen = Screen.Regions },
-                    onOpenAbout = { screen = Screen.About },
+                    onOpenPrivacy = { screen = Screen.PrivacyData },
+                    onOpenFeedback = { screen = Screen.Feedback },
                     onBack = { screen = Screen.Waybook },
                 )
             }
@@ -474,7 +482,9 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            is Screen.About -> AboutScreen(onBack = { screen = Screen.Settings })
+            is Screen.PrivacyData -> PrivacyDataScreen(onBack = { screen = Screen.Settings })
+
+            is Screen.Feedback -> FeedbackScreen(onBack = { screen = Screen.Settings })
 
             is Screen.Detail -> {
                 val poi = pois.firstOrNull { it.id == s.poiId }

@@ -29,10 +29,13 @@ import io.resupply.karoo.data.elideName
 import io.resupply.karoo.data.poiSourceFor
 import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.data.upcomingByCategory
+import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.ui.field.BuildPromptField
+import io.resupply.karoo.ui.field.BuildingField
 import io.resupply.karoo.ui.field.CategoryRow
 import io.resupply.karoo.ui.field.DetourMessage
 import io.resupply.karoo.ui.field.FieldMessage
+import io.resupply.karoo.ui.field.LiveSearchingField
 import io.resupply.karoo.ui.field.NearbyPromptField
 import io.resupply.karoo.ui.field.OffRouteMessage
 import io.resupply.karoo.ui.field.PoiCell
@@ -120,8 +123,16 @@ abstract class UpcomingPoisBaseDataType(
         val unitFlow = karooSystem.userProfileFlow()
             .map { it.preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL }
             .onStart { emit(false) }
-        val liveFlow = combine(progressFlow, routeFlow, locationFlow, unitFlow) { stream, route, loc, imperial ->
-            Live(stream, route, loc, imperial)
+        // liveOverride + buildState folded into one flow so the live combine stays at its 5-arg
+        // typed overload. buildState drives the "building resupply points" loading state that
+        // replaces the "Tap to build" prompt while an (auto- or manual) build is in flight.
+        val overrideBuildFlow = combine(repository.liveOverride, repository.buildState) { ov, bs ->
+            ov to bs
+        }
+        val liveFlow = combine(
+            progressFlow, routeFlow, locationFlow, unitFlow, overrideBuildFlow,
+        ) { stream, route, loc, imperial, (liveOverride, buildState) ->
+            Live(stream, route, loc, imperial, liveOverride, buildState)
         }
 
         // MainActivity, launched when the rider taps the field (open app / "Tap to build").
@@ -137,7 +148,7 @@ abstract class UpcomingPoisBaseDataType(
             ) { pois, routeLen, cfg, live, tick ->
                 Frame(pois, routeLen, cfg.enabledCategories, cfg.safeWaterOnly, cfg.detourMeters,
                     cfg.favoritePoiIds, cfg.favoritesOnly, live.stream, live.routeState, live.location,
-                    live.systemImperial, tick)
+                    live.systemImperial, live.liveOverride, live.buildState, cfg.autoBuild, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
                     render(f, config, mainActivity, interactive)
@@ -159,6 +170,12 @@ abstract class UpcomingPoisBaseDataType(
         val routeState: RouteState,
         val location: LatLng?,
         val systemImperial: Boolean,
+        // Rider forced live (nearby) search on over the loaded route. Drives the live dot and
+        // takes precedence over the route/detour states in render.
+        val liveOverride: Boolean,
+        // The roadbook build state. A Building state shows the loading indicator in place of the
+        // "Tap to build" prompt while an (auto- or manual) build runs.
+        val buildState: BuildState,
     )
 
     private data class Frame(
@@ -173,6 +190,12 @@ abstract class UpcomingPoisBaseDataType(
         val routeState: RouteState,
         val location: LatLng?,
         val useImperial: Boolean,
+        val liveOverride: Boolean,
+        val buildState: BuildState,
+        // Whether auto-build-on-route-load is enabled. When on, a route with no roadbook shows the
+        // loading indicator (a build is running or imminent) rather than the "Tap to build" CTA,
+        // which is only the right prompt when the rider must act (auto-build off).
+        val autoBuild: Boolean,
         val rotationTick: Long,
     )
 
@@ -197,6 +220,8 @@ abstract class UpcomingPoisBaseDataType(
         val source: PoiSource,
         // Render distances in miles/feet instead of km/m (resolved units mode). Passed to [rowFor].
         val useImperial: Boolean,
+        // Forced-live over a route: the card shows a green live dot left of its accent bar.
+        val live: Boolean = false,
     )
 
     /**
@@ -226,10 +251,35 @@ abstract class UpcomingPoisBaseDataType(
     @androidx.compose.runtime.Composable
     private fun render(f: Frame, config: ViewConfig, mainActivity: ComponentName, interactive: Boolean) {
         if (f.enabled.isEmpty()) return renderNoCategories(mainActivity, interactive)
-        // No roadbook yet: "Tap to build" when a route is loaded to build along; otherwise a
-        // "Tap for nearby" prompt that builds around the rider's location (explicit, so a
-        // field tap is never a *surprise* nearby search). Once POIs exist we always show them.
+
+        // Forced-live over a route: the rider explicitly switched to nearby search while navigating,
+        // so this takes precedence over the route/detour states (the nav state may still read
+        // Loaded or Detour underneath). The shown set is a nearby set (buildNearby zeroes the route
+        // length), so it flows through the nearby render — the card carries a green live dot (left
+        // of its accent bar); when nothing's resolved yet, the live "searching" state shows instead
+        // of a dead tap-to-build/tap-for-nearby prompt.
+        if (f.liveOverride) {
+            if (f.pois.isEmpty()) return LiveSearchingField(mainActivity, interactive)
+            return renderNearby(f, config, mainActivity, interactive, live = true)
+        }
+
+        // No roadbook yet. Three cases, in order:
         if (f.pois.isEmpty()) {
+            // 1. A build is running (auto or manual) → a loading indicator, never a CTA.
+            if (f.buildState is BuildState.Building) {
+                return BuildingField(mainActivity, interactive)
+            }
+            // 2. A route is loaded with auto-build on, not yet resolved (Idle) → the build is
+            //    imminent (nav watcher kicks it off on route load). Show loading rather than a
+            //    "Tap to build" prompt that would flash for the gap before the build starts, or
+            //    sit as a dead CTA the rider never needs to tap. A finished-but-empty build
+            //    (Success/Error) falls through so we don't spin forever on a no-results route.
+            if (f.routeState is RouteState.Loaded && f.autoBuild && f.buildState is BuildState.Idle) {
+                return BuildingField(mainActivity, interactive)
+            }
+            // 3. A tap is genuinely the required action: "Tap to build" along a route (auto-build
+            //    off, or the build resolved empty), else the "Tap for nearby" prompt (no route;
+            //    explicit so a field tap is never a *surprise* nearby search).
             return if (f.routeState is RouteState.Loaded) {
                 BuildPromptField(mainActivity, interactive)
             } else {
@@ -251,26 +301,7 @@ abstract class UpcomingPoisBaseDataType(
         val source = poiSourceFor(f.routeLenMeters)
 
         if (source == PoiSource.NEARBY) {
-            // No route to measure along: distance is straight-line from the rider to each POI,
-            // recomputed as they move. Drop POIs now beyond the detour radius (the cached set
-            // was filtered at fetch time, but the rider has since moved) so the field and the
-            // overview list agree on what's "nearby". No progress/off-route concept applies.
-            val rider = f.location
-            val radius = f.detourMeters.toDouble()
-            // Favorites are a route concept, but with no route the favorites field falls back to
-            // the same nearby set as the all-POIs field (announced in its profile description),
-            // so the field stays useful in live mode instead of sitting on a dead "need a route"
-            // note. So we compute the nearby set for every field here — favorites included.
-            val upcoming = upcomingByCategory(f.pois, f.enabled, safeWaterOnly = f.safeWaterOnly) { poi ->
-                rider?.let { haversine(it, LatLng(poi.lat, poi.lng)) }?.takeIf { it <= radius }
-            }
-            return renderResolved(
-                ResolvedPois(f.enabled, upcoming, progressMeters = 0.0, source = source, useImperial = f.useImperial),
-                config,
-                f.rotationTick,
-                mainActivity,
-                interactive,
-            )
+            return renderNearby(f, config, mainActivity, interactive)
         }
 
         // Live route progress, when available: route length − distance-to-destination.
@@ -302,6 +333,39 @@ abstract class UpcomingPoisBaseDataType(
         }
         renderResolved(
             ResolvedPois(f.enabled, upcoming, progress, source = source, useImperial = f.useImperial),
+            config,
+            f.rotationTick,
+            mainActivity,
+            interactive,
+        )
+    }
+
+    /**
+     * Nearby (no route to measure along) render: straight-line distance from the rider to each POI,
+     * recomputed as they move. Drops POIs now beyond the detour radius (the cached set was filtered
+     * at fetch time, but the rider has since moved) so the field and the overview list agree on
+     * what's "nearby". No progress/off-route concept applies. Shared by the route-less case and the
+     * forced-live-over-a-route case ([live] true → the card shows a green dot left of its accent bar).
+     */
+    @androidx.compose.runtime.Composable
+    private fun renderNearby(
+        f: Frame,
+        config: ViewConfig,
+        mainActivity: ComponentName,
+        interactive: Boolean,
+        live: Boolean = false,
+    ) {
+        val rider = f.location
+        val radius = f.detourMeters.toDouble()
+        // Favorites are a route concept, but with no route the favorites field falls back to the
+        // same nearby set as the all-POIs field (announced in its profile description), so the
+        // field stays useful in live mode instead of sitting on a dead "need a route" note. So we
+        // compute the nearby set for every field here — favorites included.
+        val upcoming = upcomingByCategory(f.pois, f.enabled, safeWaterOnly = f.safeWaterOnly) { poi ->
+            rider?.let { haversine(it, LatLng(poi.lat, poi.lng)) }?.takeIf { it <= radius }
+        }
+        renderResolved(
+            ResolvedPois(f.enabled, upcoming, progressMeters = 0.0, source = PoiSource.NEARBY, useImperial = f.useImperial, live = live),
             config,
             f.rotationTick,
             mainActivity,

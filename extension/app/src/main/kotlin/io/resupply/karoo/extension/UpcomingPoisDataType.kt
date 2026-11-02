@@ -64,7 +64,7 @@ class UpcomingPoisDataType(
             // Slot only fits one card: rotate through the categories that HAVE a POI (ahead is
             // non-empty here), so the rider never sees a blank "–" card.
             val cat = ahead[(tick % ahead.size).toInt()]
-            return SmallUpcomingField(rowFor(cat, r.upcoming.getValue(cat), large = false, useImperial = r.useImperial), activity, interactive)
+            return SmallUpcomingField(rowFor(cat, r.upcoming.getValue(cat), large = false, useImperial = r.useImperial), activity, interactive, live = r.live)
         }
 
         // Fill the slot: a page is `capacity` cards (a 2-col grid, as many rows as the height
@@ -78,7 +78,7 @@ class UpcomingPoisDataType(
         val page = ahead.drop(pageIndex * pageSize).take(pageSize)
 
         val rows = page.map { cat -> rowFor(cat, r.upcoming.getValue(cat), large = true, useImperial = r.useImperial) }
-        LargeUpcomingField(rows, activity, interactive)
+        LargeUpcomingField(rows, activity, interactive, live = r.live)
     }
 
     companion object {

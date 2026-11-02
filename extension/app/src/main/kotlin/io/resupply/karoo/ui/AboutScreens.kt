@@ -26,11 +26,13 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,62 +50,56 @@ import androidx.compose.ui.unit.dp
 import io.github.alexzhirkevich.qrose.rememberQrCodePainter
 import kotlinx.coroutines.launch
 
-/** The GitHub "new issue" form — scanning the report QR lands the rider straight here. */
+/** The GitHub "new issue" form. Scanning the feedback QR lands the rider straight here. */
 private const val REPORT_ISSUE_URL = "https://github.com/patricebender/resupply-karoo/issues/new"
 
 /**
- * The "About" screen, reached from Settings and built like [RegionsScreen]: a full page with a
- * back-arrow + title top bar, not a dialog. A dialog couldn't fit a whole page (QR + prose) on the
- * Karoo's short screen — the QR fell below the fold. As a full screen each page owns the whole
- * viewport, so everything (including the QR) is visible at a glance.
- *
- * The body is a three-page [HorizontalPager], one story per page, with navigation dots pinned at
- * the bottom (tappable to jump):
- *  1. **Open & offline** — offline-first, no tracking, open source, + a "Get in touch" button
- *     that opens a QR to the GitHub issue form.
- *  2. **Location** — used to find places, but it never leaves the device (Agreement §4f).
- *  3. **OpenStreetMap** — the data source, refreshed regularly, with a light accuracy note.
+ * "Privacy & Data", reached from Settings → About. A full page (back-arrow + title top bar) with a
+ * three-page [HorizontalPager], one reassurance per page, navigation dots pinned at the bottom:
+ *  1. **Offline by default**: search runs on-device; the internet is only used for Google hours.
+ *  2. **Your location stays with you**: used to find places, never leaves the device.
+ *  3. **Powered by OpenStreetMap**: the data source, refreshed regularly, with an accuracy note.
  */
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun PrivacyDataScreen(onBack: () -> Unit) {
     val pageCount = 3
     val pagerState = rememberPagerState(pageCount = { pageCount })
     val scope = rememberCoroutineScope()
-    // The report QR lives behind a button, shown big in a dialog on tap — cramming it onto the
-    // page left it tiny and the caption clipped. On tap it gets the room to be readable/scannable.
-    var showReportQr by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Text("About", style = MaterialTheme.typography.titleLarge)
-        }
+        AboutTopBar("Privacy & Data", onBack)
         HorizontalDivider()
 
-        // The pager takes all the room between the bar and the dots, so each page is centered in
-        // the full viewport and nothing needs to scroll.
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) { page ->
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 24.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
                 when (page) {
-                    0 -> AboutPageOpenOffline(onReport = { showReportQr = true })
-                    1 -> AboutPageLocation()
-                    else -> AboutPageData()
+                    0 -> AboutPage(
+                        Icons.Filled.Code,
+                        "Offline by default",
+                        "Search runs 100% on your Karoo. The only time the internet is used is when " +
+                            "you request opening hours via Google Maps.",
+                    )
+                    1 -> AboutPage(
+                        Icons.Filled.LocationOn,
+                        "Your location stays with you",
+                        "The app uses your location to find water, food and shelter along your " +
+                            "route and nearby. That location never leaves your Karoo. Nothing is " +
+                            "uploaded, shared or tracked.",
+                    )
+                    else -> AboutPage(
+                        Icons.Filled.Storage,
+                        "Powered by OpenStreetMap",
+                        "The on-device places database is built from OpenStreetMap data and " +
+                            "refreshed regularly. OSM is community-made, so a detail can sometimes " +
+                            "be wrong or out of date.",
+                    )
                 }
             }
         }
@@ -115,56 +111,107 @@ fun AboutScreen(onBack: () -> Unit) {
             modifier = Modifier.padding(vertical = 16.dp),
         )
     }
+}
+
+/**
+ * "Give Feedback", reached from Settings → About. A single centered page: the open-source pitch,
+ * the bug/idea invitation, and a "Get in touch" button that opens the GitHub issue-form QR big
+ * enough to scan with a phone.
+ */
+@Composable
+fun FeedbackScreen(onBack: () -> Unit) {
+    var showReportQr by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        AboutTopBar("Give Feedback", onBack)
+        HorizontalDivider()
+
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            AboutPage(
+                Icons.Filled.BugReport,
+                "Open source",
+                "Resupply is open source and actively maintained. Found a bug or have an idea for a " +
+                    "new feature?",
+            )
+            Spacer(Modifier.height(20.dp))
+            // Accent-filled pill, same vocabulary as the update CTA. Opens the QR big in a dialog.
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable { showReportQr = true }
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Get in touch",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
 
     if (showReportQr) {
         ReportQrDialog(onDismiss = { showReportQr = false })
     }
 }
 
-/** Page 1: the pitch + a button that opens the "get in touch" QR. */
+/** The shared back-arrow + title top bar for the About sub-screens. */
 @Composable
-private fun AboutPageOpenOffline(onReport: () -> Unit) {
-    AboutPageHeader(Icons.Filled.Code, "Open & offline")
-    AboutBody(
-        "100% offline by default and tracks nothing about you. It's open source and actively " +
-            "maintained. Hit a bug or have an idea for a new feature? Your voice will be heard.",
-    )
-    Spacer(Modifier.height(20.dp))
-    // Accent-filled pill, same vocabulary as the update CTA. Opens the QR big in a dialog.
+private fun AboutTopBar(title: String, onBack: () -> Unit) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(MaterialTheme.colorScheme.primary)
-            .clickable(onClick = onReport)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.Center,
+            .fillMaxWidth()
+            .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Filled.BugReport,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.size(8.dp))
-        Text(
-            "Get in touch",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onPrimary,
-            maxLines = 1,
-        )
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+        }
+        Text(title, style = MaterialTheme.typography.titleLarge)
     }
 }
 
+/** A centered About page: an accent icon over a bold title over muted body prose. */
+@Composable
+private fun AboutPage(icon: ImageVector, title: String, body: String) {
+    Icon(
+        icon,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.size(32.dp),
+    )
+    Spacer(Modifier.height(10.dp))
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Spacer(Modifier.height(10.dp))
+    Text(
+        body,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
+}
+
 /**
- * The "get in touch" QR, shown big in a dialog so it's comfortably readable and scannable. Uses
- * the same QR styling as the rest of the app ([PoiDetailScreen]'s Open-on-phone card): a runtime
- * [rememberQrCodePainter] on a white rounded card, with a short instruction and Close.
+ * The "get in touch" QR, shown big in a dialog so it's comfortably readable and scannable. Scanning
+ * it opens the GitHub issue form on a phone. Same QR styling as the rest of the app.
  */
 @Composable
 private fun ReportQrDialog(onDismiss: () -> Unit) {
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(20.dp),
         title = {
@@ -204,68 +251,16 @@ private fun ReportQrDialog(onDismiss: () -> Unit) {
         },
         confirmButton = {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Close") }
+                TextButton(onClick = onDismiss) { Text("Close") }
             }
         },
     )
 }
 
-/** Page 2: the location disclosure — used, but never leaves the device (Agreement §4f). */
-@Composable
-private fun AboutPageLocation() {
-    AboutPageHeader(Icons.Filled.LocationOn, "Your location stays with you")
-    AboutBody(
-        "The app uses your location to find water, food and shelter along your route and nearby. " +
-            "That location never leaves your Karoo. Nothing is uploaded, shared or tracked.",
-    )
-}
-
-/** Page 3: the offline OSM database + a light accuracy note. */
-@Composable
-private fun AboutPageData() {
-    AboutPageHeader(Icons.Filled.Storage, "Powered by OpenStreetMap")
-    AboutBody(
-        "The on-device places database is built from OpenStreetMap data and refreshed regularly. " +
-            "OSM is community-made, so a detail can sometimes be wrong or out of date. The community " +
-            "keeps improving it, and you can help too.",
-    )
-}
-
-/** The shared per-page header: an accent icon over a bold centered title. */
-@Composable
-private fun AboutPageHeader(icon: ImageVector, title: String) {
-    Icon(
-        icon,
-        contentDescription = null,
-        tint = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.size(32.dp),
-    )
-    Spacer(Modifier.height(10.dp))
-    Text(
-        title,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-    Spacer(Modifier.height(10.dp))
-}
-
-/** The shared per-page body prose, centered and muted. */
-@Composable
-private fun AboutBody(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = TextAlign.Center,
-    )
-}
-
 /**
- * The pager page indicator: [count] dots with the [current] one filled in the accent and grown,
- * the rest muted and small. Each dot is tappable to jump to its page; size/color animate so a
- * swipe reads as one continuous motion.
+ * The pager page indicator: [count] dots with the [current] one filled in the accent and grown, the
+ * rest muted and small. Each dot is tappable to jump to its page; size/color animate so a swipe
+ * reads as one continuous motion.
  */
 @Composable
 private fun PagerDots(

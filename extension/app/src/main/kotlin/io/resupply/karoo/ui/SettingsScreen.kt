@@ -397,7 +397,7 @@ private fun LiveSearchRow(
     // search's own pause/resume. With no fix and off, the "need GPS" note explains why it won't turn
     // on; with no fix and on, the rider can still turn it off, so we keep the mode's normal copy.
     val description = when {
-        !hasFix && !on -> "Waiting for GPS — live search needs a location fix."
+        !hasFix && !on -> "Waiting for GPS…"
         routeLoaded -> "Temporarily search for resupply around you. Turn off to return to route mode."
         else -> "Keep finding resupply around you as you ride. Turn off to stop."
     }

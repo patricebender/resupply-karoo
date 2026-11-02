@@ -557,7 +557,7 @@ private fun AutoBuildRow(checked: Boolean, enabled: Boolean, onToggle: (Boolean)
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Auto-build on route load",
+                "Auto-build",
                 style = MaterialTheme.typography.bodyLarge,
                 color = labelColor,
                 modifier = Modifier.weight(1f),

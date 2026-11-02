@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
@@ -120,12 +119,16 @@ sealed interface AppUpdateCheck {
 fun SettingsScreen(
     config: ResupplyConfig,
     buildState: BuildState,
-    // Whether a route is loaded. No route = live (nearby) mode, which auto-refreshes as the rider
-    // moves and on a periodic tick, so a manual rebuild is redundant — the rebuild arrow (and the
-    // trashcan) are route-mode only. In live mode the top bar carries a "Stop live search" control.
+    // Whether a route is loaded. The top bar carries the live-search toggle in BOTH modes; route
+    // mode additionally keeps the trashcan to clear the route's roadbook. (There's no manual
+    // rebuild button — the radius watcher auto-rebuilds on setting changes, and rebuilding an
+    // unchanged route is a no-op.)
     routeLoaded: Boolean,
-    // Live (nearby) search on/off — the rider's intent (on unless they've paused it). Drives the
-    // live-mode toggle's on (pulsing) vs off (crossed-out) look.
+    // Route mode only: the rider has forced live (nearby) search on over the loaded route. Drives
+    // the toggle's on/off look when [routeLoaded]; ignored route-less (where [liveOn] applies).
+    liveOverride: Boolean,
+    // Route-less live (nearby) search on/off — the rider's intent (on unless they've paused it).
+    // Drives the toggle's on (pulsing) vs off (crossed-out) look when there's no route.
     liveOn: Boolean,
     // A GPS fix is available. The live toggle follows the overview Find button's rule: with no fix
     // there's nothing to run, so the toggle is disabled (inert) regardless of on/off.
@@ -158,10 +161,10 @@ fun SettingsScreen(
     onInstallUpdate: () -> Unit,
     onAllowInstalls: () -> Unit,
     onRetryCheck: () -> Unit,
-    onBuild: () -> Unit,
     onClear: () -> Unit,
-    // Toggle route-less live search. true = resume (a fresh search repopulates + tracking takes
-    // over); false = pause → pre-search state (overview shows its invitation).
+    // Toggle live search. Route-less: true = resume (fresh search + tracking), false = pause →
+    // pre-search state. Route mode: true = force nearby search over the route (route roadbook kept,
+    // restored on off), false = back to the route roadbook.
     onToggleLive: (Boolean) -> Unit,
     onOpenRegions: () -> Unit,
     onOpenAbout: () -> Unit,
@@ -192,10 +195,9 @@ fun SettingsScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Top bar: back + title + rebuild + trashcan. Build feedback lives on the rebuild
-        // icon itself (it turns into a spinner in place), so there's no separate status
-        // banner. The trashcan stays put but greys out when there's nothing to clear or a
-        // build is running.
+        // Top bar: back + title + live toggle (both modes) + trashcan (route mode only). The toggle
+        // shows the "coming online" spinner in place while a build lands, so there's no separate
+        // status banner. The trashcan greys out when there's nothing to clear or a build is running.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -206,19 +208,21 @@ fun SettingsScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text("Settings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            // Live search toggle. Route-less it reflects the pause state; in route mode it reflects
+            // the forced-live override (search nearby while the route stays loaded underneath).
+            val toggleOn = if (routeLoaded) liveOverride else liveOn
+            LiveToggle(
+                on = toggleOn,
+                // Turning on runs a build → show the "coming online" spinner until it lands, so the
+                // ~second of loading reads as progress, not a dead tap.
+                loading = building,
+                // No fix → nothing to run against; the toggle is inert. (Loading is handled
+                // separately so the ON transition still shows the spinner rather than greying.)
+                enabled = hasFix && !building,
+                onToggle = { onToggleLive(!toggleOn) },
+            )
             if (routeLoaded) {
-                // Route mode: rebuild the roadbook (a deliberate one-shot) + trashcan to clear it.
-                IconButton(onClick = onBuild, enabled = !building) {
-                    if (building) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(
-                            Icons.Filled.Refresh,
-                            contentDescription = "Rebuild",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
+                // Route mode keeps a trashcan to clear this route's roadbook + favorites.
                 IconButton(onClick = { showClearDialog = true }, enabled = hasPins && !building) {
                     Icon(
                         Icons.Filled.Delete,
@@ -231,19 +235,6 @@ fun SettingsScreen(
                         },
                     )
                 }
-            } else {
-                // Live (nearby) mode: neither rebuild nor trashcan make sense (the set refreshes
-                // itself and there's no route to clear). Instead a live search on/off toggle.
-                LiveToggle(
-                    on = liveOn,
-                    // Turning on runs a build → show the "coming online" spinner state until it
-                    // lands, so the ~second of loading reads as progress, not a dead tap.
-                    loading = building,
-                    // No fix → nothing to run against; the toggle is inert. (Loading is handled
-                    // separately so the ON transition still shows the spinner rather than greying.)
-                    enabled = hasFix && !building,
-                    onToggle = { onToggleLive(!liveOn) },
-                )
             }
         }
         // No progress banner — the rebuild icon carries the in-flight state. Only a build

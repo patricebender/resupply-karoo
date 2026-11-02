@@ -65,6 +65,11 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
     // build is a deliberate one-shot along a fixed polyline). Atomic: written by the nav
     // consumer thread, read by the refresher loop.
     private val routeLoaded = java.util.concurrent.atomic.AtomicBoolean(false)
+    // Rider forced live (nearby) search ON despite a loaded route (Settings toggle). Mirrors
+    // repository.liveOverride into an Atomic so the refresher/ticker/radius loops can read it
+    // without collecting the flow. When true, the nearby refresher runs even with a route loaded,
+    // and the nav watcher leaves the shown (live) set alone. See [liveActive].
+    private val liveOverride = java.util.concurrent.atomic.AtomicBoolean(false)
     // Identity of the last route we saw navigating (name + distance), so we can tell a genuine
     // route *change* from repeated events for the same route. Null when route-less.
     @Volatile private var lastRouteKey: String? = null
@@ -96,6 +101,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
             Timber.d("karooSystem connected=$connected")
             if (connected) {
                 watchNavState()
+                watchLiveOverride()
                 startNearbyRefresher()
                 startRadiusChangeWatcher()
                 startNearbyTicker()
@@ -154,15 +160,21 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                     val key = "${state.name}|${state.routeDistance}"
                     if (key != lastRouteKey) {
                         lastRouteKey = key
-                        realizeRoadbookForRoute(state)
+                        // Forced-live is sticky across route changes: while it's on, keep showing the
+                        // live set and don't promote/clear for the new route. We still track its key
+                        // and hold lastRoute, so turning the override off later restores THIS route's
+                        // roadbook (see watchLiveOverride).
+                        if (!liveOverride.get()) realizeRoadbookForRoute(state)
                     }
                 }
 
                 is OnNavigationState.NavigationState.Idle -> {
                     // Navigation truly ended (not a detour). Drop a stale route roadbook so the
                     // overview returns to its build prompt for the next context. A route-less
-                    // (nearby) set stays — it's location-scoped, not route-scoped.
-                    if (lastRouteKey != null && repository.pois.value.isNotEmpty()) {
+                    // (nearby) set stays — it's location-scoped, not route-scoped. While forced-live
+                    // is on, the shown set is a live (nearby) set, not the route's — leave it be; the
+                    // refresher keeps it fresh and route end just means there's no route to restore.
+                    if (!liveOverride.get() && lastRouteKey != null && repository.pois.value.isNotEmpty()) {
                         Timber.d("navigation ended → clearing route roadbook")
                         repository.clear()
                         repository.setBuildState(BuildState.Idle)
@@ -171,6 +183,38 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                     lastRoute = null
                 }
             }
+        }
+    }
+
+    /**
+     * Whether the nearby refresher is in charge: either there's no route, or the rider has forced
+     * live search on over a loaded route ([liveOverride]). The inverse means a route owns the
+     * roadbook and the nearby loops stand down.
+     */
+    private fun liveActive(): Boolean = !routeLoaded.get() || liveOverride.get()
+
+    /**
+     * Mirror [ResupplyRepository.liveOverride] into the [liveOverride] Atomic the nearby loops read,
+     * and handle the OFF transition: when the rider turns the override off while a route is still
+     * loaded, restore that route's roadbook straight from the cache ([realizeRoadbookForRoute]) so
+     * it reappears instantly — no rebuild. Turning it ON needs nothing here: the toggle handler
+     * kicks off the nearby build, and the refresher takes over because [liveActive] is now true.
+     * (Skips the initial `false` — nothing to restore before an override ever happened.)
+     */
+    private fun watchLiveOverride() {
+        scope.launch {
+            repository.liveOverride
+                .drop(1) // initial value is "no override yet", not a transition
+                .distinctUntilChanged()
+                .collect { override ->
+                    liveOverride.set(override)
+                    if (!override) {
+                        // Back to route mode: re-show the loaded route's cached roadbook (if any).
+                        // No route held → nothing to restore (the live set stays until the next
+                        // location tick clears it via the refresher gate).
+                        lastRoute?.let { realizeRoadbookForRoute(it) }
+                    }
+                }
         }
     }
 
@@ -217,8 +261,9 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
     private fun startNearbyRefresher() {
         scope.launch {
             karooSystem.locationFlow().collect { loc ->
-                if (routeLoaded.get()) {
-                    // A route is loaded → not our job; reset so re-entering route-less refetches.
+                if (!liveActive()) {
+                    // A route owns the roadbook (and the rider hasn't forced live) → not our job;
+                    // reset so re-entering live mode refetches.
                     lastFetchCenter = null
                     repository.setNearbyLive(false)
                     return@collect
@@ -277,7 +322,8 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                 .drop(1) // initial value is the current setting, not a change
                 .collect {
                     when {
-                        routeLoaded.get() -> {
+                        // A route owns the roadbook (not forced-live) → rebuild that known route.
+                        !liveActive() -> {
                             // Only rebuild a roadbook that actually exists — don't start a build
                             // the rider never asked for just because they nudged the slider.
                             val route = lastRoute ?: return@collect
@@ -305,7 +351,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
         scope.launch {
             while (isActive) {
                 kotlinx.coroutines.delay(NEARBY_TICK_MS)
-                if (routeLoaded.get() || repository.nearbyPaused.value) continue
+                if (!liveActive() || repository.nearbyPaused.value) continue
                 val center = lastFetchCenter ?: continue
                 refreshNearbyAt(center, configStore.config.first())
             }

@@ -63,6 +63,27 @@ class ResupplyRepository private constructor(filesDir: File) {
     }
 
     /**
+     * Whether the rider has forced live (nearby) search ON while a route is loaded — the Settings
+     * top-bar toggle in route mode. Normally route-loaded and live are mutually exclusive; this
+     * overrides that so the rider can scan for resupply around them without abandoning navigation.
+     * The route roadbook is kept in [RoadbookCache] untouched and restored the instant the rider
+     * turns the override back off (no rebuild).
+     *
+     * Sticky: it survives route changes/ends until the rider explicitly clears it (unlike
+     * [nearbyPaused], which is per-session-and-situation). Session-scoped (not persisted) — a fresh
+     * process starts in normal route mode.
+     */
+    private val _liveOverride = MutableStateFlow(false)
+    val liveOverride: StateFlow<Boolean> = _liveOverride.asStateFlow()
+
+    fun setLiveOverride(override: Boolean) {
+        _liveOverride.value = override
+        // Forcing live on clears any leftover pause from an earlier route-less session, so the
+        // forced search isn't silently suppressed by a stale "paused" flag.
+        if (override) _nearbyPaused.value = false
+    }
+
+    /**
      * Stop live search and return to the pre-search state: clear the shown POIs, drop the "Live"
      * status, and mark paused so the refresher stands down until the rider starts a new search
      * (the overview's Find button) or a route loads.

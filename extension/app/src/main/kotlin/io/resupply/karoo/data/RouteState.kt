@@ -47,3 +47,13 @@ fun NavigationState.toRouteState(): RouteState = when (this) {
     is NavigationState.NavigatingToDestination -> RouteState.Detour
     else -> RouteState.None
 }
+
+/**
+ * Whether the route is still loaded for this nav state — the gate the extension's nearby refresher
+ * reads to stay out of live mode. True while navigating a route AND during a detour
+ * ([NavigationState.NavigatingToDestination]), since the route is still loaded underneath and
+ * resumes when the detour ends. Only a genuine route removal ([NavigationState.Idle]) is false, so
+ * live nearby mode engages only when there's truly no route — never for a mid-ride detour.
+ */
+fun NavigationState.keepsRouteLoaded(): Boolean =
+    this is NavigationState.NavigatingRoute || this is NavigationState.NavigatingToDestination

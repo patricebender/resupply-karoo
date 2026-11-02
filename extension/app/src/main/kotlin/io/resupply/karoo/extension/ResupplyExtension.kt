@@ -19,6 +19,7 @@ import io.resupply.karoo.data.PoiDatabase
 import io.resupply.karoo.data.PoiQuery
 import io.resupply.karoo.data.RoadbookCache
 import io.resupply.karoo.data.ResupplyRepository
+import io.resupply.karoo.data.keepsRouteLoaded
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.haversine
 import io.resupply.karoo.util.locationFlow
@@ -116,8 +117,12 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
     private fun watchNavState() {
         navConsumerId = karooSystem.addConsumer<OnNavigationState> { event ->
             val state = event.state
-            val nowRouting = state is OnNavigationState.NavigationState.NavigatingRoute
-            if (nowRouting) {
+            // A detour (NavigatingToDestination) still has the route loaded underneath, so it
+            // counts as "routing" for the refresher gate — otherwise the nav watcher would clear
+            // routeLoaded and the nearby refresher would wrongly start live mode mid-detour. Live
+            // engages only when the route is genuinely removed (Idle). See [keepsRouteLoaded].
+            val nowRouting = state.keepsRouteLoaded()
+            if (state is OnNavigationState.NavigationState.NavigatingRoute) {
                 // A route loading ends a route-less session: drop the "Live" flag NOW (not on the
                 // next location tick) so the header can't show the nearby "Live" chip alongside
                 // route-mode UI, and clear any pause from that session so returning to route-less

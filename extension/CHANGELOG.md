@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.10.0](https://github.com/patricebender/resupply-karoo/compare/v1.9.0...v1.10.0) (2026-11-02)
+
+
+### Features
+
+* auto-build on route load + live-mode UX refinements ([#136](https://github.com/patricebender/resupply-karoo/issues/136)) ([5ce5b8e](https://github.com/patricebender/resupply-karoo/commit/5ce5b8eef92b937360d0f25d5b817ce37f20f828))
+* let the rider force live search while a route is loaded ([#135](https://github.com/patricebender/resupply-karoo/issues/135)) ([1eb3080](https://github.com/patricebender/resupply-karoo/commit/1eb3080ca82c7e9bf01e8219671d4a8cf8ffeedc))
+
+
+### Bug Fixes
+
+* keep route mode during a mid-ride detour ([#134](https://github.com/patricebender/resupply-karoo/issues/134)) ([aa8fe65](https://github.com/patricebender/resupply-karoo/commit/aa8fe654c67824ec7f4961ae7d340decda65df12))
+
 ## [1.9.0](https://github.com/patricebender/resupply-karoo/compare/v1.8.0...v1.9.0) (2026-10-25)
 
 

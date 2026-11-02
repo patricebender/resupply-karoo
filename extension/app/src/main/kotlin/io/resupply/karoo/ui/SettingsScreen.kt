@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
@@ -166,7 +168,8 @@ fun SettingsScreen(
     // restored on off), false = back to the route roadbook.
     onToggleLive: (Boolean) -> Unit,
     onOpenRegions: () -> Unit,
-    onOpenAbout: () -> Unit,
+    onOpenPrivacy: () -> Unit,
+    onOpenFeedback: () -> Unit,
     onBack: () -> Unit,
 ) {
     val building = buildState is BuildState.Building
@@ -346,7 +349,11 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
             SectionHeader("Data")
             RegionsRow(summary = installedSummary, enabled = !building, onClick = onOpenRegions)
-            AboutRow(onClick = onOpenAbout)
+
+            Spacer(Modifier.height(20.dp))
+            SectionHeader("About")
+            SettingsRow(Icons.Filled.Shield, "Privacy & Data", onClick = onOpenPrivacy)
+            SettingsRow(Icons.Filled.BugReport, "Give Feedback", onClick = onOpenFeedback)
         }
     }
 
@@ -844,12 +851,12 @@ private fun RegionsRow(summary: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * The "About this app" entry in the Data section, styled as a settings list row like [RegionsRow]
- * (info glyph + title + drill-in chevron — single line, the title says it all). Drills into
- * [AboutScreen]. Always enabled — it's just information, independent of build state.
+ * A tappable settings list row (icon + title + drill-in chevron), used by the About section's
+ * Privacy & Data / Give Feedback entries. Single line — the title says it all; tapping drills into
+ * the matching screen. Always enabled (pure navigation, independent of build state).
  */
 @Composable
-private fun AboutRow(onClick: () -> Unit) {
+private fun SettingsRow(icon: ImageVector, title: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -857,13 +864,9 @@ private fun AboutRow(onClick: () -> Unit) {
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Filled.Info,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.size(12.dp))
-        Text("About this app", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,

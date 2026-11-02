@@ -42,7 +42,7 @@ import io.resupply.karoo.R
 
 /**
  * First-run welcome for the lean edition (no bundled data). Shown once when the app opens with
- * nothing installed. A two-page [HorizontalPager] (same pattern as [AboutScreen]) so the rider
+ * nothing installed. A two-page [HorizontalPager] so the rider
  * gets both halves of the pitch before the Waybook:
  *  1. **Set up your homebase** — download region data (or skip). The only page with the CTAs;
  *     both buttons mark onboarding seen.

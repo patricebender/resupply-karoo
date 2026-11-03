@@ -623,5 +623,25 @@
     "id": "australia",
     "label": "Australia",
     "group": "Australia"
+  },
+  {
+    "id": "japan",
+    "label": "Japan",
+    "group": "Asia"
+  },
+  {
+    "id": "south-korea",
+    "label": "South Korea",
+    "group": "Asia"
+  },
+  {
+    "id": "taiwan",
+    "label": "Taiwan",
+    "group": "Asia"
+  },
+  {
+    "id": "thailand",
+    "label": "Thailand",
+    "group": "Asia"
   }
 ]

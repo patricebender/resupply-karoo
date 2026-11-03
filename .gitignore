@@ -20,5 +20,9 @@ gradle.properties.local
 .env.*
 *.pem
 
+# --- Private / local-only docs (never commit) ---
+# e.g. the signed SRAM developer agreement — kept locally for dev flows, never tracked.
+.private/
+
 # --- OS ---
 .DS_Store

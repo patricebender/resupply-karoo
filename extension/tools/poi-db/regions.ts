@@ -25,7 +25,7 @@ export interface Region {
   /** Display name shown in the picker. */
   label: string;
   /** Picker section. */
-  group: "Europe" | "North America" | "Australia";
+  group: "Europe" | "North America" | "Australia" | "Asia";
   /** Geofabrik path(s) under download.geofabrik.de, minus `-latest.osm.pbf`. */
   geofabrik: string | string[];
   /**
@@ -235,6 +235,35 @@ const RAW_REGIONS: Array<Omit<Region, "dataVersion">> = [
     label: "Australia",
     group: "Australia",
     geofabrik: "australia-oceania/australia",
+  },
+
+  // Asia — whole-country leaves (Geofabrik publishes no sub-region extracts for these).
+  // Picked for the ultra/touring crowd this serves: Japan (Japanese Odyssey), Taiwan
+  // (Round-Taiwan / Formosa 900), South Korea (4 Rivers cross-country), Thailand. All have
+  // the dense convenience-store coverage the resupply model relies on. Alphabetical.
+  {
+    id: "japan",
+    label: "Japan",
+    group: "Asia",
+    geofabrik: "asia/japan",
+  },
+  {
+    id: "south-korea",
+    label: "South Korea",
+    group: "Asia",
+    geofabrik: "asia/south-korea",
+  },
+  {
+    id: "taiwan",
+    label: "Taiwan",
+    group: "Asia",
+    geofabrik: "asia/taiwan",
+  },
+  {
+    id: "thailand",
+    label: "Thailand",
+    group: "Asia",
+    geofabrik: "asia/thailand",
   },
 ];
 

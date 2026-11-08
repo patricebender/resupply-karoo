@@ -25,7 +25,7 @@ export interface Region {
   /** Display name shown in the picker. */
   label: string;
   /** Picker section. */
-  group: "Europe" | "North America" | "Australia" | "Asia";
+  group: "Europe" | "North America" | "Oceania" | "Asia";
   /** Geofabrik path(s) under download.geofabrik.de, minus `-latest.osm.pbf`. */
   geofabrik: string | string[];
   /**
@@ -228,19 +228,27 @@ const RAW_REGIONS: Array<Omit<Region, "dataVersion">> = [
     geofabrik: `north-america/canada/${p.slug}`,
   })),
 
-  // Australia — whole country, single Geofabrik extract (no per-state breakdown published).
-  // A ~920 MB PBF, on par with the larger single-country European extracts; a plain leaf.
+  // Oceania — whole-country leaves (no sub-region extracts published). Australia is a
+  // ~920 MB PBF; New Zealand (~390 MB) is a top cycle-touring destination (Tour Aotearoa,
+  // Alps 2 Ocean). Alphabetical.
   {
     id: "australia",
     label: "Australia",
-    group: "Australia",
+    group: "Oceania",
     geofabrik: "australia-oceania/australia",
+  },
+  {
+    id: "new-zealand",
+    label: "New Zealand",
+    group: "Oceania",
+    geofabrik: "australia-oceania/new-zealand",
   },
 
   // Asia — whole-country leaves (Geofabrik publishes no sub-region extracts for these).
   // Picked for the ultra/touring crowd this serves: Japan (Japanese Odyssey), Taiwan
-  // (Round-Taiwan / Formosa 900), South Korea (4 Rivers cross-country), Thailand. All have
-  // the dense convenience-store coverage the resupply model relies on. Alphabetical.
+  // (Round-Taiwan / Formosa 900), South Korea (4 Rivers cross-country), Thailand, Vietnam
+  // (length-of-country touring). All have the dense convenience-store coverage the resupply
+  // model relies on. Alphabetical.
   {
     id: "japan",
     label: "Japan",
@@ -264,6 +272,12 @@ const RAW_REGIONS: Array<Omit<Region, "dataVersion">> = [
     label: "Thailand",
     group: "Asia",
     geofabrik: "asia/thailand",
+  },
+  {
+    id: "vietnam",
+    label: "Vietnam",
+    group: "Asia",
+    geofabrik: "asia/vietnam",
   },
 ];
 

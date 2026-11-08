@@ -622,7 +622,12 @@
   {
     "id": "australia",
     "label": "Australia",
-    "group": "Australia"
+    "group": "Oceania"
+  },
+  {
+    "id": "new-zealand",
+    "label": "New Zealand",
+    "group": "Oceania"
   },
   {
     "id": "japan",
@@ -642,6 +647,11 @@
   {
     "id": "thailand",
     "label": "Thailand",
+    "group": "Asia"
+  },
+  {
+    "id": "vietnam",
+    "label": "Vietnam",
     "group": "Asia"
   }
 ]

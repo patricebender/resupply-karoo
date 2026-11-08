@@ -221,7 +221,12 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release delete "$TAG" --yes --cleanup-tag
           fi
+          # --latest=false: this is a data-only asset release (the app's manifest URL pins the
+          # `regions-latest` tag directly), so it must NOT claim the repo's "Latest" badge — that
+          # belongs to the regular vX.Y.Z app release. Without this, recreating the release here
+          # would steal "Latest" since gh defaults the newest release to latest.
           gh release create "$TAG" \
             --title "POI regions" \
+            --latest=false \
             --notes "Downloadable POI region files for the in-app region picker, built from Geofabrik extracts."
           gh release upload "$TAG" dist/*.sqlite.gz dist/manifest.json --clobber

@@ -345,6 +345,67 @@ export function memberLeafIds(r: Region): string[] {
 export const LEAF_REGIONS = REGIONS.filter((r) => !isComposite(r));
 export const COMPOSITE_REGIONS = REGIONS.filter(isComposite);
 
+// --- Build-matrix sharding ----------------------------------------------------------------
+//
+// A leaf's build cost (Geofabrik download + osmium filter/export) scales with its `.osm.pbf`
+// size, and the sizes are wildly skewed: France alone is ~4.9 GB, the top ~14 leaves are ~47%
+// of all bytes, the other ~114 share the rest. A whole-country leaf has no sub-split, so the
+// shard that holds France can never finish before France does — round-robin by *count* leaves
+// one runner stacking several giants while others idle. So we pack by weight instead.
+//
+// Weights are approximate PBF sizes in MB (the signal that matters is ordering + magnitude, not
+// exactness). Only the heavy leaves need an entry; everything else takes [DEFAULT_LEAF_MB], a
+// conservative mid estimate. Refresh the big ones if an extract grows a lot, but LPT is robust
+// to the estimate being off — it only needs France-class leaves to sort to the top.
+
+/** Approximate `.osm.pbf` size in MB per heavy leaf id; others fall back to [DEFAULT_LEAF_MB]. */
+const LEAF_WEIGHT_MB: Record<string, number> = {
+  france: 4900,
+  japan: 2450,
+  italy: 2150,
+  "united-kingdom": 2100,
+  poland: 2020,
+  "canada-nunavut": 1440,
+  spain: 1430,
+  netherlands: 1345,
+  norway: 1315,
+  "usa-california": 1275,
+  "canada-british-columbia": 1190,
+  "canada-quebec": 1115,
+  "canada-ontario": 980,
+  australia: 930,
+  sweden: 760,
+  finland: 700,
+  "czech-republic": 700,
+  vietnam: 320,
+  "new-zealand": 390,
+};
+/** Fallback weight for a leaf without an explicit entry — a conservative mid-size extract. */
+const DEFAULT_LEAF_MB = 300;
+
+/** Approximate build weight (MB) of a leaf, summing its extract(s). */
+export function leafWeightMb(r: Region): number {
+  return LEAF_WEIGHT_MB[r.id] ?? DEFAULT_LEAF_MB;
+}
+
+/**
+ * Split the leaves into [n] shards balanced by build weight, via greedy longest-processing-time
+ * (LPT): sort heaviest-first, drop each onto the currently-lightest shard. This isolates France
+ * (and the other giants) on their own light shards and packs the long tail tightly, so the matrix
+ * wall-clock is bounded by the single heaviest leaf rather than by whichever shard luck stacked.
+ * Empty shards are dropped (n larger than the leaf count just yields fewer, non-empty shards).
+ */
+export function weightedShards(n: number): string[][] {
+  const bins = Array.from({ length: n }, () => ({ ids: [] as string[], mb: 0 }));
+  const ordered = [...LEAF_REGIONS].sort((a, b) => leafWeightMb(b) - leafWeightMb(a));
+  for (const r of ordered) {
+    const lightest = bins.reduce((min, b) => (b.mb < min.mb ? b : min), bins[0]!);
+    lightest.ids.push(r.id);
+    lightest.mb += leafWeightMb(r);
+  }
+  return bins.filter((b) => b.ids.length > 0).map((b) => b.ids);
+}
+
 // CLI: `npx tsx regions.ts <command> [id]`
 //   ids                 → print all region ids, one per line
 //   paths <id>          → print the region's Geofabrik path(s), space-separated
@@ -352,8 +413,8 @@ export const COMPOSITE_REGIONS = REGIONS.filter(isComposite);
 //   leaves              → leaf region ids (built independently, in parallel), one per line
 //   composites          → composite region ids (merged from leaves), one per line
 //   members <id>        → the leaf ids a composite is assembled from, space-separated
-//   shards <n>          → JSON [[id,…],…]: leaf ids split into <n> round-robin shards, for
-//                         the build matrix (round-robin so a big region doesn't stack a shard)
+//   shards <n>          → JSON [[id,…],…]: leaf ids packed into up to <n> shards balanced by
+//                         build weight (LPT), so France-class giants don't stack on one runner
 // Kept tiny so the bash builder can shell out for exactly what it needs.
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [cmd, arg] = process.argv.slice(2);
@@ -387,9 +448,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     case "shards": {
       const n = Number(arg);
       if (!Number.isInteger(n) || n < 1) throw new Error("usage: regions.ts shards <n>");
-      const shards: string[][] = Array.from({ length: n }, () => []);
-      LEAF_REGIONS.forEach((r, i) => shards[i % n]!.push(r.id));
-      console.log(JSON.stringify(shards.filter((s) => s.length > 0)));
+      console.log(JSON.stringify(weightedShards(n)));
       break;
     }
     default:

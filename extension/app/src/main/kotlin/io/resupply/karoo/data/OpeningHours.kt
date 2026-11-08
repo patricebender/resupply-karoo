@@ -87,6 +87,15 @@ object OpeningHours {
         // an empty schedule must read as "unknown", never as a false "Closed".
         val unknown: Boolean = false,
     ) {
+        /**
+         * Whether this carries a usable schedule to show: a structured week, or 24/7.
+         * False for an [unknown] result (place resolved, no hours on record) and for a
+         * [rawFallback] (an OSM spec we couldn't structure). Used to decide whether a
+         * Google verify result is worth preferring over OSM hours.
+         */
+        val hasHours: Boolean
+            get() = is247 || (!unknown && rawFallback == null && schedule.isNotEmpty())
+
         fun status(now: Calendar = Calendar.getInstance()): Status {
             if (is247) return Status(OpenState.OPEN)
             if (unknown || rawFallback != null) return Status(OpenState.UNKNOWN)

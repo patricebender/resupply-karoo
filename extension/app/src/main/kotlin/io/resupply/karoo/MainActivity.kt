@@ -492,10 +492,10 @@ class MainActivity : ComponentActivity() {
                     // POI vanished (e.g. cleared while open) — bounce back.
                     screen = Screen.Waybook
                 } else {
-                    // Offer a Google hours lookup only when OSM has none, the category
-                    // is one where hours matter, and an API key is configured.
-                    val googleEligible = poi.tags["opening_hours"] == null &&
-                        Category.ofType(poi.type) in GOOGLE_HOURS_CATEGORIES &&
+                    // Offer a Google lookup for any hours-relevant category with a key
+                    // configured — whether OSM has hours (the rider can *verify* them) or
+                    // not (the original fallback). The screen picks "search" vs "verify".
+                    val googleEligible = Category.ofType(poi.type) in GOOGLE_HOURS_CATEGORIES &&
                         BuildConfig.PLACES_API_KEY.isNotEmpty()
                     // "Open on arrival" for the detail view: the estimated arrival time at this
                     // POI, same math as the list row (distance-ahead + average speed). Only for a
@@ -634,13 +634,17 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Live opening-hours lookup via Google Places (only when OSM has none). The Place
-     * ID is cached (allowed by Maps ToS); the hours are returned for display but never
-     * persisted. Short-lived connection like [fetchDescription].
+     * Live opening-hours lookup via Google Places — the "search" fallback when OSM has no
+     * hours, and the "verify" path when it does. The Place ID is cached (allowed by Maps
+     * ToS); the hours are returned for display but never persisted. Short-lived connection
+     * like [fetchDescription].
      */
     private suspend fun fetchGoogleHours(poi: Poi): PlacesClient.Result? {
-        // Serve a still-fresh cached fetch (performance cache) without a network call.
-        repository.cachedHours(poi.id)?.let { return it }
+        // Serve a still-fresh cached fetch (performance cache) without a network call — but
+        // only when it actually carries hours. A cached *empty* result would otherwise make
+        // "Check again" a no-op for the TTL window; let it fall through to a real re-query
+        // (the cached Place ID still skips the Text Search, so it's one cheap call).
+        repository.cachedHours(poi.id)?.takeIf { it.hours.hasHours }?.let { return it }
         return withKarooConnection(applicationContext) { system ->
             PlacesClient(system)
                 .hoursFor(
@@ -845,10 +849,13 @@ class MainActivity : ComponentActivity() {
         // never hangs while the Karoo connection settles.
         const val STATE_READ_TIMEOUT_MS = 5_000L
 
-        // Categories where opening hours matter enough to spend a Google lookup.
+        // Categories where opening hours matter enough to spend a Google lookup — every
+        // named business with a real schedule. Excluded: WATER/TOILET (no business hours,
+        // generic names that resolve badly on Text Search).
         val GOOGLE_HOURS_CATEGORIES = setOf(
             Category.SUPERMARKETS, Category.CAFE_BAKERY, Category.RESTAURANTS, Category.FUEL,
-            Category.ICE_CREAM, Category.HOTELS, Category.BIKE,
+            Category.ICE_CREAM, Category.HOTELS, Category.BIKE, Category.PHARMACY,
+            Category.ATM, Category.CAMPGROUND,
         )
     }
 }

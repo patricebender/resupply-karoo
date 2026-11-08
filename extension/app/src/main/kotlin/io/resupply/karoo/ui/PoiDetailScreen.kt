@@ -183,13 +183,15 @@ fun PoiDetailScreen(
             )
 
             // Hours are resolved once, here, so the status pill and the hours block agree
-            // and both reflect a Google lookup once it lands. OSM is primary; the Google
-            // result (seeded from cache, updated by the fetch button) fills the gap.
+            // and both reflect a Google lookup once it lands. OSM is primary — but once the
+            // rider verifies against Google and Google *has* real hours, that wins (fresher
+            // truth). A Google result with no hours never displaces good OSM data.
             val osmHours = remember(poi.tags) {
                 poi.tags["opening_hours"]?.let { OpeningHours.Hours.fromOsm(it) }
             }
             var googleHours by remember(poi.id) { mutableStateOf(cachedGoogleHours) }
-            val hours = osmHours ?: googleHours?.hours
+            val googleHasHours = googleHours?.hours?.hasHours == true
+            val hours = if (googleHasHours) googleHours!!.hours else osmHours ?: googleHours?.hours
 
             // Contact fields are source-agnostic: OSM first, then the Google result once
             // it's fetched — so the page looks the same however the data arrived.
@@ -204,7 +206,6 @@ fun PoiDetailScreen(
             // the same container as the content).
             val contactViaGoogle = (osmAddress == null && googleHours?.address != null) ||
                 (osmPhone == null && googleHours?.phone != null)
-            val hoursViaGoogle = osmHours == null && googleHours != null
 
             // Status pill sits centered on its own line, above the route context pills,
             // so a long "Open 24/7" + "at 12.3 km" + "detour 400 m" never crowds one row.
@@ -245,14 +246,16 @@ fun PoiDetailScreen(
                 Spacer(Modifier.height(16.dp))
             }
 
-            // Opening hours: the "opens…"/24-7 line, the weekday table, or the on-demand
-            // Google lookup when OSM has none.
+            // Opening hours: the "opens…"/24-7 line and weekday table, the on-demand
+            // Google lookup when OSM has none, or a "verify with Google" action when it does.
             OpeningHoursBlock(
                 osmHours = osmHours,
                 googleHours = googleHours,
                 onGoogleHours = { googleHours = it },
                 loadGoogleHours = loadGoogleHours,
-                viaGoogle = hoursViaGoogle,
+                // The shown hours came from Google only when it had real hours (a verify win,
+                // or the OSM-less fallback) — not while we're showing OSM with an empty note.
+                viaGoogle = googleHasHours,
             )
 
             // Address + phone.
@@ -373,8 +376,15 @@ private fun DrinkingWaterSection(subtype: String, potability: String) {
 /**
  * The Opening hours block: an "Opening hours" section label over a card holding the
  * details — the weekday table, the "opens …" line for a closed place, a plain line for
- * 24/7 or seasonal, or the on-demand Google lookup when OSM has none. The open/closed
- * headline itself now lives in the hero pill row, so this block is detail-only.
+ * 24/7 or seasonal, or the on-demand Google lookup. The open/closed headline itself lives
+ * in the hero pill row, so this block is detail-only.
+ *
+ * Three shapes, by what we have:
+ *  - **Google has real hours** ([viaGoogle]) — the verify/fallback landed; show Google's
+ *    table and credit it. (The parent already prefers this over OSM.)
+ *  - **OSM only** — show the OSM table, plus a "Verify with Google" action that can upgrade
+ *    it. A verify that comes back empty/failed keeps OSM and notes it; it never downgrades.
+ *  - **Neither** — the original fallback: a "Search Internet" button ([GoogleHoursFallback]).
  */
 @Composable
 private fun OpeningHoursBlock(
@@ -391,15 +401,105 @@ private fun OpeningHoursBlock(
     Spacer(Modifier.height(6.dp))
     InfoCard {
         when {
-            osmHours != null -> HoursDetail(osmHours)
-            googleHours != null -> HoursDetail(googleHours.hours)
+            // Google won (verify success, or the OSM-less fallback): show its hours + credit.
+            viaGoogle -> {
+                HoursDetail(googleHours!!.hours)
+                GoogleMapsCredit()
+            }
+            // OSM has hours: show them, and (when a key is configured) let the rider verify
+            // against Google. The verify result is lifted to the parent, which re-renders
+            // this block as the Google branch above once Google actually has hours.
+            osmHours != null -> {
+                HoursDetail(osmHours)
+                if (loadGoogleHours != null) {
+                    VerifyWithGoogle(
+                        alreadyChecked = googleHours != null,
+                        loadGoogleHours = loadGoogleHours,
+                        onGoogleHours = onGoogleHours,
+                    )
+                }
+            }
+            // No OSM, no Google yet: the on-demand search.
             else -> GoogleHoursFallback(loadGoogleHours!!, onGoogleHours)
         }
-        // Attribution rides inside the card only when Google supplied actual hours — not for
-        // the "Place could not be found" note, which carries no Google content to credit.
-        // (Google hours are either a real schedule, 24/7, or unknown; never rawFallback.)
-        val hasGoogleHoursContent = googleHours?.hours?.let { !it.unknown } == true
-        if (viaGoogle && hasGoogleHoursContent) GoogleMapsCredit()
+    }
+}
+
+/**
+ * The "verify with Google" affordance shown beneath OSM hours: an outlined button that
+ * runs the same lookup as [GoogleHoursFallback]. Because the parent prefers a Google
+ * result *with hours* over OSM, a successful verify never renders here — the parent
+ * re-renders the whole block as the Google branch. So this composable only ever shows:
+ *  - the idle button,
+ *  - a spinner while checking,
+ *  - or, after a verify that resolved no hours / failed, a muted note + retry (OSM stays
+ *    above, untouched).
+ */
+@Composable
+private fun VerifyWithGoogle(
+    // True when a Google result is already cached for this POI (a prior check, possibly
+    // empty) — seeds the "already looked" state so re-opening shows the note, not a fresh button.
+    alreadyChecked: Boolean,
+    loadGoogleHours: suspend () -> PlacesClient.Result?,
+    onGoogleHours: (PlacesClient.Result?) -> Unit,
+) {
+    var loading by remember { mutableStateOf(false) }
+    // Tracks whether a verify attempt has completed this session, so we can show the right
+    // "empty"/"failed" note. Seeded from any cached result so re-opening the POI is honest.
+    var attempted by remember { mutableStateOf(alreadyChecked) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    val verify: () -> Unit = {
+        loading = true
+        scope.launch {
+            val result = loadGoogleHours()
+            onGoogleHours(result)
+            failed = result == null
+            attempted = true
+            loading = false
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (loading) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Checking Google…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@Column
+        }
+
+        // A completed attempt that didn't upgrade the hours: Google either couldn't find
+        // the place (failed) or had no hours of its own (resolved, but empty). Say which —
+        // honestly, without touching the OSM table shown above — then offer a retry.
+        if (attempted) {
+            Text(
+                if (failed) "Couldn't find this on Google Maps." else "Google had no hours to confirm this.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        OutlinedButton(onClick = verify) {
+            Icon(
+                Icons.Filled.TravelExplore,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(if (attempted) "Check again" else "Verify")
+        }
     }
 }
 

@@ -9,12 +9,17 @@ import java.util.Calendar
 import java.util.Locale
 
 /**
- * Resolve a POI's normalized [OpeningHours.Hours] from whichever source we have:
- * OSM tags first, else an already-fetched Google result ([googleHours]). Returns null
- * when neither is available — the caller shows type only, no open/closed claim.
+ * Resolve a POI's normalized [OpeningHours.Hours] from whichever source we have.
+ *
+ * A verified/fetched Google result wins *only when it carries real hours* — then it's
+ * preferred over OSM (the rider verified it, so Google is the fresher truth), matching
+ * the detail view. Otherwise OSM is primary, with Google as the fallback when OSM has
+ * nothing. Returns null when neither source has anything — the caller shows type only.
  */
-fun hoursFor(poi: Poi, googleHours: OpeningHours.Hours?): OpeningHours.Hours? =
-    poi.tags["opening_hours"]?.let { OpeningHours.Hours.fromOsm(it) } ?: googleHours
+fun hoursFor(poi: Poi, googleHours: OpeningHours.Hours?): OpeningHours.Hours? {
+    val osm = poi.tags["opening_hours"]?.let { OpeningHours.Hours.fromOsm(it) }
+    return if (googleHours?.hasHours == true) googleHours else osm ?: googleHours
+}
 
 // --- Units ------------------------------------------------------------------------------------
 //

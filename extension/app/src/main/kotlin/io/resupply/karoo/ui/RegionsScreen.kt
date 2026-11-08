@@ -60,7 +60,8 @@ import io.resupply.karoo.service.RegionDownloadService
 import kotlinx.coroutines.delay
 
 /**
- * Region picker, a collapsible tree from the bundled `regions.json`: a top section per
+ * Region picker, a collapsible tree built from [regions] (derived from the fetched/disk-cached
+ * manifest, or the bundled `regions.json` seed on a cold start): a top section per
  * [Region.group] → the countries in it. A country whose id prefixes others (germany/usa/
  * canada) is an expandable node whose row is the whole-country download and which expands to
  * its states; other countries are leaves. Per-region size/place count comes from [manifest].

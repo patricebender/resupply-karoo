@@ -37,6 +37,7 @@ import io.resupply.karoo.data.PoiQuery
 import io.resupply.karoo.data.Region
 import io.resupply.karoo.data.RegionCatalog
 import io.resupply.karoo.data.RegionCatalogClient
+import io.resupply.karoo.data.RegionManifestCache
 import io.resupply.karoo.data.RegionDownloadStatus
 import io.resupply.karoo.data.RegionManifestEntry
 import io.resupply.karoo.data.ResupplyConfig
@@ -122,14 +123,31 @@ class MainActivity : ComponentActivity() {
     // connection. Every distance the app shows is formatted to match it. False until the first
     // UserProfile arrives → treated as metric.
     private val systemImperial = MutableStateFlow(false)
-    private val regionCatalog: List<Region> by lazy { RegionCatalog.load(applicationContext) }
+    // The picker's region list. Seeded from the disk-cached manifest (authoritative, survives
+    // restarts) or, failing that, the bundled regions.json fallback seed — so the Browse tree
+    // renders instantly and offline. A successful manifest fetch re-derives it (see loadManifest),
+    // which is how a region added to the manifest appears with no app release.
+    private val regionList by lazy {
+        androidx.compose.runtime.mutableStateOf(
+            (RegionManifestCache.load(applicationContext)?.toRegions()
+                ?: RegionCatalog.load(applicationContext)),
+        )
+    }
 
     // Region manifest (sizes/counts) + its fetch state. The download itself lives in the
     // foreground RegionDownloadService, observed via its liveDownload flow + persisted status.
-    private val regionManifest =
-        androidx.compose.runtime.mutableStateOf<Map<String, RegionManifestEntry>>(emptyMap())
+    private val regionManifest by lazy {
+        androidx.compose.runtime.mutableStateOf(
+            RegionManifestCache.load(applicationContext)?.regions?.associateBy { it.id } ?: emptyMap(),
+        )
+    }
     private val manifestLoading = androidx.compose.runtime.mutableStateOf(false)
     private val manifestFailed = androidx.compose.runtime.mutableStateOf(false)
+    // The manifest is refreshed once per app process (background, on first Regions entry): the
+    // cached list shows instantly and a single fetch reconciles sizes/dataVersion. Subsequent
+    // re-entries in the same session serve the cache; a newer region/update is picked up on the
+    // next app restart. (Matches "re-fetch in background only after the next restart".)
+    private var manifestRefreshed = false
 
     // The app update check, run when Settings opens. Drives the always-present Update section:
     // Checking → UpToDate / Available / Failed. The manifest is kept on the Available/UpToDate
@@ -455,17 +473,20 @@ class MainActivity : ComponentActivity() {
                     statuses.filter { it.phase == RegionDownloadStatus.Phase.FAILED }
                         .associate { it.regionId to (it.reason ?: "Download failed") }
                 }
-                // Re-fetch the manifest on every entry into the Regions screen, not just when
-                // empty: it's how the app learns a region has a newer dataVersion (→ "Update
-                // available"). Caching it for the process lifetime meant a rebuild published after
-                // first open was never seen. The file is tiny (~40 KB, one bridge request) and
-                // loadManifest keeps the last good value on a failed refresh, so this is cheap and
-                // safe. The spinner only shows on the very first (empty) load.
+                // Refresh the manifest once per app process: the cached/seeded list shows
+                // instantly and a single background fetch reconciles sizes + dataVersion (→
+                // "Update available") and re-derives the Browse list, picking up any newly-
+                // published region. Same-session re-entries serve the cache; a newer region or
+                // update lands on the next app restart. The spinner shows only when we have no
+                // list to display yet (cold, no cache, no bundled seed).
                 LaunchedEffect(Unit) {
-                    loadManifest(showSpinner = regionManifest.value.isEmpty())
+                    if (!manifestRefreshed) {
+                        manifestRefreshed = true
+                        loadManifest(showSpinner = regionList.value.isEmpty())
+                    }
                 }
                 RegionsScreen(
-                    regions = regionCatalog,
+                    regions = regionList.value,
                     manifest = regionManifest.value,
                     installedRegions = installed,
                     installedVersions = installedVersions,
@@ -667,7 +688,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun installedSummary(installed: Set<String>): String {
         if (installed.isEmpty()) return "No regions yet: download one"
-        val labels = installed.mapNotNull { id -> regionCatalog.firstOrNull { it.id == id }?.label }
+        val labels = installed.mapNotNull { id -> regionList.value.firstOrNull { it.id == id }?.label }
         if (labels.isEmpty()) return "No regions yet: download one"
         return when {
             labels.size <= 2 -> labels.sorted().joinToString(", ")
@@ -719,6 +740,10 @@ class MainActivity : ComponentActivity() {
                 if (regionManifest.value.isEmpty()) manifestFailed.value = true
             } else {
                 regionManifest.value = manifest.regions.associateBy { it.id }
+                // The manifest is now the authoritative Browse list; re-derive it and persist to
+                // disk so the next cold start renders from it (superseding the bundled seed).
+                regionList.value = manifest.toRegions()
+                RegionManifestCache.save(applicationContext, manifest)
             }
         }
     }

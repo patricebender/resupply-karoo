@@ -53,7 +53,15 @@ data class RegionManifest(
     /** Absolute URL prefix; a region file lives at `baseUrl + entry.file`. */
     val baseUrl: String,
     val regions: List<RegionManifestEntry>,
-)
+) {
+    /**
+     * The picker's catalog derived straight from the manifest: every entry's id/label/group.
+     * This is why adding a region needs no app release — a newly-published manifest entry
+     * shows up in the picker as soon as the manifest is fetched (or read from the disk cache).
+     * The bundled `regions.json` ([RegionCatalog]) is only the cold-start fallback seed.
+     */
+    fun toRegions(): List<Region> = regions.map { Region(it.id, it.label, it.group) }
+}
 
 @Serializable
 data class RegionManifestEntry(
@@ -76,7 +84,12 @@ data class RegionManifestEntry(
     val dataVersion: Int = 1,
 )
 
-/** Reads the bundled region catalog so the picker renders without a network call. */
+/**
+ * Reads the bundled region catalog — the **cold-start fallback seed** so the picker renders a
+ * non-empty Browse list offline, before any manifest is fetched. Once the fetched (or
+ * disk-cached) manifest is available, [RegionManifest.toRegions] supersedes this, so a region
+ * added to the manifest appears with no app release.
+ */
 object RegionCatalog {
     private const val ASSET = "regions.json"
     private val json = Json { ignoreUnknownKeys = true }

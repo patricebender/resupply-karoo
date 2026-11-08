@@ -6,7 +6,7 @@ name: Build region files
 #
 # Always rebuilds the ENTIRE catalog (no subset), in three tiers so the many-GB of Geofabrik
 # downloads run in parallel instead of one long sequential loop:
-#   1. build-leaves    — matrix: every single-extract region, sharded across runners.
+#   1. build-leaves    — matrix: every single-extract region, weight-balanced across runners.
 #   2. build-composites — Germany/USA/Canada Complete, MERGED from the built leaf files (no
 #                         re-download); semantically identical to a from-scratch build.
 #   3. publish         — gather all region files, emit the manifest, upload to the release.
@@ -50,9 +50,11 @@ jobs:
       - name: Compute shards
         id: shard
         working-directory: extension/tools/poi-db
-        # ~10 shards keeps us well under the public-repo 20-concurrent-job cap while batching
-        # ~12 leaves per runner so each amortizes checkout+npm ci over many regions.
-        run: echo "shards=$(npx --yes tsx regions.ts shards 10)" >> "$GITHUB_OUTPUT"
+        # 16 shards, packed by build weight (LPT) not count: the heaviest leaf (France, ~4.9 GB)
+        # is indivisible, so it bounds the matrix wall-clock — 16 is where France lands alone on a
+        # shard and every other shard is lighter, so more shards wouldn't help. Stays under the
+        # public-repo 20-concurrent-job cap (16 + the plan job) with headroom for a concurrent run.
+        run: echo "shards=$(npx --yes tsx regions.ts shards 16)" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------------------------
   # Tier 1: build every leaf region in parallel. Each shard uploads its dist files as an artifact.

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,6 +92,8 @@ fun RegionsScreen(
     onDownload: (Region) -> Unit,
     onUpdate: (Region) -> Unit,
     onRemove: (Region) -> Unit,
+    /** Re-fetch the manifest on demand (the header refresh button). */
+    onRefresh: () -> Unit,
     onBack: () -> Unit,
 ) {
     val downloadingId = live?.takeIf {
@@ -133,7 +136,21 @@ fun RegionsScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
-            Text("Regions", style = MaterialTheme.typography.titleLarge)
+            Text("Regions", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            // On-demand manifest refresh: picks up a just-published region/update without the
+            // once-per-process cadence or an app restart. While a fetch is in flight the button
+            // becomes the same spinner the loading row shows, so it reads as "working" and can't
+            // be double-tapped.
+            if (manifestLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp).padding(2.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh region list")
+                }
+            }
         }
         HorizontalDivider()
 

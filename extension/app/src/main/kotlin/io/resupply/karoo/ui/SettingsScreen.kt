@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -170,6 +171,9 @@ fun SettingsScreen(
     onOpenRegions: () -> Unit,
     onOpenPrivacy: () -> Unit,
     onOpenFeedback: () -> Unit,
+    // Hoisted so the scroll position survives opening Regions/Privacy/Feedback and coming back —
+    // this composable leaves the composition on those jumps, so an inline state would reset to top.
+    scrollState: ScrollState,
     onBack: () -> Unit,
 ) {
     val building = buildState is BuildState.Building
@@ -243,7 +247,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(16.dp),
         ) {
             SectionHeader("Categories") {

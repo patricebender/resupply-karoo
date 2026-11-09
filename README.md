@@ -114,7 +114,8 @@ live.
     <td width="50%" valign="top">
       <h3>🌍 Regional coverage</h3>
       Download the regions you ride, right on the device. Europe, the USA, Canada,
-      Australia, and Asia (Japan, South Korea, Taiwan, Thailand) are supported.
+      Oceania (Australia, New Zealand), and Asia (Japan, South Korea, Taiwan,
+      Thailand, Vietnam) are supported.
     </td>
     <td width="50%" valign="top" align="center">
       <img src="docs/media/02-regions-download.gif" alt="Browsing and downloading a region in-app" width="280">

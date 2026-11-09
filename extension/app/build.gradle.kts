@@ -192,11 +192,16 @@ tasks.register("generateManifest") {
                 .joinToString("\n")
         }.getOrDefault("")
 
-        // Screenshots are release assets named preview*.png next to this module. None yet;
-        // drop them into extension/app/ and they'll be listed + attached automatically.
-        val screenshotUrls = projectDir.listFiles { f -> f.name.matches(Regex("preview.*\\.png")) }
+        // Screenshots live in extension/app/screenshots/ and are served straight from the repo
+        // on `main` via raw.githubusercontent.com — decoupled from the per-release asset list, so
+        // they're neither re-uploaded to every release nor clutter it. Drop more *.png in there
+        // (numbered to fix carousel order) and they're picked up automatically. Pinned to `main`:
+        // existing releases keep their own manifest URLs, so this never breaks a shipped listing.
+        val screenshotBaseUrl =
+            "https://raw.githubusercontent.com/patricebender/resupply-karoo/main/extension/app/screenshots"
+        val screenshotUrls = file("$projectDir/screenshots").listFiles { f -> f.name.endsWith(".png") }
             ?.sortedBy { it.name }
-            ?.map { "$baseUrl/${it.name}" }
+            ?.map { "$screenshotBaseUrl/${it.name}" }
             ?: emptyList()
 
         val manifest = linkedMapOf(

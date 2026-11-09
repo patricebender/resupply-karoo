@@ -88,11 +88,8 @@ jobs:
           set -euo pipefail
           # The library update mechanism fetches assets by fixed name at the release's
           # download path (app-release.apk, manifest.json, resupply.png). Keep those names.
+          # Screenshots are NOT attached here — the manifest points them at raw.githubusercontent
+          # (extension/app/screenshots/ on main), so they stay out of the per-release asset list.
           cp extension/app/build/outputs/apk/release/app-release.apk app-release.apk
-          # Also publish a versioned copy for humans sideloading from the releases page.
-          cp app-release.apk "resupply-${TAG}.apk"
-          ASSETS=(app-release.apk "resupply-${TAG}.apk" extension/app/manifest.json extension/app/resupply.png)
-          for shot in extension/app/preview*.png; do
-            [ -e "$shot" ] && ASSETS+=("$shot")
-          done
-          gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          gh release upload "$TAG" \
+            app-release.apk extension/app/manifest.json extension/app/resupply.png --clobber

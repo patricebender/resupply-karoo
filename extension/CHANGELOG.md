@@ -5,10 +5,10 @@
 
 ### Features
 
-* add New Zealand 🇳🇿 and Vietnam 🇻🇳 ([79c2566](https://github.com/patricebender/resupply-karoo/commit/79c2566bb83a2172c0bb814eb6efb7ba10d61e78))
+* New Regions: Japan 🇯🇵 Vietnam 🇻🇳 Thailand 🇹🇭 South Korea 🇰🇷 Taiwan 🇹🇼 New Zealand 🇳🇿 ([79c2566](https://github.com/patricebender/resupply-karoo/commit/79c2566bb83a2172c0bb814eb6efb7ba10d61e78))
 * better UX for regions ✨ ([16d99b7](https://github.com/patricebender/resupply-karoo/commit/16d99b7ad43552da713cdb8e4be74c5756c9ee6e))
-* build region picker from the manifest, not a bundled catalog ([#145](https://github.com/patricebender/resupply-karoo/issues/145)) ([b905c43](https://github.com/patricebender/resupply-karoo/commit/b905c432187c75d0f65f90c1116cf5e7aa31c98d))
-* verify offline data against Google Maps ([0948afd](https://github.com/patricebender/resupply-karoo/commit/0948afd599e00f09a0dbdce80e5b189f15f9f628))
+* Group Australia and NZ under Oceania ([#145](https://github.com/patricebender/resupply-karoo/issues/145)) ([b905c43](https://github.com/patricebender/resupply-karoo/commit/b905c432187c75d0f65f90c1116cf5e7aa31c98d))
+* on-demand verification of opening hours against Google Maps data ([0948afd](https://github.com/patricebender/resupply-karoo/commit/0948afd599e00f09a0dbdce80e5b189f15f9f628))
 
 ## [1.10.0](https://github.com/patricebender/resupply-karoo/compare/v1.9.0...v1.10.0) (2026-11-02)
 

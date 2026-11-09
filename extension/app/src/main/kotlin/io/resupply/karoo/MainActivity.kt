@@ -289,6 +289,9 @@ class MainActivity : ComponentActivity() {
         // Hoisted here so the list scroll position is preserved across navigation to
         // the detail/filter screens and back.
         val waybookListState = rememberLazyListState()
+        // Likewise for Settings: opening Regions/Privacy/Feedback drops the SettingsScreen from the
+        // composition, so hoist its scroll state here to return the rider to where they were.
+        val settingsScrollState = androidx.compose.foundation.rememberScrollState()
         // Position-following flag, hoisted so it SURVIVES a POI-detail round-trip (the Waybook
         // screen leaves the composition there, so a flag living inside it would reset to true on
         // return and yank the rider back to the current position). Only a fresh field-tap
@@ -446,6 +449,7 @@ class MainActivity : ComponentActivity() {
                     onOpenRegions = { screen = Screen.Regions(returnTo = Screen.Settings) },
                     onOpenPrivacy = { screen = Screen.PrivacyData },
                     onOpenFeedback = { screen = Screen.Feedback },
+                    scrollState = settingsScrollState,
                     onBack = { screen = Screen.Waybook },
                 )
             }

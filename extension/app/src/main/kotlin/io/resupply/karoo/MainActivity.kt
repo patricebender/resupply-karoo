@@ -149,6 +149,9 @@ class MainActivity : ComponentActivity() {
     // re-entries in the same session serve the cache; a newer region/update is picked up on the
     // next app restart. (Matches "re-fetch in background only after the next restart".)
     private var manifestRefreshed = false
+    // True while a manifest fetch is in flight (independent of the spinner, which a silent
+    // background refresh doesn't raise) so loadManifest can reject a concurrent refresh tap.
+    private var manifestFetching = false
 
     // The app update check, run when Settings opens. Drives the always-present Update section:
     // Checking → UpToDate / Available / Failed. The manifest is kept on the Available/UpToDate
@@ -730,32 +733,43 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Fetch the region manifest (per-region sizes/counts + dataVersion for "update available").
-     * Called on every entry into the Regions screen so a newly-published rebuild is seen. Keeps
-     * the last good value on failure. [showSpinner] gates the loading row — false for a silent
-     * background refresh when we already have a manifest to display.
+     * Runs once per process on first Regions entry, and on demand via the header refresh button;
+     * either way it picks up a newly-published rebuild. Keeps the last good value on failure.
+     * [showSpinner] gates the loading row — false for a silent background refresh when we already
+     * have a manifest to display. A fetch already in flight is a no-op, so the auto-refresh and a
+     * refresh tap can't race into two concurrent requests.
      */
     private fun loadManifest(showSpinner: Boolean = true) {
+        // Guard on a dedicated in-flight flag, not manifestLoading: a silent refresh
+        // (showSpinner = false) never sets manifestLoading, so that alone wouldn't block a
+        // concurrent refresh tap.
+        if (manifestFetching) return
+        manifestFetching = true
         if (showSpinner) manifestLoading.value = true
         manifestFailed.value = false
         lifecycleScope.launch {
-            // Always attempt the fetch: the phone bridge doesn't surface as an Android network,
-            // so the only way to know we can reach the internet through it is to try. failFast
-            // caps the wait (~12 s, not the full 30 s bridge timeout) so a truly-dead state
-            // surfaces the offline banner reasonably quickly without blocking a live bridge.
-            val manifest = withKarooConnection(applicationContext) { system ->
-                RegionCatalogClient(system).fetchManifest(failFast = true)
-            }
-            manifestLoading.value = false
-            if (manifest == null) {
-                // Only surface a failure when we have nothing to show; a failed background refresh
-                // silently keeps the last good manifest.
-                if (regionManifest.value.isEmpty()) manifestFailed.value = true
-            } else {
-                regionManifest.value = manifest.regions.associateBy { it.id }
-                // The manifest is now the authoritative Browse list; re-derive it and persist to
-                // disk so the next cold start renders from it (superseding the bundled seed).
-                regionList.value = manifest.toRegions()
-                RegionManifestCache.save(applicationContext, manifest)
+            try {
+                // Always attempt the fetch: the phone bridge doesn't surface as an Android network,
+                // so the only way to know we can reach the internet through it is to try. failFast
+                // caps the wait (~12 s, not the full 30 s bridge timeout) so a truly-dead state
+                // surfaces the offline banner reasonably quickly without blocking a live bridge.
+                val manifest = withKarooConnection(applicationContext) { system ->
+                    RegionCatalogClient(system).fetchManifest(failFast = true)
+                }
+                if (manifest == null) {
+                    // Only surface a failure when we have nothing to show; a failed background
+                    // refresh silently keeps the last good manifest.
+                    if (regionManifest.value.isEmpty()) manifestFailed.value = true
+                } else {
+                    regionManifest.value = manifest.regions.associateBy { it.id }
+                    // The manifest is now the authoritative Browse list; re-derive it and persist to
+                    // disk so the next cold start renders from it (superseding the bundled seed).
+                    regionList.value = manifest.toRegions()
+                    RegionManifestCache.save(applicationContext, manifest)
+                }
+            } finally {
+                manifestLoading.value = false
+                manifestFetching = false
             }
         }
     }

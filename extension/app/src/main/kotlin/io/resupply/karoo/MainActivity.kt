@@ -87,7 +87,8 @@ import timber.log.Timber
 private sealed interface Screen {
     data object Waybook : Screen
     data object Settings : Screen
-    data object Regions : Screen
+    /** [returnTo] is where Back lands — Settings when opened from there, else Waybook. */
+    data class Regions(val returnTo: Screen = Settings) : Screen
     data object PrivacyData : Screen
     data object Feedback : Screen
     data object Welcome : Screen
@@ -331,7 +332,7 @@ class MainActivity : ComponentActivity() {
                 },
                 onBuild = ::runBuild,
                 onOpenSettings = { screen = Screen.Settings },
-                onOpenRegions = { screen = Screen.Regions },
+                onOpenRegions = { screen = Screen.Regions(returnTo = Screen.Waybook) },
                 onOpenPoi = { screen = Screen.Detail(it.id) },
                 following = followPosition,
                 onUserScrolled = { followPosition = false },
@@ -442,7 +443,7 @@ class MainActivity : ComponentActivity() {
                             repository.pauseNearby()
                         }
                     },
-                    onOpenRegions = { screen = Screen.Regions },
+                    onOpenRegions = { screen = Screen.Regions(returnTo = Screen.Settings) },
                     onOpenPrivacy = { screen = Screen.PrivacyData },
                     onOpenFeedback = { screen = Screen.Feedback },
                     onBack = { screen = Screen.Waybook },
@@ -452,7 +453,7 @@ class MainActivity : ComponentActivity() {
             is Screen.Welcome -> WelcomeScreen(
                 onChooseRegion = {
                     lifecycleScope.launch { configStore.setOnboardingSeen() }
-                    screen = Screen.Regions
+                    screen = Screen.Regions(returnTo = Screen.Waybook)
                 },
                 onSkip = {
                     lifecycleScope.launch { configStore.setOnboardingSeen() }
@@ -499,7 +500,14 @@ class MainActivity : ComponentActivity() {
                     onDownload = ::downloadRegion,
                     onUpdate = ::updateRegion,
                     onRemove = ::removeRegion,
-                    onBack = { screen = Screen.Waybook },
+                    // On-demand refresh: fetch now regardless of the once-per-process gate, and
+                    // show the spinner (the list is already populated, but the rider asked, so
+                    // surface that work is happening).
+                    onRefresh = {
+                        manifestRefreshed = true
+                        loadManifest(showSpinner = true)
+                    },
+                    onBack = { screen = s.returnTo },
                 )
             }
 

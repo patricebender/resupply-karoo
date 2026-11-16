@@ -44,6 +44,9 @@ class ConfigStore(private val context: Context) {
         // Absent key reads as on, so existing installs get auto-build on route load without a
         // first-run write or a surprise flip.
         val autoBuild = prefs[AUTO_BUILD_KEY] ?: true
+        // Absent key reads as on, so existing installs keep live search on without a first-run
+        // write or a surprise flip. One preference for both modes (route-less + forced-over-route).
+        val liveSearchEnabled = prefs[LIVE_SEARCH_KEY] ?: true
         // Live favorites are DERIVED, not stored separately: they're the cache entry for the
         // route currently loaded ([CURRENT_ROUTE_KEY]). One source of truth — the live set and
         // the per-route cache can't desync, and loading a route needs no restore step. Route-less
@@ -66,6 +69,7 @@ class ConfigStore(private val context: Context) {
             favoritesOnly = prefs[FAVORITES_ONLY_KEY] ?: false,
             themeMode = themeMode,
             autoBuild = autoBuild,
+            liveSearchEnabled = liveSearchEnabled,
         )
     }
 
@@ -83,6 +87,11 @@ class ConfigStore(private val context: Context) {
 
     suspend fun setAutoBuild(enabled: Boolean) {
         context.dataStore.edit { it[AUTO_BUILD_KEY] = enabled }
+    }
+
+    /** Turn live (nearby) search on/off — the single preference the extension's refresher reads. */
+    suspend fun setLiveSearchEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[LIVE_SEARCH_KEY] = enabled }
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -303,6 +312,7 @@ class ConfigStore(private val context: Context) {
         val SAFE_WATER_KEY = booleanPreferencesKey("safe_water_only")
         val SMART_DISTANCE_KEY = booleanPreferencesKey("smart_distance")
         val AUTO_BUILD_KEY = booleanPreferencesKey("auto_build")
+        val LIVE_SEARCH_KEY = booleanPreferencesKey("live_search_enabled")
         val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
         val REGIONS_KEY = stringSetPreferencesKey("installed_regions")
         val REGION_VERSIONS_KEY = stringPreferencesKey("installed_region_versions")

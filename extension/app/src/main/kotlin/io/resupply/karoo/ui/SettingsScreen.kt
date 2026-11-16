@@ -124,12 +124,9 @@ fun SettingsScreen(
     // rebuild button — the radius watcher auto-rebuilds on setting changes, and rebuilding an
     // unchanged route is a no-op.)
     routeLoaded: Boolean,
-    // Route mode only: the rider has forced live (nearby) search on over the loaded route. Drives
-    // the toggle's on/off look when [routeLoaded]; ignored route-less (where [liveOn] applies).
-    liveOverride: Boolean,
-    // Route-less live (nearby) search on/off — the rider's intent (on unless they've paused it).
-    // Drives the toggle's on (pulsing) vs off (crossed-out) look when there's no route.
-    liveOn: Boolean,
+    // Live (nearby) search on/off — one persisted preference across both modes. Drives the toggle's
+    // on/off look and the header's read-only Live chip (together with [hasFix]).
+    liveEnabled: Boolean,
     // A GPS fix is available. The live toggle follows the overview Find button's rule: with no fix
     // there's nothing to run, so the toggle is disabled (inert) regardless of on/off.
     hasFix: Boolean,
@@ -203,7 +200,7 @@ fun SettingsScreen(
     // Live search is active (and showing) when the mode's toggle is on and a fix exists — route
     // mode keys off the forced-live override, route-less off the pause state. Drives the header's
     // read-only Live chip; the actual control is the row below Categories.
-    val liveActive = (if (routeLoaded) liveOverride else liveOn) && hasFix
+    val liveActive = liveEnabled && hasFix
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Top bar: back + title + a read-only Live chip (when live is active) + trashcan (route mode
@@ -269,11 +266,11 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(12.dp))
             LiveSearchRow(
-                on = if (routeLoaded) liveOverride else liveOn,
+                on = liveEnabled,
                 hasFix = hasFix,
                 building = building,
                 routeLoaded = routeLoaded,
-                onToggle = { onToggleLive(!(if (routeLoaded) liveOverride else liveOn)) },
+                onToggle = { onToggleLive(!liveEnabled) },
             )
 
             Spacer(Modifier.height(12.dp))
@@ -328,7 +325,9 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
             AutoBuildRow(
                 checked = autoBuild,
-                enabled = !building,
+                // Governs only future route loads, not the running build, so it stays usable while
+                // one is in flight — no reason to freeze it.
+                enabled = true,
                 onToggle = onAutoBuildToggle,
             )
 
@@ -394,23 +393,41 @@ private fun LiveSearchRow(
     routeLoaded: Boolean,
     onToggle: () -> Unit,
 ) {
-    // Turning live ON needs a GPS fix (nothing to search around without one), but turning it OFF
-    // must ALWAYS be allowed — otherwise a rider who forced live on and then lost the fix is
-    // trapped and can't get back to route mode. So the switch is interactive whenever it's already
-    // on (to allow off) or a fix exists (to allow on), gated by no build in flight.
-    val enabled = (on || hasFix) && !building
+    // Live search is a persisted preference, so the switch is ALWAYS interactive (gated only by a
+    // build in flight) — the rider can arm it without a fix; it simply starts searching the moment
+    // GPS arrives. GPS availability is surfaced by the overview's "Waiting for GPS" face, not by
+    // locking this control.
+    val enabled = !building
     val labelColor = if (enabled) {
         MaterialTheme.colorScheme.onSurface
     } else {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     }
-    // Route mode frames it as a temporary detour from the route; route-less it's the nearby
-    // search's own pause/resume. With no fix and off, the "need GPS" note explains why it won't turn
-    // on; with no fix and on, the rider can still turn it off, so we keep the mode's normal copy.
+    // Describe the current state without restating the toggle: off says what turning it on does;
+    // on describes what it's doing (or waiting on GPS to do).
+    val waitingForGps = on && !hasFix
     val description = when {
-        !hasFix && !on -> "Waiting for GPS…"
-        routeLoaded -> "Temporarily search for resupply around you. Turn off to return to route mode."
-        else -> "Keep finding resupply around you as you ride. Turn off to stop."
+        !on -> "Find resupply around you as you ride."
+        !hasFix -> "Waiting for GPS" // trailing dots are animated below
+        routeLoaded -> "Searching around you instead of along the route."
+        else -> "Finding resupply around you as you ride."
+    }
+    // While waiting on a fix, cycle the trailing dots ("" -> "." -> ".." -> "...") so the line reads
+    // as live/working rather than stuck.
+    val dots = if (waitingForGps) {
+        val transition = rememberInfiniteTransition(label = "gpsWaitDots")
+        val phase by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 4f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1200, easing = androidx.compose.animation.core.LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "gpsWaitDotsPhase",
+        )
+        ".".repeat(phase.toInt() % 4)
+    } else {
+        ""
     }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -423,7 +440,7 @@ private fun LiveSearchRow(
             Switch(checked = on, onCheckedChange = { onToggle() }, enabled = enabled)
         }
         Text(
-            description,
+            description + dots,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),

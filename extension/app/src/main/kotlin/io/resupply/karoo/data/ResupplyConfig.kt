@@ -85,6 +85,17 @@ data class ResupplyConfig(
      * route.
      */
     val autoBuild: Boolean = true,
+    /**
+     * Live (nearby) search on/off — ONE preference across both modes, so "live mode is live mode"
+     * whether or not a route is loaded. Route-less: on → the background refresher keeps nearby
+     * places fresh as you ride; off → it stands down (the pre-search invitation). Route mode: on →
+     * live nearby search over the loaded route (the route roadbook stays cached and is restored the
+     * moment it's turned off, no rebuild); off → the route roadbook shows. Persisted and sticky —
+     * survives restarts and route loads; only the rider re-enables it (the Settings toggle or the
+     * overview Find button). A view/behavior preference, not a query input, so NOT part of
+     * [io.resupply.karoo.build.routeBuildKey]. Default on.
+     */
+    val liveSearchEnabled: Boolean = true,
 ) {
     /**
      * Whether [poi] should be shown under this config: its category must be enabled, and —

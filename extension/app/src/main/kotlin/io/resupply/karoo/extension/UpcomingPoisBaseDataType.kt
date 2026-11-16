@@ -123,16 +123,16 @@ abstract class UpcomingPoisBaseDataType(
         val unitFlow = karooSystem.userProfileFlow()
             .map { it.preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL }
             .onStart { emit(false) }
-        // liveOverride + buildState folded into one flow so the live combine stays at its 5-arg
+        // liveSearchEnabled + buildState folded into one flow so the live combine stays at its 5-arg
         // typed overload. buildState drives the "building resupply points" loading state that
         // replaces the "Tap to build" prompt while an (auto- or manual) build is in flight.
-        val overrideBuildFlow = combine(repository.liveOverride, repository.buildState) { ov, bs ->
-            ov to bs
+        val liveBuildFlow = combine(repository.liveSearchEnabled, repository.buildState) { live, bs ->
+            live to bs
         }
         val liveFlow = combine(
-            progressFlow, routeFlow, locationFlow, unitFlow, overrideBuildFlow,
-        ) { stream, route, loc, imperial, (liveOverride, buildState) ->
-            Live(stream, route, loc, imperial, liveOverride, buildState)
+            progressFlow, routeFlow, locationFlow, unitFlow, liveBuildFlow,
+        ) { stream, route, loc, imperial, (liveEnabled, buildState) ->
+            Live(stream, route, loc, imperial, liveEnabled, buildState)
         }
 
         // MainActivity, launched when the rider taps the field (open app / "Tap to build").
@@ -148,7 +148,7 @@ abstract class UpcomingPoisBaseDataType(
             ) { pois, routeLen, cfg, live, tick ->
                 Frame(pois, routeLen, cfg.enabledCategories, cfg.safeWaterOnly, cfg.detourMeters,
                     cfg.favoritePoiIds, cfg.favoritesOnly, live.stream, live.routeState, live.location,
-                    live.systemImperial, live.liveOverride, live.buildState, cfg.autoBuild, tick)
+                    live.systemImperial, live.liveEnabled, live.buildState, cfg.autoBuild, tick)
             }.collect { f ->
                 val remoteViews = glance.compose(context, DpSize.Unspecified) {
                     render(f, config, mainActivity, interactive)
@@ -170,9 +170,9 @@ abstract class UpcomingPoisBaseDataType(
         val routeState: RouteState,
         val location: LatLng?,
         val systemImperial: Boolean,
-        // Rider forced live (nearby) search on over the loaded route. Drives the live dot and
-        // takes precedence over the route/detour states in render.
-        val liveOverride: Boolean,
+        // Live (nearby) search on — the single preference. Drives the live dot and takes precedence
+        // over the route/detour states in render (both route-less and forced over a loaded route).
+        val liveEnabled: Boolean,
         // The roadbook build state. A Building state shows the loading indicator in place of the
         // "Tap to build" prompt while an (auto- or manual) build runs.
         val buildState: BuildState,
@@ -190,7 +190,7 @@ abstract class UpcomingPoisBaseDataType(
         val routeState: RouteState,
         val location: LatLng?,
         val useImperial: Boolean,
-        val liveOverride: Boolean,
+        val liveEnabled: Boolean,
         val buildState: BuildState,
         // Whether auto-build-on-route-load is enabled. When on, a route with no roadbook shows the
         // loading indicator (a build is running or imminent) rather than the "Tap to build" CTA,
@@ -252,13 +252,14 @@ abstract class UpcomingPoisBaseDataType(
     private fun render(f: Frame, config: ViewConfig, mainActivity: ComponentName, interactive: Boolean) {
         if (f.enabled.isEmpty()) return renderNoCategories(mainActivity, interactive)
 
-        // Forced-live over a route: the rider explicitly switched to nearby search while navigating,
-        // so this takes precedence over the route/detour states (the nav state may still read
-        // Loaded or Detour underneath). The shown set is a nearby set (buildNearby zeroes the route
-        // length), so it flows through the nearby render — the card carries a green live dot (left
-        // of its accent bar); when nothing's resolved yet, the live "searching" state shows instead
-        // of a dead tap-to-build/tap-for-nearby prompt.
-        if (f.liveOverride) {
+        // Live search on: the shown set is a nearby set (buildNearby zeroes the route length), so it
+        // flows through the nearby render with a green live dot. This takes precedence over the
+        // route/detour states — route-less it's the ongoing nearby search, and over a loaded route
+        // the rider explicitly switched to nearby (the nav state may still read Loaded/Detour
+        // underneath). When nothing's resolved yet, the live "searching" state shows instead of a
+        // dead tap-to-build/tap-for-nearby prompt — but a build actually in flight still shows its
+        // own loading indicator (below).
+        if (f.liveEnabled && f.buildState !is BuildState.Building) {
             if (f.pois.isEmpty()) return LiveSearchingField(mainActivity, interactive)
             return renderNearby(f, config, mainActivity, interactive, live = true)
         }

@@ -45,6 +45,7 @@ import io.resupply.karoo.data.ResupplyRepository
 import io.resupply.karoo.data.RoadbookCache
 import io.resupply.karoo.data.RouteState
 import io.resupply.karoo.data.WikipediaClient
+import io.resupply.karoo.data.keepsRouteLoaded
 import io.resupply.karoo.data.toRouteState
 import io.resupply.karoo.extension.toSymbol
 import io.resupply.karoo.data.AppManifest
@@ -189,12 +190,24 @@ class MainActivity : ComponentActivity() {
             if (!connected) return@connect
             lifecycleScope.launch {
                 progressSystem.streamDataFlow(DataType.Type.DISTANCE_TO_DESTINATION).collect { state ->
-                    toDestMeters.value = (state as? StreamState.Streaming)
+                    // Only overwrite on a real Streaming value. A transient non-Streaming state
+                    // (brief GPS loss, tunnel, momentary stream gap) must NOT null this out — the
+                    // last known distance-to-destination is the right thing to keep showing until a
+                    // fresh value or the route is actually removed (handled in the nav collector
+                    // below). Clearing it on every blip snapped the overview to the route-start
+                    // fallback mid-ride.
+                    (state as? StreamState.Streaming)
                         ?.dataPoint?.values?.get(DataType.Field.DISTANCE_TO_DESTINATION)
+                        ?.let { toDestMeters.value = it }
                 }
             }
             lifecycleScope.launch {
-                progressSystem.navStateFlow().collect { routeState.value = it.toRouteState() }
+                progressSystem.navStateFlow().collect { nav ->
+                    routeState.value = nav.toRouteState()
+                    // Drop the retained distance only when the route genuinely goes away, so the
+                    // stale remaining doesn't linger once there's no route to measure against.
+                    if (!nav.keepsRouteLoaded()) toDestMeters.value = null
+                }
             }
             lifecycleScope.launch {
                 progressSystem.locationFlow().collect { riderLocation.value = LatLng(it.lat, it.lng) }
@@ -251,6 +264,7 @@ class MainActivity : ComponentActivity() {
         val buildState by repository.buildState.collectAsStateWithLifecycle()
         val pois by repository.pois.collectAsStateWithLifecycle()
         val routeLength by repository.routeLengthMeters.collectAsStateWithLifecycle()
+        val routeElevationProfile by repository.routeElevationProfile.collectAsStateWithLifecycle()
         val toDest by toDestMeters.collectAsStateWithLifecycle()
         val avgSpeed by avgSpeedMps.collectAsStateWithLifecycle()
         val route by routeState.collectAsStateWithLifecycle()
@@ -317,6 +331,7 @@ class MainActivity : ComponentActivity() {
                 enabledCategories = config.enabledCategories,
                 safeWaterOnly = config.safeWaterOnly,
                 routeLengthMeters = routeLength,
+                routeElevationProfile = routeElevationProfile,
                 progressMeters = progressMeters,
                 avgSpeedMps = avgSpeed,
                 routeState = route,
@@ -519,10 +534,33 @@ class MainActivity : ComponentActivity() {
                     val detailArrival = progressMeters
                         ?.let { io.resupply.karoo.data.aheadMetersFor(poi, it) }
                         ?.let { io.resupply.karoo.data.etaArrival(it, avgSpeed) }
+                    // Stats-panel distance: route distance-ahead with progress; straight-line from
+                    // the rider in live/nearby mode (no route). Null = passed (progress but no
+                    // crossing ahead) → the panel's absolute fallbacks below don't fire for it.
+                    val detailAhead = if (routeLength > 0.0) {
+                        progressMeters?.let { io.resupply.karoo.data.aheadMetersFor(poi, it) }
+                    } else {
+                        rider?.let { io.resupply.karoo.util.haversine(it, LatLng(poi.lat, poi.lng)) }
+                    }
+                    val detailAscent = progressMeters?.let {
+                        io.resupply.karoo.data.ascentForPoi(poi, it, routeElevationProfile)
+                    }
+                    // Absolute fallbacks ONLY when there's no progress at all (no fix / not started),
+                    // so the panel still anchors the POI. With progress, a passed POI shows nothing
+                    // rather than a climb-from-start to a stop that's already behind the rider.
+                    val noProgress = routeLength > 0.0 && progressMeters == null
+                    val detailAlong = if (noProgress) poi.distancesAlongRoute.firstOrNull() else null
+                    val detailAscentFromStart = if (noProgress) {
+                        io.resupply.karoo.data.ascentFromStartForPoi(poi, routeElevationProfile)
+                    } else null
                     PoiDetailScreen(
                         poi = poi,
                         hasRoute = routeLength > 0,
                         arrival = detailArrival,
+                        aheadMeters = detailAhead,
+                        ascentMeters = detailAscent,
+                        alongMeters = detailAlong,
+                        ascentFromStartMeters = detailAscentFromStart,
                         useImperial = useImperial,
                         cachedDescription = repository.cachedDescription(poi.id),
                         loadDescription = { fetchDescription(poi) },

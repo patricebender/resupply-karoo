@@ -264,6 +264,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
             val hit = promoteCachedRoadbook(
                 routePolyline = state.routePolyline,
                 routeDistance = state.routeDistance,
+                routeElevationPolyline = state.routeElevationPolyline,
                 config = config,
                 installedRegions = regions,
                 repository = repository,
@@ -279,7 +280,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                     // publishes Building/Success/Error, so the field shows progress on its own.
                     // Skipped while live search is on — the rider asked for nearby, not this route.
                     BuildController(karooSystem, configStore, repository, roadbookCache, query.await())
-                        .rebuildForRoute(state.routePolyline, state.routeDistance)
+                        .rebuildForRoute(state.routePolyline, state.routeDistance, state.routeElevationPolyline)
                 } else {
                     // Auto-build off (or live search on): drop any prior roadbook so the field prompts
                     // to build for this route rather than showing the last route's places.
@@ -364,7 +365,7 @@ class ResupplyExtension : KarooExtension("resupply", BuildConfig.VERSION_NAME) {
                             val route = lastRoute ?: return@collect
                             if (repository.pois.value.isEmpty()) return@collect
                             BuildController(karooSystem, configStore, repository, roadbookCache, query.await())
-                                .rebuildForRoute(route.routePolyline, route.routeDistance)
+                                .rebuildForRoute(route.routePolyline, route.routeDistance, route.routeElevationPolyline)
                         }
                         else -> {
                             val center = lastFetchCenter ?: return@collect

@@ -114,10 +114,11 @@ fun behindMetersFor(poi: Poi, progressMeters: Double): Double? {
         .minOrNull()
 }
 
-// Imperial conversion for the data-field formatters. Defined here (not imported from ui/Format.kt)
-// to keep this JVM-only `data` file free of any `ui` dependency; the values match Format.kt.
-private const val METERS_PER_MILE = 1609.344
-private const val METERS_PER_FOOT = 0.3048
+// Imperial conversion for the `data`-package formatters. Kept here (not imported from ui/Format.kt)
+// so this JVM-only package carries no `ui` dependency; the values match Format.kt. internal so
+// sibling data files (e.g. RouteElevation) share one copy.
+internal const val METERS_PER_MILE = 1609.344
+internal const val METERS_PER_FOOT = 0.3048
 
 /**
  * Distance shown to the rider in the data field, in the compact no-space style the ~255dp width

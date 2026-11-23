@@ -18,18 +18,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.PinDrop
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Terrain
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.filled.WaterDrop
@@ -70,6 +73,8 @@ import io.resupply.karoo.R
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.PlacesClient
 import io.resupply.karoo.data.Poi
+import io.resupply.karoo.data.formatElevation
+import io.resupply.karoo.data.formatKm
 import kotlinx.coroutines.launch
 
 /**
@@ -88,6 +93,19 @@ fun PoiDetailScreen(
     // Estimated arrival time at this POI (distance-ahead + average speed), or null when it's not
     // ahead on a route / no live position. Drives the "open on arrival" ETA callout.
     arrival: java.util.Calendar?,
+    // Remaining distance (metres) still to ride to reach this POI, or null when passed / no live
+    // position. Drives the "to go" hero stat; distinct from the POI's absolute route mark
+    // (poi.distancesAlongRoute). Precomputed in MainActivity (see [aheadMetersFor]).
+    aheadMeters: Double?,
+    // Total ascent (metres, ≥0) from the rider to this POI along the route. Null when passed / no
+    // position / no elevation profile, so the cue is simply omitted. Precomputed in MainActivity
+    // (see [ascentForPoi]).
+    ascentMeters: Double?,
+    // Fallbacks for when there's no live progress (no GPS fix / not started): the POI's absolute
+    // route mark (metres along the route) and the climb from the route start. Let the stats card
+    // always show a distance + climb anchor; labeled differently so they don't read as "from here".
+    alongMeters: Double?,
+    ascentFromStartMeters: Double?,
     // Render distances in miles/feet instead of km/m (resolved units mode).
     useImperial: Boolean,
     cachedDescription: String?,
@@ -223,15 +241,32 @@ fun PoiDetailScreen(
                 Spacer(Modifier.height(6.dp))
                 Pill(etaPill.text, themedStatus(etaPill.color), Color.White)
             }
-            val routePills = buildList {
-                poi.distancesAlongRoute.firstOrNull()?.let { add("at ${formatDistance(it, useImperial)}") }
-                if (hasRoute && poi.detourMeters > 0) add("detour ${formatDistance(poi.detourMeters, useImperial)}")
-            }
-            if (routePills.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    routePills.forEach { OutlineChip(it) }
+            // The "to reach it" stats as a trip-computer readout: distance (hero), climb, detour —
+            // icon over bold value over a dim label, side by side in one card. With live progress
+            // these are measured FROM THE RIDER ("to go" / "climb"); with no fix or before the ride
+            // starts they fall back to absolute, position-independent numbers (the POI's route mark
+            // / total climb from the route start) so the card always has its anchors — the LABEL
+            // changes to say which it is. Detour is always absolute (no progress needed).
+            val stats = buildList {
+                // Distance: remaining when we have progress, else the absolute route mark.
+                if (aheadMeters != null) {
+                    add(RouteStat(Icons.Filled.Place, formatKm(aheadMeters, useImperial), "to go"))
+                } else if (hasRoute && alongMeters != null) {
+                    add(RouteStat(Icons.Filled.Place, formatRouteMark(alongMeters, useImperial), "on route"))
                 }
+                // Climb: from-here when we have progress, else total from the route start.
+                if (hasRoute && ascentMeters != null) {
+                    add(RouteStat(Icons.Filled.Terrain, formatElevation(ascentMeters, useImperial), "climb"))
+                } else if (hasRoute && ascentFromStartMeters != null) {
+                    add(RouteStat(Icons.Filled.Terrain, formatElevation(ascentFromStartMeters, useImperial), "climb total"))
+                }
+                if (hasRoute && poi.detourMeters > 0) {
+                    add(RouteStat(Icons.AutoMirrored.Filled.AltRoute, formatDistance(poi.detourMeters, useImperial), "detour"))
+                }
+            }
+            if (stats.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                RouteStatsRow(stats)
             }
 
             Spacer(Modifier.height(16.dp))
@@ -762,15 +797,15 @@ private data class StatusPill(val text: String, val color: Color)
 
 /**
  * The "open on arrival" pill: the ETA clock time plus a verdict against the POI's hours at that
- * time — "ETA 14:35 · open" (green), "· close" (amber, a close call), "· closed" (red), or a
- * plain "ETA 14:35" (grey) when there are no hours to judge. Mirrors the list row's [EtaLine].
+ * time — "ETA 14:35 · open" (green), "· tight" (amber, a close call), "· closed" (red), or a
+ * plain "ETA 14:35" (grey) when there are no hours to judge.
  */
 private fun etaPillFor(hours: OpeningHours.Hours?, arrival: java.util.Calendar): StatusPill {
     val clock = io.resupply.karoo.data.formatEtaClock(arrival)
     val status = hours?.arrivalStatus(arrival) ?: OpeningHours.ArrivalStatus.UNKNOWN
     return when (status) {
         OpeningHours.ArrivalStatus.OPEN -> StatusPill("ETA $clock · open", OpenGreen)
-        OpeningHours.ArrivalStatus.CLOSE_CALL -> StatusPill("ETA $clock · close", EtaCloseCallAmber)
+        OpeningHours.ArrivalStatus.CLOSE_CALL -> StatusPill("ETA $clock · tight", EtaCloseCallAmber)
         OpeningHours.ArrivalStatus.CLOSED -> StatusPill("ETA $clock · closed", ClosedRed)
         OpeningHours.ArrivalStatus.UNKNOWN -> StatusPill("ETA $clock", SeasonalGrey)
     }
@@ -859,6 +894,76 @@ private fun Pill(text: String, background: Color, contentColor: Color) {
 @Composable
 private fun OutlineChip(text: String) =
     Pill(text, MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+
+/** One cell of the route-stats readout: an icon, a bold value, a dim label beneath. */
+private data class RouteStat(val icon: ImageVector, val value: String, val label: String)
+
+/**
+ * The "to reach it" stats as a single trip-computer card: each [RouteStat] a centered
+ * icon/value/label column, split by thin vertical dividers. The first stat (distance to go) is the
+ * one the rider acts on, so its value is tinted primary; the rest stay neutral. Equal-weight cells
+ * so two or three stats share the width evenly and the card reads at a glance.
+ */
+@Composable
+private fun RouteStatsRow(stats: List<RouteStat>) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Row(
+            modifier = Modifier.padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            stats.forEachIndexed { i, stat ->
+                RouteStatCell(stat, hero = i == 0, modifier = Modifier.weight(1f))
+                if (i < stats.lastIndex) {
+                    Box(
+                        Modifier
+                            .height(32.dp)
+                            .width(1.dp)
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RouteStatCell(stat: RouteStat, hero: Boolean, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            stat.icon,
+            contentDescription = null,
+            tint = if (hero) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            stat.value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = if (hero) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+        Text(
+            stat.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+}
+
+/** The POI's fixed mark on the route, e.g. "km 42" / "mi 26" — its position along the route, not a
+ *  remaining distance. Whole units (a route mark doesn't need metre precision). */
+private fun formatRouteMark(alongMeters: Double, useImperial: Boolean): String =
+    if (useImperial) "mi ${Math.round(alongMeters / METERS_PER_MILE)}"
+    else "km ${Math.round(alongMeters / 1000.0)}"
 
 /** A rounded panel grouping related detail rows against a subtle tinted background. */
 @Composable

@@ -57,22 +57,6 @@ class BuildController(
     }
 
     /**
-     * Force a nearby (route-less) build around the rider, bypassing the nav-state read. Used by the
-     * route-mode "force live search" toggle: a route IS loaded, so [runBuild] would take the route
-     * branch — this runs the nearby path directly instead. The route roadbook in [RoadbookCache] is
-     * left untouched (nearby sets are never cached), so turning the toggle off restores it with no
-     * rebuild. Serialized with the other builds through the same [mutex].
-     */
-    suspend fun rebuildNearby(): BuildState = mutex.withLock {
-        return try {
-            buildNearby(configStore.config.first())
-        } catch (e: Exception) {
-            Timber.e(e, "nearby build failed")
-            fail(e.message ?: "Build failed")
-        }
-    }
-
-    /**
      * Build around the rider's current location. Needs a fix — with no satellite reception the
      * Karoo may have none, so we surface "waiting on GPS" rather than a silent hang. Clears any
      * route context (nearby has no route → no favorites, no cached set). Caller holds the [mutex].

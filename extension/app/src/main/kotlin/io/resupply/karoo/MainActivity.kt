@@ -256,8 +256,8 @@ class MainActivity : ComponentActivity() {
         val route by routeState.collectAsStateWithLifecycle()
         val rider by riderLocation.collectAsStateWithLifecycle()
         val nearbyLive by repository.nearbyLive.collectAsStateWithLifecycle()
-        val nearbyPaused by repository.nearbyPaused.collectAsStateWithLifecycle()
-        val liveOverride by repository.liveOverride.collectAsStateWithLifecycle()
+        // Live search on/off — the single persisted preference, read straight from config.
+        val liveEnabled = config.liveSearchEnabled
         // Live position along the route, mirroring the field's math
         // (UpcomingPoisDataType): route length − distance-to-destination. Null when we
         // have no route or no live stream — the overview then drops the position cues.
@@ -322,8 +322,7 @@ class MainActivity : ComponentActivity() {
                 routeState = route,
                 riderLocation = rider,
                 nearbyLive = nearbyLive,
-                nearbyPaused = nearbyPaused,
-                liveOverride = liveOverride,
+                liveEnabled = liveEnabled,
                 nearbyRadiusMeters = nearbyRadiusMeters,
                 useImperial = useImperial,
                 buildState = buildState,
@@ -337,6 +336,9 @@ class MainActivity : ComponentActivity() {
                     lifecycleScope.launch { configStore.setFavoritesOnly(!config.favoritesOnly) }
                 },
                 onBuild = ::runBuild,
+                // Turning live on from the overview just arms the persisted preference — the
+                // refresher searches on the next GPS tick. No build, so it never greys out the UI.
+                onEnableLive = { enableLiveSearch(true) },
                 onOpenSettings = { screen = Screen.Settings },
                 onOpenRegions = { screen = Screen.Regions(returnTo = Screen.Waybook) },
                 onOpenPoi = { screen = Screen.Detail(it.id) },
@@ -372,12 +374,9 @@ class MainActivity : ComponentActivity() {
                     // gets the "Stop live search" control instead. Gated on the route (not
                     // nearbyLive) so the mode is stable from the moment there's no route.
                     routeLoaded = route is RouteState.Loaded,
-                    // In route mode the toggle reflects the forced-live override; route-less it
-                    // reflects pause state. hasFix gates whether live can actually run.
-                    liveOverride = liveOverride,
-                    // Live search on/off reflects the rider's intent (on unless paused); hasFix
-                    // gates whether it can actually run. Together they drive the 3-state toggle.
-                    liveOn = !nearbyPaused,
+                    // Live search on/off — one persisted preference across both modes. hasFix gates
+                    // whether it can actually run; together they drive the toggle's look.
+                    liveEnabled = liveEnabled,
                     hasFix = rider != null,
                     pois = pois,
                     installedSummary = installedSummary(installedRegions),
@@ -425,30 +424,11 @@ class MainActivity : ComponentActivity() {
                             configStore.clearCurrentRouteKey()
                         }
                     },
-                    onToggleLive = { turnOn ->
-                        if (route is RouteState.Loaded) {
-                            // Route mode: force live search on/off over the loaded route.
-                            if (turnOn) {
-                                // Keep the route roadbook in cache (untouched); show nearby instead.
-                                // The override flips the refresher gate on, and a direct nearby
-                                // build gives an immediate result rather than waiting for movement.
-                                repository.setLiveOverride(true)
-                                runNearbyBuild()
-                            } else {
-                                // Back to the route: the extension restores its cached roadbook when
-                                // the override clears (no rebuild). See watchLiveOverride.
-                                repository.setLiveOverride(false)
-                            }
-                        } else if (turnOn) {
-                            // Route-less resume: a fresh nearby build (which clears the pause)
-                            // repopulates and the refresher/ticker take over tracking again.
-                            runBuild()
-                        } else {
-                            // Route-less pause → pre-search state (POIs cleared, not live, refresher
-                            // stood down). The overview falls back to its Find invitation.
-                            repository.pauseNearby()
-                        }
-                    },
+                    // Live search is just a persisted preference: write it and let the extension's
+                    // watchLiveSearch own every roadbook/visibility effect (clear, restore, Live flag).
+                    // No build is kicked off here — a build sets BuildState.Building, which would grey
+                    // out the build-input settings rows until it lands.
+                    onToggleLive = { turnOn -> enableLiveSearch(turnOn) },
                     onOpenRegions = { screen = Screen.Regions(returnTo = Screen.Settings) },
                     onOpenPrivacy = { screen = Screen.PrivacyData },
                     onOpenFeedback = { screen = Screen.Feedback },
@@ -617,11 +597,29 @@ class MainActivity : ComponentActivity() {
         if (resolved) runBuild()
     }
 
-    /** Build from the app by spinning up a short-lived Karoo connection. */
+    /**
+     * Turn live (nearby) search on/off by writing the persisted preference. Deliberately does NOT
+     * build: the extension's watchLiveSearch owns the roadbook effects (clear/restore/Live flag) and
+     * the background refresher starts searching on its own, so flipping the preference never enters a
+     * BuildState.Building that would grey out the build-input settings rows. The lone UI nicety is
+     * clearing a stale build error on ON, so the overview shows the searching face rather than a
+     * leftover error while the refresher spins up (the refresher also clears it once a fix arrives,
+     * but not before — so we do it here for the no-fix case).
+     */
+    private fun enableLiveSearch(on: Boolean) {
+        lifecycleScope.launch { configStore.setLiveSearchEnabled(on) }
+        if (on && repository.buildState.value is BuildState.Error) {
+            repository.setBuildState(BuildState.Idle)
+        }
+    }
+
+    /**
+     * Build from the app by spinning up a short-lived Karoo connection. Builds whatever context
+     * applies (route roadbook if a route is loaded, else a nearby set) and does NOT touch the live
+     * search preference — that's managed only by [enableLiveSearch]. Used by the route face's "Find
+     * places" button and the data-field entry.
+     */
     private fun runBuild() {
-        // A manual build is the rider starting a search again — lift any live-search pause so the
-        // refresher resumes tracking once this build lands (route-less case).
-        repository.setNearbyPaused(false)
         repository.setBuildState(BuildState.Building("Connecting…"))
         val system = KarooSystemService(applicationContext)
         system.connect { connected ->
@@ -631,26 +629,6 @@ class MainActivity : ComponentActivity() {
             }
             lifecycleScope.launch {
                 BuildController(system, configStore, repository, roadbookCache, query.await()).runBuild()
-                system.disconnect()
-            }
-        }
-    }
-
-    /**
-     * Force a nearby build even though a route is loaded — the route-mode "live search" toggle. Like
-     * [runBuild] but calls [BuildController.rebuildNearby] so it always builds around the rider, not
-     * along the route. The route roadbook stays cached and reappears when the toggle is turned off.
-     */
-    private fun runNearbyBuild() {
-        repository.setBuildState(BuildState.Building("Connecting…"))
-        val system = KarooSystemService(applicationContext)
-        system.connect { connected ->
-            if (!connected) {
-                repository.setBuildState(BuildState.Error("Karoo not connected"))
-                return@connect
-            }
-            lifecycleScope.launch {
-                BuildController(system, configStore, repository, roadbookCache, query.await()).rebuildNearby()
                 system.disconnect()
             }
         }

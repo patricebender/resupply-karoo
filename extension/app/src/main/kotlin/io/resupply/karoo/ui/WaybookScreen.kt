@@ -136,13 +136,11 @@ fun WaybookScreen(
     // Nearby POIs are being auto-refreshed as the rider moves → the proximity band shows a
     // "Live" indicator.
     nearbyLive: Boolean,
-    // Rider has paused route-less live search. Drives the empty face: paused → the "find live
-    // resupply" invitation; not paused (actively searching) → "No places nearby".
-    nearbyPaused: Boolean,
-    // Rider forced live (nearby) search on over a loaded route. When set, the empty face uses the
-    // nearby (live) face — including its "Waiting for GPS signal" state — instead of the route hero,
-    // so a no-fix live session reads consistently with a route-less live session.
-    liveOverride: Boolean,
+    // Live (nearby) search on/off — one persisted preference across both modes. Drives the empty
+    // face: off → the "find live resupply" invitation; on → the nearby (live) face (including its
+    // "Waiting for GPS signal" state) instead of the route hero, so a live session over a route reads
+    // consistently with a route-less one.
+    liveEnabled: Boolean,
     // The detour radius (meters) — sets the nearby proximity band's right-edge scale.
     nearbyRadiusMeters: Int,
     // Render distances in miles/feet instead of km/m (resolved units mode).
@@ -157,7 +155,13 @@ fun WaybookScreen(
     installedRegions: Set<String>,
     onToggleFavorite: (Poi, Boolean) -> Unit,
     onToggleFavoritesFilter: () -> Unit,
+    // Build the roadbook for the loaded route (the route face's "Find places" button). A deliberate
+    // one-shot build, so the route face shows its loading state while it runs.
     onBuild: () -> Unit,
+    // Turn live (nearby) search on (the route-less face's button). Just arms the persisted
+    // preference — the background refresher does the searching — so it never blocks the UI with a
+    // build state.
+    onEnableLive: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRegions: () -> Unit,
     onOpenPoi: (Poi) -> Unit,
@@ -254,13 +258,14 @@ fun WaybookScreen(
                 routeState,
                 buildState,
                 hasFix = riderLocation != null,
-                paused = nearbyPaused,
-                // Forced-live over a route → treat the empty face as live (nearby), so no-GPS shows
-                // the "Waiting for GPS signal" face instead of the route hero's "Find places".
-                liveOverride = liveOverride,
+                // Live off → the "find live resupply" invitation; live on → the nearby (live) face,
+                // so no-GPS shows "Waiting for GPS signal" rather than the route hero's "Find places".
+                paused = !liveEnabled,
+                liveOn = liveEnabled,
                 hasData = installedRegions.isNotEmpty(),
                 useImperial = useImperial,
                 onBuild = onBuild,
+                onEnableLive = onEnableLive,
                 onOpenRegions = onOpenRegions,
             )
             return@Column
@@ -1035,23 +1040,24 @@ private fun EmptyState(
     // Whether a GPS fix is available. With no route, the nearby face waits on this: until a fix
     // lands it shows "Waiting for GPS signal" with the Find button disabled.
     hasFix: Boolean,
-    // Rider paused live search → the nearby face shows the invitation instead of "No places nearby".
+    // Live search off → the nearby face shows the invitation instead of "No places nearby".
     paused: Boolean,
-    // Rider forced live search on over a loaded route → use the nearby (live) face regardless of
-    // the loaded route, so a no-fix live session shows "Waiting for GPS signal" like route-less live.
-    liveOverride: Boolean,
+    // Live search on → use the nearby (live) face regardless of any loaded route, so a no-fix live
+    // session shows "Waiting for GPS signal" rather than the route hero's "Find places".
+    liveOn: Boolean,
     // Whether any region data is installed. With no data, the route face disables Find and shows a
     // hint pointing the rider to Settings → Data.
     hasData: Boolean,
     // Render distances in miles/feet instead of km/m (resolved units mode).
     useImperial: Boolean,
     onBuild: () -> Unit,
+    onEnableLive: () -> Unit,
     onOpenRegions: () -> Unit,
 ) {
-    // Forced-live takes the nearby face even with a route loaded: the rider chose live search, so
+    // Live search takes the nearby face even with a route loaded: the rider chose live search, so
     // its states (waiting-on-GPS, searching, none-nearby) are the consistent ones — not the route
     // hero's "Find places".
-    val loaded = if (liveOverride) null else routeState as? RouteState.Loaded
+    val loaded = if (liveOn) null else routeState as? RouteState.Loaded
     // Otherwise pick the face by whether a ROUTE is loaded, not by whether a build is running: a
     // nearby build (no route) must stay on the nearby face and morph in place, or the button would
     // vanish and be replaced by the route-oriented "Tracing your route…" copy — an abrupt swap
@@ -1059,7 +1065,7 @@ private fun EmptyState(
     if (loaded != null) {
         RouteReadyState(loaded, buildState, hasData, useImperial, onBuild, onOpenRegions)
     } else {
-        NearbyReadyState(buildState, hasFix, paused, onBuild)
+        NearbyReadyState(buildState, hasFix, paused, onEnableLive)
     }
 }
 
@@ -1139,7 +1145,7 @@ private fun RouteReadyState(route: RouteState.Loaded?, buildState: BuildState, h
                 // Search ran, found nothing — hint that a region may be missing, but keep Find.
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Nothing found — try downloading the region for this route",
+                    "Nothing found. Try downloading the region for this route",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -1180,10 +1186,11 @@ private fun routeSubtitle(route: RouteState.Loaded?, useImperial: Boolean): Stri
  * animation) never jumps. The CTA both starts/resumes a build and previews the header's "live" chip.
  */
 @Composable
-private fun NearbyReadyState(buildState: BuildState, hasFix: Boolean, paused: Boolean, onBuild: () -> Unit) {
+private fun NearbyReadyState(buildState: BuildState, hasFix: Boolean, paused: Boolean, onEnableLive: () -> Unit) {
     val building = buildState is BuildState.Building
-    // No fix yet: we're waiting on GPS. The button stays disabled until one arrives.
-    val waitingForGps = !hasFix && !building
+    // No fix yet while live is ON: we're waiting on GPS. Never shown when live is off ([paused]) —
+    // the rider chose not to search, so there's nothing to wait for; they get the invitation instead.
+    val waitingForGps = !paused && !hasFix && !building
     // Live and searching (not paused, not waiting, not building) but we reached the empty face →
     // nothing nearby resolves under the current categories. Reassure rather than imply an error.
     val noneNearby = hasFix && !paused && !building
@@ -1206,15 +1213,15 @@ private fun NearbyReadyState(buildState: BuildState, hasFix: Boolean, paused: Bo
             )
         }
         Spacer(Modifier.height(16.dp))
-        // The title tracks the state: waiting on GPS, the live build phase, "No places nearby"
-        // when live but nothing resolves, else the paused invitation. The pulsing mark above
-        // carries the motion, so the title itself is static.
+        // The title tracks the state: waiting on GPS (live on, no fix), the live build phase,
+        // "No places nearby" when live but nothing resolves, else live is off. The pulsing mark
+        // above carries the motion, so the title itself is static.
         Text(
             when {
                 waitingForGps -> "Waiting for GPS signal…"
                 buildState is BuildState.Building -> buildState.phase
                 noneNearby -> "No places nearby"
-                else -> "Find places near you"
+                else -> "Live mode is disabled"
             },
             style = MaterialTheme.typography.titleMedium,
             textAlign = TextAlign.Center,
@@ -1240,7 +1247,9 @@ private fun NearbyReadyState(buildState: BuildState, hasFix: Boolean, paused: Bo
         // inert while building, while waiting for a fix (nothing to search around yet), and in the
         // "No places nearby" state — there live search is already running and auto-refreshing, so a
         // manual re-search would be a no-op that contradicts the "we'll keep looking" copy.
-        FindLiveResupplyButton(onClick = onBuild, enabled = !building && !waitingForGps && !noneNearby)
+        // The only actionable state here is "live off → turn it on"; once on, the refresher is
+        // already searching (waiting on GPS or keeping looking), so the button goes inert.
+        FindLiveResupplyButton(onClick = onEnableLive, enabled = paused)
     }
 }
 

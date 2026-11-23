@@ -6,6 +6,7 @@ import io.resupply.karoo.data.PoiDatabase
 import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.ResupplyRepository
 import io.resupply.karoo.data.RoadbookCache
+import io.resupply.karoo.util.decodeElevationProfile
 import io.resupply.karoo.util.sha256
 import timber.log.Timber
 
@@ -43,6 +44,7 @@ fun routeBuildKey(routePolyline: String, config: ResupplyConfig, installedRegion
 suspend fun promoteCachedRoadbook(
     routePolyline: String,
     routeDistance: Double,
+    routeElevationPolyline: String?,
     config: ResupplyConfig,
     installedRegions: Set<String>,
     repository: ResupplyRepository,
@@ -52,7 +54,7 @@ suspend fun promoteCachedRoadbook(
     val buildKey = routeBuildKey(routePolyline, config, installedRegions)
     val pois = roadbookCache.get(buildKey)?.takeIf { it.isNotEmpty() } ?: return false
     Timber.d("route load: realizing ${pois.size} cached POIs (no rebuild)")
-    promoteRoadbook(pois, routePolyline, routeDistance, repository, configStore)
+    promoteRoadbook(pois, routePolyline, routeDistance, routeElevationPolyline, repository, configStore)
     return true
 }
 
@@ -67,10 +69,12 @@ suspend fun promoteRoadbook(
     pois: List<Poi>,
     routePolyline: String,
     routeDistance: Double,
+    routeElevationPolyline: String?,
     repository: ResupplyRepository,
     configStore: ConfigStore,
 ) {
     repository.setRouteLength(routeDistance)
+    repository.setRouteElevationProfile(decodeElevationProfile(routeElevationPolyline))
     repository.setPois(pois)
     configStore.setCurrentRouteKey(sha256(routePolyline))
 }

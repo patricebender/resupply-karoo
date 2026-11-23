@@ -17,6 +17,24 @@ const val METERS_PER_DEG_LAT = 111_320.0
 fun decodeLatLng(encoded: String, precision: Int = 5): List<LatLng> =
     decodePolyline(encoded, precision).map { LatLng(it.first, it.second) }
 
+/**
+ * Decode the Karoo's route elevation polyline — (distanceAlongRoute, elevation) pairs in metres,
+ * Google-encoded at **precision 1** (coarser than the route's own precision-5 lat/lng) — into an
+ * [io.resupply.karoo.data.ElevationProfile]. Returns [ElevationProfile.EMPTY] for a blank string
+ * (no elevation available), so callers can treat "no data" uniformly. Samples are kept sorted by
+ * distance (the profile's lookups assume ascending distances); an empty or 1-point profile is fine.
+ */
+fun decodeElevationProfile(encoded: String?): io.resupply.karoo.data.ElevationProfile {
+    if (encoded.isNullOrEmpty()) return io.resupply.karoo.data.ElevationProfile.EMPTY
+    val pairs = decodePolyline(encoded, precision = 1) // (distance, elevation)
+    if (pairs.isEmpty()) return io.resupply.karoo.data.ElevationProfile.EMPTY
+    val sorted = pairs.sortedBy { it.first }
+    return io.resupply.karoo.data.ElevationProfile(
+        distances = DoubleArray(sorted.size) { sorted[it].first },
+        elevations = DoubleArray(sorted.size) { sorted[it].second },
+    )
+}
+
 /** Great-circle distance in meters. Mirrors backend polyline.ts. */
 fun haversine(a: LatLng, b: LatLng): Double {
     val R = 6_371_000.0

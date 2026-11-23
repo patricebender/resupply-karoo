@@ -12,6 +12,7 @@ import io.resupply.karoo.data.ResupplyRepository
 import io.resupply.karoo.util.LatLng
 import io.resupply.karoo.util.awaitOnce
 import io.resupply.karoo.util.cumulativeDistances
+import io.resupply.karoo.util.decodeElevationProfile
 import io.resupply.karoo.util.decodeLatLng
 import io.resupply.karoo.util.sha256
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,10 @@ class BuildController(
 
             when (nav) {
                 is OnNavigationState.NavigationState.NavigatingRoute ->
-                    buildForRoute(nav.routePolyline, nav.routeDistance, config, installedRegions)
+                    buildForRoute(
+                        nav.routePolyline, nav.routeDistance, nav.routeElevationPolyline,
+                        config, installedRegions,
+                    )
                 else -> buildNearby(config)
             }
         } catch (e: Exception) {
@@ -62,7 +66,7 @@ class BuildController(
      * route context (nearby has no route → no favorites, no cached set). Caller holds the [mutex].
      */
     private suspend fun buildNearby(config: io.resupply.karoo.data.ResupplyConfig): BuildState {
-        repository.clear()
+        repository.clear() // also clears the elevation profile — nearby has no route
         configStore.clearCurrentRouteKey()
         publish(BuildState.Building("Waiting for GPS…"))
         val loc = withTimeoutOrNull(LOCATION_READ_TIMEOUT_MS) {
@@ -84,12 +88,16 @@ class BuildController(
      * time out and fall through to a nearby build, silently replacing the route roadbook. Serialized
      * with [runBuild] through the same [mutex] so it can't race a concurrent build.
      */
-    suspend fun rebuildForRoute(routePolyline: String, routeDistance: Double): BuildState =
+    suspend fun rebuildForRoute(
+        routePolyline: String,
+        routeDistance: Double,
+        routeElevationPolyline: String?,
+    ): BuildState =
         mutex.withLock {
             val config = configStore.config.first()
             val installedRegions = configStore.installedRegions.first()
             try {
-                buildForRoute(routePolyline, routeDistance, config, installedRegions)
+                buildForRoute(routePolyline, routeDistance, routeElevationPolyline, config, installedRegions)
             } catch (e: Exception) {
                 Timber.e(e, "route rebuild failed")
                 fail(e.message ?: "Build failed")
@@ -105,17 +113,19 @@ class BuildController(
     private suspend fun buildForRoute(
         routePolyline: String,
         routeDistance: Double,
+        routeElevationPolyline: String?,
         config: io.resupply.karoo.data.ResupplyConfig,
         installedRegions: Set<String>,
     ): BuildState {
         val buildKey = routeBuildKey(routePolyline, config, installedRegions)
 
         // Cache hit: this route with these inputs was built before — reuse the stored set and skip
-        // the DB query. Promotion re-derives this route's favorites, so its stars come back too.
+        // the DB query. Promotion realizes the route's length, POIs, favorites AND elevation profile
+        // (see promoteRoadbook) — the same realization the route-load fast path uses.
         val cached = roadbookCache.get(buildKey)
         if (cached != null && cached.isNotEmpty()) {
             Timber.d("build cache hit: reusing ${cached.size} POIs for route")
-            promoteRoadbook(cached, routePolyline, routeDistance, repository, configStore)
+            promoteRoadbook(cached, routePolyline, routeDistance, routeElevationPolyline, repository, configStore)
             return succeed(cached.size, byCategory(cached))
         }
 
@@ -124,8 +134,9 @@ class BuildController(
         publish(BuildState.Building())
         val route = decodeLatLng(routePolyline)
         Timber.d("build along route: ${route.size} pts, detour=${config.detourMeters}, smart=${config.smartDistance}")
-        // Cache the route length so the Waybook strip can place POI dots.
+        // Cache the route length + elevation profile so the strip/fields read them for this route.
         repository.setRouteLength(cumulativeDistances(route).lastOrNull() ?: 0.0)
+        repository.setRouteElevationProfile(decodeElevationProfile(routeElevationPolyline))
         val pois = withContext(Dispatchers.IO) {
             query.queryCorridor(route, config.detourMeters, config.smartDistance)
         }

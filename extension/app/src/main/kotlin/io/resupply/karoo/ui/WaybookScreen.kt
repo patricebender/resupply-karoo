@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,9 +31,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Terrain
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
@@ -70,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import io.resupply.karoo.R
 import io.resupply.karoo.build.BuildState
 import io.resupply.karoo.data.Category
+import io.resupply.karoo.data.ElevationProfile
 import io.resupply.karoo.data.ResupplyConfig
 import io.resupply.karoo.data.OpeningHours
 import io.resupply.karoo.data.Poi
@@ -77,7 +81,10 @@ import io.resupply.karoo.data.PoiSource
 import io.resupply.karoo.data.aheadMetersFor
 import io.resupply.karoo.data.behindMetersFor
 import io.resupply.karoo.data.RouteState
+import io.resupply.karoo.data.ascentForPoi
+import io.resupply.karoo.data.ascentFromStartForPoi
 import io.resupply.karoo.data.etaArrival
+import io.resupply.karoo.data.formatAscentCompact
 import io.resupply.karoo.data.formatEtaClock
 import io.resupply.karoo.data.formatKm
 import io.resupply.karoo.data.poiSourceFor
@@ -90,6 +97,11 @@ import kotlin.math.roundToInt
 // jumps snap instantly, so a discontinuity re-syncs the list without the range bracket
 // visibly crawling toward the (instantly-moved) strip bike glyph.
 private const val SMOOTH_FOLLOW_ROWS = 3
+
+// Fixed width of a POI row's trailing control (favorite star / chevron). Much tighter than the
+// default 48dp IconButton target so the rail's extra width doesn't cost the middle column — the
+// star glyph is 24dp and stays comfortably tappable.
+private val TRAILING_WIDTH = 28.dp
 
 // True when the active theme is dark (dark surface). Drives the logo swap below.
 @Composable
@@ -120,6 +132,9 @@ fun WaybookScreen(
     // Only bites when the water category is enabled; the build keeps every water POI.
     safeWaterOnly: Boolean,
     routeLengthMeters: Double,
+    // The route's elevation profile, for the per-row signed climb-to-POI cue. Empty on a nearby
+    // build or a route with no elevation data — the row then omits the climb line.
+    routeElevationProfile: ElevationProfile,
     // Live along-route position of the rider, or null when there's no route/live
     // stream. Drives the timeline marker, per-row distance-ahead, and the initial
     // scroll to the first POI ahead.
@@ -509,13 +524,29 @@ fun WaybookScreen(
                 } else {
                     null
                 }
+                // Climb to a POI on a route: from the rider when we have progress, else the total
+                // from the route start (position-independent fallback for no GPS / not started).
+                val ascentMeters: Double? = when {
+                    source != PoiSource.ROUTE -> null
+                    progressMeters != null -> ascentForPoi(poi, progressMeters, routeElevationProfile)
+                    else -> ascentFromStartForPoi(poi, routeElevationProfile)
+                }
+                // Absolute route mark, shown in the distance slot when there's no live progress so
+                // the row still anchors the POI on the route (no GPS / not started). Null for nearby.
+                val alongMeters = if (source == PoiSource.ROUTE && ahead == null && behind == null) {
+                    poi.distancesAlongRoute.firstOrNull()
+                } else {
+                    null
+                }
                 PoiRow(
                     poi = poi,
                     hours = hoursOf(poi),
                     hasRoute = routeLengthMeters > 0,
                     aheadMeters = ahead,
                     behindMeters = behind,
+                    alongMeters = alongMeters,
                     arrival = arrival,
+                    ascentMeters = ascentMeters,
                     onClick = { onOpenPoi(poi) },
                     // Route mode: a per-row star (trailing) to favorite straight from the list.
                     // Live mode: no star (favorites are route-only) — the chevron stays instead.
@@ -524,7 +555,7 @@ fun WaybookScreen(
                     onToggleFavorite = { fav -> onToggleFavorite(poi, fav) },
                     useImperial = useImperial,
                 )
-                HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
+                HorizontalDivider()
             }
         }
     }
@@ -733,9 +764,15 @@ private fun PoiRow(
     aheadMeters: Double?,
     // Meters behind the rider once passed (≥0); null when still ahead / no position.
     behindMeters: Double?,
+    // The POI's absolute route mark (metres along the route), shown in the distance slot as a
+    // fallback when there's no live progress (no GPS / not started). Null when ahead/behind applies.
+    alongMeters: Double?,
     // Estimated arrival clock time for a POI ahead on a route; null when not applicable (nearby,
     // passed, or no live speed). Drives the "open on arrival" ETA line.
     arrival: java.util.Calendar?,
+    // Total climb (metres, ≥0) to reach this POI: from the rider with live progress, else the total
+    // from the route start (the caller resolves which). Null when nearby / no profile → chip omitted.
+    ascentMeters: Double?,
     onClick: () -> Unit,
     // Route mode: show the trailing star to favorite from the list. Live mode: false → the
     // chevron shows instead (favorites are route-only).
@@ -755,27 +792,23 @@ private fun PoiRow(
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .alpha(rowAlpha)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            // Tight left edge (shifts the whole row left → more room for the name/ETA) and a small
+            // right edge so the star rides near the screen edge rather than floating inward.
+            .padding(start = 8.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Left rail: the category icon (with the open/closed status badge) stacked over
-        // the route distance to/from this POI and the detour, so all three live on the narrow
-        // left edge and the name/type/ETA text gets the full remaining width (keeping rows to
-        // at most three lines on the right).
+        // Left rail: just the category icon. The reach stats (distance/climb/detour) used to live
+        // here, but a fixed-width rail couldn't fit "distance + climb" inline for every value — so
+        // they moved into the middle column as a compact stats strip (below), a mini version of the
+        // detail view's trip-computer panel. The rail now holds the icon + the ETA clock beneath it.
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             StatusIcon(style = style, hours = hours)
-            DistanceLabel(aheadMeters = aheadMeters, behindMeters = behindMeters, useImperial = useImperial)
-            // Detour (only meaningful along a route): a compact "+120m" under the distance.
-            if (hasRoute && poi.detourMeters > 0) {
-                Text(
-                    "+${formatDistance(poi.detourMeters, useImperial)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
+            // ETA under the icon: just the clock time, its open/tight/closed status carried by COLOR
+            // (the word would never fit here and is redundant beside the tint). Frees a line from the
+            // middle column → shorter rows. Only when we have an arrival estimate.
+            if (arrival != null) EtaClock(arrival = arrival, hours = hours)
         }
-        Spacer(Modifier.size(16.dp))
+        Spacer(Modifier.size(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 poi.name ?: "Unnamed",
@@ -783,25 +816,36 @@ private fun PoiRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Line 2: type. Line 3 (when closed): "opens Mon 08:00".
+            // Type. When closed, an "opens Mon 08:00" line follows.
             TypeAndOpensLine(hours = hours, typeLabel = labelForPoi(poi))
-            // "Open on arrival": ETA clock time, tinted by whether the POI will be open then —
-            // green (open), amber (a close call), grey (no hours to judge).
-            if (arrival != null) EtaLine(arrival = arrival, hours = hours)
+            // Compact reach-stats strip — distance, climb, detour as icon+value chips on one short
+            // line, the list-sized echo of the detail panel. Short so the row stays compact.
+            RouteStatsStrip(
+                aheadMeters = aheadMeters,
+                behindMeters = behindMeters,
+                alongMeters = alongMeters,
+                ascentMeters = if (hasRoute) ascentMeters else null,
+                detourMeters = if (hasRoute) poi.detourMeters else 0,
+                useImperial = useImperial,
+            )
         }
         // Route mode: a star to favorite this POI straight from the list (the row itself still
         // opens the detail). Live mode: the plain chevron, since favorites don't apply there.
+        // Trailing control pinned to a tight width so it can't widen the 3rd column at the ETA
+        // line's expense — the default IconButton reserves a 48dp touch target, too wide here.
         if (favoritable) {
             StarToggle(
                 filled = isFavorite,
                 contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
                 onClick = { onToggleFavorite(!isFavorite) },
+                modifier = Modifier.size(TRAILING_WIDTH),
             )
         } else {
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(TRAILING_WIDTH),
             )
         }
     }
@@ -854,28 +898,64 @@ private fun StatusIcon(style: CategoryStyle, hours: OpeningHours.Hours?) {
 }
 
 /**
- * Compact route-distance label sitting under the icon on the left rail: bold primary
- * `4.2km` for a POI ahead (distance to reach it), or a dim `↓ 2.1km` for one already
- * passed (a down-arrow reads as "behind you" without spending a second line). Nothing
- * when there's no live position. A little top padding separates it from the icon.
+ * Compact reach-stats strip for a list row — the list-sized echo of the detail view's
+ * trip-computer panel. One short line of icon+value chips: distance (primary, the hero), climb,
+ * detour. Measured FROM THE RIDER with live progress ("4.2km", "↑86m"); falls back to absolute
+ * numbers without a fix (the POI's route mark "km42", total climb "Σ…"). Each chip appears only
+ * when it has a value, so a flat/detour-free POI just shows distance. Deliberately small (labelSmall)
+ * so the row stays compact — the detail panel carries the big readout.
  */
 @Composable
-private fun DistanceLabel(aheadMeters: Double?, behindMeters: Double?, useImperial: Boolean) {
-    when {
-        aheadMeters != null -> Text(
-            formatKm(aheadMeters, useImperial),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
+private fun RouteStatsStrip(
+    aheadMeters: Double?,
+    behindMeters: Double?,
+    alongMeters: Double?,
+    ascentMeters: Double?,
+    detourMeters: Int,
+    useImperial: Boolean,
+) {
+    Row(
+        modifier = Modifier.padding(top = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // Distance chip — remaining ahead (primary hero), behind (dim ↓), or the absolute mark.
+        when {
+            aheadMeters != null ->
+                StatChip(Icons.Filled.Place, formatKm(aheadMeters, useImperial), hero = true)
+            behindMeters != null ->
+                StatChip(Icons.Filled.Place, "↓${formatKm(behindMeters, useImperial)}", hero = false)
+            alongMeters != null ->
+                // No-progress fallback: the POI's absolute route position, formatted like any
+                // distance. Identical to the live chip but dim (not primary) — the only cue that
+                // it's a static position, not a live "to go". The Place icon carries the meaning.
+                StatChip(Icons.Filled.Place, formatKm(alongMeters, useImperial), hero = false)
+        }
+        // Climb chip — "↑86m". Same in the live and no-progress cases; the ↑ + Terrain icon speak
+        // for themselves, and the chip's dim color already distinguishes the fallback state.
+        if (ascentMeters != null) {
+            StatChip(Icons.Filled.Terrain, "↑${formatAscentCompact(ascentMeters, useImperial)}", hero = false)
+        }
+        // Detour chip — cross-track off the route to reach it.
+        if (detourMeters > 0) {
+            StatChip(Icons.AutoMirrored.Filled.AltRoute, "+${formatDistance(detourMeters, useImperial)}", hero = false)
+        }
+    }
+}
+
+/** One icon+value chip in [RouteStatsStrip]. [hero] tints it primary (the distance); the rest are dim. */
+@Composable
+private fun StatChip(icon: androidx.compose.ui.graphics.vector.ImageVector, value: String, hero: Boolean) {
+    val color = if (hero) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
+        Spacer(Modifier.size(2.dp))
+        Text(
+            value,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (hero) FontWeight.Bold else FontWeight.Normal,
+            color = color,
             maxLines = 1,
-            modifier = Modifier.padding(top = 3.dp),
-        )
-        behindMeters != null -> Text(
-            "↓ ${formatKm(behindMeters, useImperial)}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            modifier = Modifier.padding(top = 3.dp),
         )
     }
 }
@@ -889,24 +969,37 @@ private fun DistanceLabel(aheadMeters: Double?, behindMeters: Double?, useImperi
  * wolf on a jittery average speed.
  */
 @Composable
-private fun EtaLine(arrival: java.util.Calendar, hours: OpeningHours.Hours?) {
+private fun EtaClock(arrival: java.util.Calendar, hours: OpeningHours.Hours?) {
     val status = remember(hours, arrival.timeInMillis) {
         hours?.arrivalStatus(arrival) ?: OpeningHours.ArrivalStatus.UNKNOWN
     }
-    val (color, suffix) = when (status) {
-        OpeningHours.ArrivalStatus.OPEN -> openGreen to " · open"
-        OpeningHours.ArrivalStatus.CLOSE_CALL -> EtaCloseCallAmber to " · close"
-        OpeningHours.ArrivalStatus.CLOSED -> closedRed to " · closed"
-        OpeningHours.ArrivalStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant to ""
+    // The clock is tinted by the arrival status; a small word beneath names it (open / tight /
+    // closed). That label also uses the otherwise-empty space under the clock to match the height
+    // of rows whose middle carries an "opens …" line — so every row is the same height.
+    val (color, label) = when (status) {
+        OpeningHours.ArrivalStatus.OPEN -> openGreen to "open"
+        OpeningHours.ArrivalStatus.CLOSE_CALL -> EtaCloseCallAmber to "tight"
+        OpeningHours.ArrivalStatus.CLOSED -> closedRed to "closed"
+        OpeningHours.ArrivalStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant to "ETA"
     }
-    Text(
-        "ETA ${formatEtaClock(arrival)}$suffix",
-        style = MaterialTheme.typography.bodySmall,
-        color = color,
-        fontWeight = FontWeight.Medium,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(top = 3.dp),
+    ) {
+        Text(
+            formatEtaClock(arrival),
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1,
+        )
+    }
 }
 
 /**

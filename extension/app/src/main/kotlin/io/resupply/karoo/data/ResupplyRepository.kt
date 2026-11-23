@@ -40,6 +40,15 @@ class ResupplyRepository private constructor(filesDir: File) {
     val routeLengthMeters: StateFlow<Double> = _routeLengthMeters.asStateFlow()
 
     /**
+     * The elevation profile of the route the current POIs were built against — decoded once per
+     * build from the Karoo's `routeElevationPolyline`, so the climb-to-POI cue is a cheap lookup,
+     * not per-frame decoding. [ElevationProfile.EMPTY] for a /nearby build (no route) or a route
+     * with no elevation data; set alongside the POIs/length whenever a roadbook becomes current.
+     */
+    private val _routeElevationProfile = MutableStateFlow(ElevationProfile.EMPTY)
+    val routeElevationProfile: StateFlow<ElevationProfile> = _routeElevationProfile.asStateFlow()
+
+    /**
      * Whether nearby POIs are being kept fresh automatically as the rider moves (route-less
      * background refresh). Drives the overview's steady "Live" badge. Set true by the
      * refresher once it's tracking, false when a route loads or the roadbook is cleared. Not
@@ -81,6 +90,10 @@ class ResupplyRepository private constructor(filesDir: File) {
 
     fun setRouteLength(meters: Double) {
         _routeLengthMeters.value = meters
+    }
+
+    fun setRouteElevationProfile(profile: ElevationProfile) {
+        _routeElevationProfile.value = profile
     }
 
     fun setNearbyLive(live: Boolean) {
@@ -145,6 +158,7 @@ class ResupplyRepository private constructor(filesDir: File) {
     fun clear() {
         _pois.value = emptyList()
         _nearbyLive.value = false
+        _routeElevationProfile.value = ElevationProfile.EMPTY
     }
 
     companion object {

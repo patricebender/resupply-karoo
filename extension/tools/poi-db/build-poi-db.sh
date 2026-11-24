@@ -37,12 +37,22 @@ if [[ "${FORCE_DOWNLOAD:-0}" != "1" && -s "$PBF" ]]; then
   echo ">> Using cached $PBF ($(du -h "$PBF" | cut -f1)); FORCE_DOWNLOAD=1 to refresh"
 else
   echo ">> Downloading $URL"
-  # -4: GitHub runners have no IPv6, but Geofabrik now also answers on IPv6 — without this
-  # curl can pick an unreachable AAAA and fail. --retry-connrefused + a longer delay cover
-  # Geofabrik's transient per-IP connection refusals (plain --retry doesn't retry a refused
-  # connection), which bite the long multi-GB extract fetches when the 16-shard matrix hits
-  # the server at once.
-  curl -fsSL -4 --retry 5 --retry-connrefused --retry-delay 15 -o "$PBF" "$URL"
+  # Geofabrik intermittently resets or refuses a connection under load — curl surfaces these
+  # as exit (7) "could not connect", (35) "connection reset by peer", or (28) timeout. curl's
+  # own --retry does NOT retry these connection-level failures (it only retries transient HTTP
+  # responses + refused connections with --retry-connrefused), so a single blip would otherwise
+  # abort the whole shard under `set -e`. Retry the whole curl on any non-zero exit with backoff.
+  attempt=1; max=6
+  until curl -fsSL -4 -o "$PBF" "$URL"; do
+    if [[ "$attempt" -ge "$max" ]]; then
+      echo "!! download failed after $max attempts: $URL" >&2
+      exit 1
+    fi
+    delay=$((attempt * 20)) # 20s, 40s, 60s, 80s, 100s
+    echo "   attempt $attempt/$max failed; retrying in ${delay}s" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
   echo "   $(du -h "$PBF" | cut -f1) downloaded"
 fi
 

@@ -37,7 +37,12 @@ if [[ "${FORCE_DOWNLOAD:-0}" != "1" && -s "$PBF" ]]; then
   echo ">> Using cached $PBF ($(du -h "$PBF" | cut -f1)); FORCE_DOWNLOAD=1 to refresh"
 else
   echo ">> Downloading $URL"
-  curl -fsSL --retry 3 -o "$PBF" "$URL"
+  # -4: GitHub runners have no IPv6, but Geofabrik now also answers on IPv6 — without this
+  # curl can pick an unreachable AAAA and fail. --retry-connrefused + a longer delay cover
+  # Geofabrik's transient per-IP connection refusals (plain --retry doesn't retry a refused
+  # connection), which bite the long multi-GB extract fetches when the 16-shard matrix hits
+  # the server at once.
+  curl -fsSL -4 --retry 5 --retry-connrefused --retry-delay 15 -o "$PBF" "$URL"
   echo "   $(du -h "$PBF" | cut -f1) downloaded"
 fi
 

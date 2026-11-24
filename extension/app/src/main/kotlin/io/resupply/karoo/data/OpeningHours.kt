@@ -115,6 +115,20 @@ object OpeningHours {
             return arrivalStatusOf(schedule, arrival)
         }
 
+        /**
+         * The reopen/close edge to show beside an ETA, judged against the *arrival* time:
+         *   • arriving open-but-closing-soon → "closes 18:00" (the range's end)
+         *   • arriving closed               → "opens 14:00" / "opens Mon 08:00" (next opening at or
+         *                                      after arrival, searched up to a week out)
+         * Null when arriving comfortably open, 24/7, or with no structured schedule. Unlike the live
+         * [Status.opensAtLabel] this is relative to arrival, so a place that's open now but shut by
+         * the time you get there correctly reports when it *reopens* after your arrival.
+         */
+        fun arrivalEdgeLabel(arrival: Calendar): String? {
+            if (is247 || unknown || rawFallback != null) return null
+            return arrivalEdgeOf(schedule, arrival)
+        }
+
         companion object {
             /** Parse an OSM `opening_hours` spec. Never null — degrades to a raw fallback. */
             fun fromOsm(spec: String): Hours {
@@ -314,6 +328,39 @@ object OpeningHours {
         // Closed on arrival — but flag a near-miss if a range opens within the margin later today.
         val opensSoon = schedule[day].orEmpty().any { it.startMin in (minute + 1)..(minute + margin) }
         return if (opensSoon) ArrivalStatus.CLOSE_CALL else ArrivalStatus.CLOSED
+    }
+
+    /**
+     * The ETA edge label for [arrival] (see [Hours.arrivalEdgeLabel]). Open-but-closing-soon →
+     * "closes HH:MM"; closed → the next opening at or after arrival ("opens HH:MM", or
+     * "opens Mon HH:MM" on a later day), searched up to a week out. Null when arriving comfortably
+     * open or nothing reopens within the week.
+     */
+    private fun arrivalEdgeOf(schedule: Map<Int, List<TimeRange>>, arrival: Calendar): String? {
+        val day = dayIndex(arrival)
+        val minute = arrival.get(Calendar.HOUR_OF_DAY) * 60 + arrival.get(Calendar.MINUTE)
+        val margin = CLOSE_CALL_MARGIN_MIN
+
+        val prevWrap = schedule[(day + 6) % 7].orEmpty().filter { it.endMin < it.startMin }
+        for (r in schedule[day].orEmpty() + prevWrap) {
+            if (contains(r, minute)) {
+                val toClose = if (r.endMin >= r.startMin) r.endMin - minute
+                else (if (minute >= r.startMin) r.endMin + 24 * 60 - minute else r.endMin - minute)
+                return if (toClose <= margin) "closes ${hhmm(r.endMin % (24 * 60))}" else null
+            }
+        }
+        // Closed on arrival → the next opening at/after arrival, up to a week out. Same-day reads
+        // "opens 08:00"; a later day reads "Mon 08:00" — the weekday already implies "opens", so we
+        // drop the word to keep the line short enough not to truncate on the narrow display.
+        for (offset in 0..7) {
+            val d = (day + offset) % 7
+            val next = schedule[d].orEmpty().sortedBy { it.startMin }
+                .firstOrNull { offset != 0 || it.startMin > minute }
+                ?: continue
+            return if (offset == 0) "opens ${hhmm(next.startMin)}"
+            else "${DAY_LABELS[d]} ${hhmm(next.startMin)}"
+        }
+        return null
     }
 
     private fun contains(r: TimeRange, minute: Int): Boolean =

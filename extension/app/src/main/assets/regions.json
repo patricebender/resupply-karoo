@@ -653,5 +653,35 @@
     "id": "vietnam",
     "label": "Vietnam",
     "group": "Asia"
+  },
+  {
+    "id": "kenya",
+    "label": "Kenya",
+    "group": "Africa"
+  },
+  {
+    "id": "lesotho",
+    "label": "Lesotho",
+    "group": "Africa"
+  },
+  {
+    "id": "morocco",
+    "label": "Morocco",
+    "group": "Africa"
+  },
+  {
+    "id": "namibia",
+    "label": "Namibia",
+    "group": "Africa"
+  },
+  {
+    "id": "south-africa",
+    "label": "South Africa",
+    "group": "Africa"
+  },
+  {
+    "id": "tunisia",
+    "label": "Tunisia",
+    "group": "Africa"
   }
 ]

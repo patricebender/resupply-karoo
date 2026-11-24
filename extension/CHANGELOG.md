@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.12.0](https://github.com/patricebender/resupply-karoo/compare/v1.11.0...v1.12.0) (2026-11-24)
+
+
+### Features
+
+* add Kenya 🇰🇪, Lesotho 🇱🇸, Morocco 🇲🇦, Namibia 🇳🇦, South Africa 🇿🇦 and Tunisia 🇹🇳 ([#159](https://github.com/patricebender/resupply-karoo/issues/159)) ([65107bb](https://github.com/patricebender/resupply-karoo/commit/65107bb3f2ccb8df2c7102cc890bcbadfff62883))
+* show remaining climb & nicer POI list ✨ ([#157](https://github.com/patricebender/resupply-karoo/issues/157)) ([8797aeb](https://github.com/patricebender/resupply-karoo/commit/8797aeb5cb5d868ec7cc5bab9d0b63b6366eb4c0))
+
+
+### Bug Fixes
+
+* persist live search across sessions ([#153](https://github.com/patricebender/resupply-karoo/issues/153)) ([273461a](https://github.com/patricebender/resupply-karoo/commit/273461a06ea5be2d4a5150afb9a54685e994bf51))
+
 ## [1.11.0](https://github.com/patricebender/resupply-karoo/compare/v1.10.0...v1.11.0) (2026-11-09)
 
 

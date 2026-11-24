@@ -67,6 +67,14 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # Cap how many shards download from Geofabrik at once. Geofabrik refuses connections from
+      # some runner IPs for a job's duration (curl (7) could-not-connect, every retry); launching
+      # all 16 shards in the same window maximises the chance a run includes an unlucky runner.
+      # Staggering ~5 at a time spreads the requests over time, so fewer runs hit a refusal and a
+      # later-starting shard may land after a transient one has lifted. Shards stay 16 so the LPT
+      # packing keeps the giants (France, …) isolated. Not a cure — a run that still draws a bad
+      # IP needs "Re-run failed jobs" (fresh runner) — but it cuts how often that's needed.
+      max-parallel: 5
       matrix:
         shard: ${{ fromJson(needs.plan.outputs.shards) }}
     steps:

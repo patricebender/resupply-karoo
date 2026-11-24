@@ -25,7 +25,7 @@ export interface Region {
   /** Display name shown in the picker. */
   label: string;
   /** Picker section. */
-  group: "Europe" | "North America" | "Oceania" | "Asia";
+  group: "Europe" | "North America" | "Oceania" | "Asia" | "Africa";
   /** Geofabrik path(s) under download.geofabrik.de, minus `-latest.osm.pbf`. */
   geofabrik: string | string[];
   /**
@@ -278,6 +278,49 @@ const RAW_REGIONS: Array<Omit<Region, "dataVersion">> = [
     label: "Vietnam",
     group: "Asia",
     geofabrik: "asia/vietnam",
+  },
+
+  // Africa — whole-country leaves (Geofabrik publishes no sub-region extracts). Picked for
+  // the bikepacking/ultra crowd this serves: Morocco (Atlas Mountains Race), South Africa
+  // (Freedom Challenge, The Munga), Kenya (Migration Gravel Race), plus Namibia/Lesotho
+  // (southern-Africa desert & mountain touring) and Tunisia (Sahara touring, pairs with
+  // Morocco). South Africa's extract is standalone — Lesotho is its own entry (not the
+  // "incl. Lesotho" Geofabrik variant). Alphabetical by label.
+  {
+    id: "kenya",
+    label: "Kenya",
+    group: "Africa",
+    geofabrik: "africa/kenya",
+  },
+  {
+    id: "lesotho",
+    label: "Lesotho",
+    group: "Africa",
+    geofabrik: "africa/lesotho",
+  },
+  {
+    id: "morocco",
+    label: "Morocco",
+    group: "Africa",
+    geofabrik: "africa/morocco",
+  },
+  {
+    id: "namibia",
+    label: "Namibia",
+    group: "Africa",
+    geofabrik: "africa/namibia",
+  },
+  {
+    id: "south-africa",
+    label: "South Africa",
+    group: "Africa",
+    geofabrik: "africa/south-africa",
+  },
+  {
+    id: "tunisia",
+    label: "Tunisia",
+    group: "Africa",
+    geofabrik: "africa/tunisia",
   },
 ];
 
